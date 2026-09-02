@@ -1,0 +1,81 @@
+:root {
+  /* === Page Base (Dark, not pure black) === */
+  --bg: #0E0E12;
+  --surface: #16161E;
+  --surface-2: #1E1E28;
+
+  /* === Text === */
+  --ink: #F0F0F5;
+  --ink-2: #9898A8;
+  --ink-3: #5C5C6E;
+
+  /* === Lines & Borders === */
+  --line: #2A2A35;
+
+  /* === Brand Primary (app UI, active states, CTAs) === */
+  --brand: #6366F1;
+  --brand-ink: #FFFFFF;
+
+  /* === Subject Accent Colors (data-identity for categorization) === */
+  --subject-math: #4ADE80;
+  --subject-english: #818CF8;
+  --subject-physics: #60A5FA;
+  --subject-chinese: #FBBF24;
+  --subject-chemistry: #F472B6;
+
+  /* === State Colors === */
+  --state-success: #4ADE80;
+  --state-warning: #FBBF24;
+  --state-error: #F87171;
+
+  /* === Radius Scale === */
+  --r-xs: 2px;
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 16px;
+  --r-pill: 999px;
+
+  /* === Border === */
+  --border: 1px solid var(--line);
+
+  /* === Shadows (subtle, alpha <= 0.05 for static) === */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-2: 0 8px 24px -8px rgba(0, 0, 0, 0.4);
+  --shadow-3: 0 24px 60px -20px rgba(0, 0, 0, 0.5);
+
+  /* === Spacing (8pt grid) === */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 80px;
+
+  /* === Type Stack === */
+  --font-sans: "Inter", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", "Consolas", monospace;
+
+  /* === Brand Semantic Aliases (for apply-html-head-contract.mjs) === */
+  --brand-background: var(--bg);
+  --brand-foreground: var(--ink);
+  --brand-card: var(--surface);
+  --brand-card-foreground: var(--ink);
+  --brand-popover: var(--surface-2);
+  --brand-popover-foreground: var(--ink);
+  --brand-primary: var(--brand);
+  --brand-primary-foreground: var(--brand-ink);
+  --brand-secondary: var(--surface-2);
+  --brand-secondary-foreground: var(--ink-2);
+  --brand-muted: var(--surface-2);
+  --brand-muted-foreground: var(--ink-2);
+  --brand-accent: var(--surface-2);
+  --brand-accent-foreground: var(--ink);
+  --brand-border: var(--line);
+  --brand-input: var(--surface-2);
+  --brand-ring: var(--brand);
+  --brand-radius-sm: var(--r-sm);
+  --brand-radius-md: var(--r-md);
+  --brand-radius-lg: var(--r-lg);
+}
