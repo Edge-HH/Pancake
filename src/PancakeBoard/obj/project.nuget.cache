@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "bydB6epbkNU=",
+  "dgSpecHash": "KlebHBkiVgQ=",
   "success": true,
   "projectFilePath": "D:\\Files\\Codes\\Projects\\PancakeBoard\\PancakeBoard\\src\\PancakeBoard\\PancakeBoard.csproj",
   "expectedPackageFiles": [
@@ -17,6 +17,13 @@
     "C:\\Users\\YangTianming\\.nuget\\packages\\microsoft.windowsappsdk.runtime\\1.8.260804001\\microsoft.windowsappsdk.runtime.1.8.260804001.nupkg.sha512",
     "C:\\Users\\YangTianming\\.nuget\\packages\\microsoft.windowsappsdk.widgets\\1.8.251231004\\microsoft.windowsappsdk.widgets.1.8.251231004.nupkg.sha512",
     "C:\\Users\\YangTianming\\.nuget\\packages\\microsoft.windowsappsdk.winui\\1.8.260803003\\microsoft.windowsappsdk.winui.1.8.260803003.nupkg.sha512",
+    "C:\\Users\\YangTianming\\.nuget\\packages\\naudio\\2.4.0\\naudio.2.4.0.nupkg.sha512",
+    "C:\\Users\\YangTianming\\.nuget\\packages\\naudio.asio\\2.4.0\\naudio.asio.2.4.0.nupkg.sha512",
+    "C:\\Users\\YangTianming\\.nuget\\packages\\naudio.core\\2.4.0\\naudio.core.2.4.0.nupkg.sha512",
+    "C:\\Users\\YangTianming\\.nuget\\packages\\naudio.midi\\2.4.0\\naudio.midi.2.4.0.nupkg.sha512",
+    "C:\\Users\\YangTianming\\.nuget\\packages\\naudio.wasapi\\2.4.0\\naudio.wasapi.2.4.0.nupkg.sha512",
+    "C:\\Users\\YangTianming\\.nuget\\packages\\naudio.winforms\\2.4.0\\naudio.winforms.2.4.0.nupkg.sha512",
+    "C:\\Users\\YangTianming\\.nuget\\packages\\naudio.winmm\\2.4.0\\naudio.winmm.2.4.0.nupkg.sha512",
     "C:\\Users\\YangTianming\\.nuget\\packages\\system.numerics.tensors\\9.0.0\\system.numerics.tensors.9.0.0.nupkg.sha512",
     "C:\\Users\\YangTianming\\.nuget\\packages\\microsoft.windows.sdk.net.ref\\10.0.19041.57\\microsoft.windows.sdk.net.ref.10.0.19041.57.nupkg.sha512"
   ],

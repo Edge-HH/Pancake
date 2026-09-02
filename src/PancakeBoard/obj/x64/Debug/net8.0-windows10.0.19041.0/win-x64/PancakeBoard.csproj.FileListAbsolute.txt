@@ -84,3 +84,10 @@ D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\obj\x64\Debug
 D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\obj\x64\Debug\net8.0-windows10.0.19041.0\win-x64\qualifiers.txt
 D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\obj\x64\Debug\net8.0-windows10.0.19041.0\win-x64\qualifiers.txt.intermediate
 D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\obj\x64\Debug\net8.0-windows10.0.19041.0\win-x64\MultipleQualifiersPerDimensionFound.txt
+D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\NAudio.dll
+D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\NAudio.Asio.dll
+D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\NAudio.Core.dll
+D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\NAudio.Midi.dll
+D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\NAudio.Wasapi.dll
+D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\NAudio.WinForms.dll
+D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\NAudio.WinMM.dll

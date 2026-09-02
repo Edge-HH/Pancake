@@ -10,10 +10,9 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Grid Grid.Row="0" Padding="28,0,18,0" Background="#1E1E1E" BorderBrush="#292929" BorderThickness="0,0,0,1" ColumnSpacing="16">
+        <Grid Grid.Row="0" Padding="28,0" Background="#1E1E1E" BorderBrush="#292929" BorderThickness="0,0,0,1" ColumnSpacing="16">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <Grid x:Name="DragRegion" Background="Transparent">
@@ -28,24 +27,6 @@
                 </StackPanel>
             </Grid>
             <TextBlock x:Name="TopDateText" Grid.Column="1" VerticalAlignment="Center" FontSize="13" Foreground="#AAAAAA" />
-            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
-                <Button x:Name="BackToBoardButton" Click="BackToBoardButton_Click" Style="{StaticResource BoardSecondaryButtonStyle}" Visibility="Collapsed">
-                    <StackPanel Orientation="Horizontal" Spacing="7"><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE72B;" /><TextBlock Text="返回看板" /></StackPanel>
-                </Button>
-                <Button x:Name="DiscardEditButton" Click="DiscardEditButton_Click" Style="{StaticResource BoardSecondaryButtonStyle}" Visibility="Collapsed" Content="放弃修改" />
-                <Button x:Name="AddSubjectButton" Click="AddSubjectButton_Click" Style="{StaticResource BoardSecondaryButtonStyle}" Visibility="Collapsed">
-                    <StackPanel Orientation="Horizontal" Spacing="7"><FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE710;" /><TextBlock Text="添加科目" /></StackPanel>
-                </Button>
-                <Button x:Name="EditBoardButton" Click="EditBoardButton_Click" Style="{StaticResource BoardPrimaryButtonStyle}">
-                    <StackPanel Orientation="Horizontal" Spacing="7"><FontIcon x:Name="EditBoardIcon" FontFamily="Segoe Fluent Icons" Glyph="&#xE70F;" /><TextBlock x:Name="EditBoardText" Text="直接编辑" /></StackPanel>
-                </Button>
-                <Button Click="SettingsButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="设置">
-                    <FontIcon FontFamily="Segoe Fluent Icons" FontSize="17" Glyph="&#xE713;" />
-                </Button>
-                <Button Click="FullScreenButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="切换全屏">
-                    <FontIcon x:Name="FullScreenIcon" FontFamily="Segoe Fluent Icons" FontSize="17" Glyph="&#xE740;" />
-                </Button>
-            </StackPanel>
         </Grid>
 
         <Grid x:Name="DisplayRoot" Grid.Row="1">
@@ -61,7 +42,7 @@
                         <TextBlock x:Name="ClockDateText" HorizontalAlignment="Center" FontSize="20" Foreground="#B4B4B4" />
                         <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
                             <Border Padding="16,10" Background="#151515" CornerRadius="8">
-                                <StackPanel Orientation="Horizontal" Spacing="9"><FontIcon FontFamily="Segoe Fluent Icons" Foreground="{ThemeResource BoardWarningBrush}" Glyph="&#xE706;" /><TextBlock FontSize="14" Foreground="#DEDEDE" Text="晴  27°C" /></StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="9"><FontIcon FontFamily="Segoe Fluent Icons" Foreground="{ThemeResource BoardWarningBrush}" Glyph="&#xE706;" /><TextBlock x:Name="WeatherText" FontSize="14" Foreground="#DEDEDE" Text="天气未配置" /></StackPanel>
                             </Border>
                             <Border Padding="16,10" Background="#151515" CornerRadius="8">
                                 <StackPanel Orientation="Horizontal" Spacing="9"><FontIcon FontFamily="Segoe Fluent Icons" Foreground="{ThemeResource BoardSuccessBrush}" Glyph="&#xE720;" /><TextBlock x:Name="NoiseText" FontSize="14" Foreground="#DEDEDE" Text="42 dB · 安静" /></StackPanel>
@@ -82,15 +63,18 @@
                             <TextBlock x:Name="SubjectCountText" FontSize="12" Foreground="#B9B9B9" />
                         </Border>
                     </Grid>
-                    <ScrollViewer x:Name="BoardScrollViewer" Grid.Row="1" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Auto" VerticalScrollMode="Enabled" ZoomMode="Disabled">
-                        <Canvas x:Name="BoardCanvas" Width="1100" Height="780" Background="#151515" />
+                    <ScrollViewer x:Name="BoardScrollViewer" Grid.Row="1" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Auto" VerticalScrollMode="Enabled" ViewChanged="BoardScrollViewer_ViewChanged" ZoomMode="Disabled">
+                        <Grid x:Name="BoardSurface" Width="1100" Height="780" Background="#151515">
+                            <Canvas x:Name="GridCanvas" IsHitTestVisible="False" />
+                            <Canvas x:Name="BoardCanvas" />
+                        </Grid>
                     </ScrollViewer>
                 </Grid>
             </Grid>
         </Grid>
 
         <ScrollViewer x:Name="SettingsRoot" Grid.Row="1" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
-            <StackPanel MaxWidth="900" Padding="40,34,40,64" HorizontalAlignment="Center" Spacing="22">
+            <StackPanel MaxWidth="900" Padding="40,34,40,120" HorizontalAlignment="Center" Spacing="22">
                 <StackPanel Spacing="5">
                     <TextBlock FontSize="32" FontWeight="SemiBold" Foreground="{ThemeResource BoardTextBrush}" Text="设置" />
                     <TextBlock FontSize="14" Foreground="{ThemeResource BoardTextSecondaryBrush}" Text="调整大屏外观、环境信息和数据管理方式" />
@@ -109,6 +93,38 @@
                 </Border>
                 <Border Style="{StaticResource BoardCardStyle}">
                     <StackPanel Spacing="18">
+                        <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="小米天气 API" />
+                        <TextBlock FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="端点模板支持 {city} 和 {key} 占位符；密钥只保存在当前运行内存中。" />
+                        <TextBox x:Name="WeatherEndpointTextBox" Header="官方端点模板" PlaceholderText="https://example.xiaomi.com/weather?city={city}&amp;key={key}" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <TextBox x:Name="WeatherCityTextBox" Header="城市" Text="北京市" />
+                            <PasswordBox x:Name="WeatherApiKeyBox" Grid.Column="1" Header="API 密钥" />
+                        </Grid>
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button Click="RefreshWeatherButton_Click" Style="{StaticResource BoardPrimaryButtonStyle}" Content="测试并刷新" />
+                            <TextBlock x:Name="WeatherStatusText" MaxWidth="560" VerticalAlignment="Center" FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="等待配置" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource BoardCardStyle}">
+                    <StackPanel Spacing="18">
+                        <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="麦克风噪音检测" />
+                        <TextBlock FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="只计算实时音量，不录音、不保存音频；系统拒绝麦克风权限时会停止检测。" />
+                        <Grid ColumnSpacing="24">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="240" /></Grid.ColumnDefinitions>
+                            <StackPanel Spacing="3"><TextBlock FontSize="15" FontWeight="SemiBold" Text="采样率" /><TextBlock FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="较高采样率更细致，也会增加少量计算量" /></StackPanel>
+                            <ComboBox x:Name="MicrophoneSampleRateComboBox" Grid.Column="1" SelectedIndex="1" SelectionChanged="MicrophoneSampleRateComboBox_SelectionChanged">
+                                <ComboBoxItem Content="8000 Hz" Tag="8000" /><ComboBoxItem Content="16000 Hz" Tag="16000" /><ComboBoxItem Content="22050 Hz" Tag="22050" /><ComboBoxItem Content="44100 Hz" Tag="44100" /><ComboBoxItem Content="48000 Hz" Tag="48000" />
+                            </ComboBox>
+                        </Grid>
+                        <TextBlock x:Name="MicrophoneCalibrationLabel" FontSize="13" Foreground="{ThemeResource BoardTextSecondaryBrush}" Text="校准偏移 · 0 dB" />
+                        <Slider x:Name="MicrophoneCalibrationSlider" Minimum="-30" Maximum="30" StepFrequency="1" Value="0" ValueChanged="MicrophoneCalibrationSlider_ValueChanged" />
+                        <InfoBar x:Name="MicrophoneStatusInfoBar" IsClosable="False" IsOpen="True" Severity="Informational" Message="正在等待麦克风启动" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource BoardCardStyle}">
+                    <StackPanel Spacing="18">
                         <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="科目与数据" />
                         <TextBlock FontSize="13" Foreground="{ThemeResource BoardTextSecondaryBrush}" Text="科目管理已经移到主看板，避免在展示页和编辑页之间来回切换。" />
                         <Grid ColumnSpacing="10">
@@ -121,5 +137,43 @@
                 </Border>
             </StackPanel>
         </ScrollViewer>
+
+        <!-- 主操作集中在屏幕下方，触屏时不需要跨越整块大屏。 -->
+        <Border
+            x:Name="FloatingToolbar"
+            Grid.RowSpan="2"
+            Margin="0,0,0,24"
+            Padding="7"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Background="#F009090B"
+            BorderBrush="#55555C"
+            BorderThickness="1"
+            CornerRadius="14"
+            Canvas.ZIndex="100">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+                <Button x:Name="BackToBoardButton" Click="BackToBoardButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="返回看板">
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE72B;" />
+                </Button>
+                <Button x:Name="DiscardEditButton" Click="DiscardEditButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="放弃修改">
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE711;" />
+                </Button>
+                <Button x:Name="AddSubjectButton" Click="AddSubjectButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="添加科目">
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE710;" />
+                </Button>
+                <Button x:Name="EditBoardButton" Click="EditBoardButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="编辑看板">
+                    <FontIcon x:Name="EditBoardIcon" FontFamily="Segoe Fluent Icons" Glyph="&#xE70F;" />
+                </Button>
+                <Button x:Name="SettingsButton" Click="SettingsButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="设置">
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE713;" />
+                </Button>
+                <Button x:Name="FullScreenButton" Click="FullScreenButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="进入全屏">
+                    <StackPanel Orientation="Horizontal" Spacing="7">
+                        <FontIcon x:Name="FullScreenIcon" FontFamily="Segoe Fluent Icons" Glyph="&#xE740;" />
+                        <TextBlock x:Name="FullScreenLabel" Text="退出全屏" Visibility="Collapsed" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>
