@@ -62,11 +62,14 @@ public sealed class MainViewModel : ObservableObject
     public SubjectBoard AddSubject(string name)
     {
         string hex = _accentPalette[Subjects.Count % _accentPalette.Length];
+        int index = Subjects.Count;
         SubjectBoard subject = new()
         {
             Name = name,
             AccentHex = hex,
-            AccentBrush = BrushFromHex(hex)
+            AccentBrush = BrushFromHex(hex),
+            X = 36 + (index % 2) * 470,
+            Y = 36 + (index / 2) * 360
         };
         Subjects.Add(subject);
         SelectedSubject = subject;
@@ -102,30 +105,40 @@ public sealed class MainViewModel : ObservableObject
 
     private static ObservableCollection<SubjectBoard> CreateSampleSubjects()
     {
-        SubjectBoard math = CreateSubject("数学", "#4ADE80");
+        SubjectBoard math = CreateSubject("数学", "#65D46E", 36, 36, 430, 360);
         math.Entries.Add(CreateHomework("完成 P30 练习题\n复习二次函数公式", true,
             new AttachmentItem { Name = "二次函数例题.pdf", Kind = "PDF" }));
         math.Entries.Add(CreateHomework("整理课堂错题，写出三种解法", false));
 
-        SubjectBoard english = CreateSubject("英语", "#818CF8");
+        SubjectBoard english = CreateSubject("英语", "#7567FF", 500, 36, 430, 250);
         english.Entries.Add(CreateHomework("背诵 Unit 3 单词\n完成阅读理解", false,
             new AttachmentItem { Name = "Unit 3 词汇表.jpg", Kind = "图片" }));
 
-        SubjectBoard physics = CreateSubject("物理", "#60A5FA");
+        SubjectBoard physics = CreateSubject("物理", "#60A5FA", 500, 320, 520, 300);
         physics.Entries.Add(CreateHomework("完成力学练习第 1—8 题\n预习串并联电路", true));
 
-        SubjectBoard chinese = CreateSubject("语文", "#FBBF24");
+        SubjectBoard chinese = CreateSubject("语文", "#FBBF24", 36, 430, 430, 280);
         chinese.Entries.Add(CreateHomework("背诵《赤壁赋》第二段\n整理作文素材", false,
             new AttachmentItem { Name = "作文素材清单.pdf", Kind = "PDF" }));
 
         return [math, english, physics, chinese];
     }
 
-    private static SubjectBoard CreateSubject(string name, string accentHex) => new()
+    private static SubjectBoard CreateSubject(
+        string name,
+        string accentHex,
+        double x,
+        double y,
+        double width,
+        double height) => new()
     {
         Name = name,
         AccentHex = accentHex,
-        AccentBrush = BrushFromHex(accentHex)
+        AccentBrush = BrushFromHex(accentHex),
+        X = x,
+        Y = y,
+        TileWidth = width,
+        TileHeight = height
     };
 
     private static HomeworkEntry CreateHomework(string content, bool hasHandwriting, params AttachmentItem[] attachments)

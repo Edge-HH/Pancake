@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml.Media;
+using Windows.Foundation;
 
 namespace PancakeBoard.Models;
 
@@ -98,13 +99,32 @@ public sealed class HomeworkEntry : ObservableObject
     }
 }
 
+public sealed class InkStrokeData
+{
+    public Windows.UI.Color Color { get; init; } = Windows.UI.Color.FromArgb(255, 245, 245, 247);
+    public double Thickness { get; init; } = 5;
+    public List<Point> Points { get; } = [];
+
+    public InkStrokeData Clone()
+    {
+        InkStrokeData clone = new() { Color = Color, Thickness = Thickness };
+        clone.Points.AddRange(Points);
+        return clone;
+    }
+}
+
 public sealed class SubjectBoard : ObservableObject
 {
     private string _name = string.Empty;
+    private double _x;
+    private double _y;
+    private double _tileWidth = 430;
+    private double _tileHeight = 320;
 
     public required string AccentHex { get; init; }
     public SolidColorBrush AccentBrush { get; init; } = new(Windows.UI.Color.FromArgb(255, 99, 102, 241));
     public ObservableCollection<HomeworkEntry> Entries { get; } = [];
+    public ObservableCollection<InkStrokeData> InkStrokes { get; } = [];
 
     public string Name
     {
@@ -122,6 +142,30 @@ public sealed class SubjectBoard : ObservableObject
     public string Watermark => Name;
     public string CountLabel => $"{Entries.Count} 条内容";
 
+    public double X
+    {
+        get => _x;
+        set => SetProperty(ref _x, value);
+    }
+
+    public double Y
+    {
+        get => _y;
+        set => SetProperty(ref _y, value);
+    }
+
+    public double TileWidth
+    {
+        get => _tileWidth;
+        set => SetProperty(ref _tileWidth, value);
+    }
+
+    public double TileHeight
+    {
+        get => _tileHeight;
+        set => SetProperty(ref _tileHeight, value);
+    }
+
     public void NotifyEntriesChanged() => RaisePropertyChanged(nameof(CountLabel));
 
     public SubjectBoard Clone()
@@ -130,12 +174,21 @@ public sealed class SubjectBoard : ObservableObject
         {
             Name = Name,
             AccentHex = AccentHex,
-            AccentBrush = new SolidColorBrush(AccentBrush.Color)
+            AccentBrush = new SolidColorBrush(AccentBrush.Color),
+            X = X,
+            Y = Y,
+            TileWidth = TileWidth,
+            TileHeight = TileHeight
         };
 
         foreach (HomeworkEntry entry in Entries)
         {
             clone.Entries.Add(entry.Clone());
+        }
+
+        foreach (InkStrokeData stroke in InkStrokes)
+        {
+            clone.InkStrokes.Add(stroke.Clone());
         }
 
         return clone;
