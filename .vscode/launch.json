@@ -2,12 +2,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "PancakeBoard",
+      "name": "Pancake",
       "type": "coreclr",
       "request": "launch",
-      "preLaunchTask": "build PancakeBoard (Debug x64)",
-      "program": "${workspaceFolder}/src/PancakeBoard/bin/Debug/net8.0-windows10.0.19041.0/win-x64/PancakeBoard.exe",
-      "cwd": "${workspaceFolder}/src/PancakeBoard",
+      "preLaunchTask": "build Pancake (Debug x64)",
+      "program": "${workspaceFolder}/src/Pancake/bin/Debug/net8.0-windows10.0.19041.0/win-x64/Pancake.exe",
+      "cwd": "${workspaceFolder}/src/Pancake",
       "args": [],
       "stopAtEntry": false,
       "console": "internalConsole",

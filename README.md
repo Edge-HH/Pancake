@@ -1,4 +1,4 @@
-# PancakeBoard
+# Pancake
 
 > 面向教室大屏与触控设备的 Windows 班级作业看板。
 
@@ -6,7 +6,7 @@
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white)
 ![WinUI](https://img.shields.io/badge/UI-WinUI%203-0078D4)
 
-PancakeBoard 将时间、日期、天气、教室噪音和各科作业集中在一块适合远距离阅读的深色看板中。它使用 WinUI 3 构建，支持鼠标、触控笔与触摸操作，并为教室大屏提供默认全屏展示。
+Pancake 将时间、日期、天气、教室噪音和各科作业集中在一块适合远距离阅读的深色看板中。它使用 WinUI 3 构建，支持鼠标、触控笔与触摸操作，并为教室大屏提供默认全屏展示。
 
 ## ✨ 功能
 
@@ -50,14 +50,14 @@ PancakeBoard 将时间、日期、天气、教室噪音和各科作业集中在�
 ### 命令行
 
 ```powershell
-git clone https://github.com/MEMZ-Edge01/PancakeBoard.git
-cd PancakeBoard
-dotnet restore .\PancakeBoard.slnx
-dotnet build .\PancakeBoard.slnx -c Release -p:Platform=x64
-dotnet run --project .\src\PancakeBoard\PancakeBoard.csproj -c Release -p:Platform=x64
+git clone https://github.com/MEMZ-Edge01/Pancake.git
+cd Pancake
+dotnet restore .\Pancake.slnx
+dotnet build .\Pancake.slnx -c Release -p:Platform=x64
+dotnet run --project .\src\Pancake\Pancake.csproj -c Release -p:Platform=x64
 ```
 
-也可以使用 Visual Studio 打开 `PancakeBoard.slnx`，选择 `x64` 后启动 `PancakeBoard` 项目。
+也可以使用 Visual Studio 打开 `Pancake.slnx`，选择 `x64` 后启动 `Pancake` 项目。
 
 ### 启动参数
 
@@ -71,7 +71,7 @@ dotnet run --project .\src\PancakeBoard\PancakeBoard.csproj -c Release -p:Platfo
 例如：
 
 ```powershell
-dotnet run --project .\src\PancakeBoard\PancakeBoard.csproj -- --windowed --view=editor
+dotnet run --project .\src\Pancake\Pancake.csproj -- --windowed --view=editor
 ```
 
 ## 🌤️ 天气配置
@@ -82,14 +82,14 @@ dotnet run --project .\src\PancakeBoard\PancakeBoard.csproj -- --windowed --view
 
 - 麦克风数据只用于实时计算音量，不录音，也不保存音频。
 - 添加附件时当前只记录文件路径，不会上传文件。
-- 数据默认写入程序所在目录的 `data/pancakeboard.json`，移动整个程序目录即可一并迁移。
+- 数据默认写入程序所在目录的 `data/pancake.json`，移动整个程序目录即可一并迁移。
 - 如果把程序放在无写入权限的目录（例如受保护的系统安装目录），自动保存会在设置页报告失败。
 
 ## 📁 项目结构
 
 ```text
-PancakeBoard/
-├─ src/PancakeBoard/
+Pancake/
+├─ src/Pancake/
 │  ├─ Controls/       # 科目磁贴、拖动、缩放与手写交互
 │  ├─ Models/         # 看板、作业、附件与笔迹模型
 │  ├─ Services/       # 数据保存、噪音、天气、地区搜索与更新
@@ -98,7 +98,7 @@ PancakeBoard/
 │  └─ MainWindow.*    # 主界面与窗口交互
 ├─ tests/             # 交互契约检查脚本
 ├─ design-qa.md       # 设计验收记录
-└─ PancakeBoard.slnx
+└─ Pancake.slnx
 ```
 
 ## 🧪 验证

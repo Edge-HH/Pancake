@@ -1,13 +1,13 @@
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$windowCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\PancakeBoard\MainWindow.xaml.cs'))
-$windowXaml = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\PancakeBoard\MainWindow.xaml'))
-$tileCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\PancakeBoard\Controls\SubjectTileControl.cs'))
-$dataCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\PancakeBoard\Services\AppDataStore.cs'))
-$weatherCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\PancakeBoard\Services\XiaomiWeatherService.cs'))
-$weatherCatalogCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\PancakeBoard\Services\WeatherCityCatalog.cs'))
-$updateCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\PancakeBoard\Services\GitHubUpdateService.cs'))
+$windowCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.xaml.cs'))
+$windowXaml = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.xaml'))
+$tileCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\SubjectTileControl.cs'))
+$dataCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\AppDataStore.cs'))
+$weatherCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\XiaomiWeatherService.cs'))
+$weatherCatalogCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\WeatherCityCatalog.cs'))
+$updateCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\GitHubUpdateService.cs'))
 $failures = [System.Collections.Generic.List[string]]::new()
 
 if ($windowXaml -match 'x:Name="BoardScrollViewer"' -and
@@ -74,7 +74,7 @@ if ($tileCode -notmatch 'CreateThemeButton' -or $tileCode -notmatch 'AccentHex')
     $failures.Add('磁贴主题色切换尚未接入。')
 }
 
-if ($dataCode -notmatch 'AppContext\.BaseDirectory' -or $dataCode -notmatch 'pancakeboard\.json' -or $windowCode -notmatch 'ScheduleSave') {
+if ($dataCode -notmatch 'AppContext\.BaseDirectory' -or $dataCode -notmatch 'pancake\.json' -or $windowCode -notmatch 'ScheduleSave') {
     $failures.Add('布局与配置没有自动保存到软件目录。')
 }
 

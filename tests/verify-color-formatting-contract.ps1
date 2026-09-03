@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$tileCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\PancakeBoard\Controls\SubjectTileControl.cs'))
+$tileCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\SubjectTileControl.cs'))
 $failures = [System.Collections.Generic.List[string]]::new()
 
 $sizedSwatches = [regex]::Matches($tileCode, 'Content\s*=\s*new Ellipse\s*\{\s*Width\s*=')

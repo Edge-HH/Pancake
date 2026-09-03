@@ -1,21 +1,21 @@
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$outputDirectory = Join-Path $projectRoot 'src\PancakeBoard\bin\Release\net8.0-windows10.0.19041.0\win-x64'
-$executablePath = Join-Path $outputDirectory 'PancakeBoard.exe'
+$outputDirectory = Join-Path $projectRoot 'src\Pancake\bin\Release\net8.0-windows10.0.19041.0\win-x64'
+$executablePath = Join-Path $outputDirectory 'Pancake.exe'
 
 if (-not (Test-Path -LiteralPath $executablePath)) {
     throw 'Build Release x64 before running the layout persistence test.'
 }
 
-$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('PancakeBoard-layout-persistence-' + [guid]::NewGuid().ToString('N'))
+$testRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('Pancake-layout-persistence-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 
 try {
     Copy-Item -Path (Join-Path $outputDirectory '*') -Destination $testRoot -Recurse -Force
     $dataDirectory = Join-Path $testRoot 'data'
     New-Item -ItemType Directory -Path $dataDirectory -Force | Out-Null
-    $statePath = Join-Path $dataDirectory 'pancakeboard.json'
+    $statePath = Join-Path $dataDirectory 'pancake.json'
     $fixture = @'
 {
   "SchemaVersion": 1,
@@ -27,7 +27,7 @@ try {
     "WeatherCityCode": "101010100",
     "GridSnappingEnabled": true,
     "AutoUpdateEnabled": false,
-    "UpdateRepository": "MEMZ-Edge01/PancakeBoard"
+    "UpdateRepository": "MEMZ-Edge01/Pancake"
   },
   "Subjects": [
     { "Name": "Math", "AccentHex": "#65D46E", "X": 48, "Y": 48, "Width": 384, "Height": 240, "Entries": [], "InkStrokes": [] },
@@ -40,7 +40,7 @@ try {
     $before = [System.IO.File]::ReadAllText($statePath) | ConvertFrom-Json
 
     $process = Start-Process `
-        -FilePath (Join-Path $testRoot 'PancakeBoard.exe') `
+        -FilePath (Join-Path $testRoot 'Pancake.exe') `
         -ArgumentList '--windowed', '--view=display' `
         -WorkingDirectory $testRoot `
         -WindowStyle Hidden `
@@ -71,7 +71,7 @@ finally {
     $resolvedTestRoot = [System.IO.Path]::GetFullPath($testRoot)
     $resolvedTempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
     if ($resolvedTestRoot.StartsWith($resolvedTempRoot, [System.StringComparison]::OrdinalIgnoreCase) -and
-        (Split-Path -Leaf $resolvedTestRoot).StartsWith('PancakeBoard-layout-persistence-')) {
+        (Split-Path -Leaf $resolvedTestRoot).StartsWith('Pancake-layout-persistence-')) {
         Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }

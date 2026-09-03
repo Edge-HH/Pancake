@@ -1,10 +1,10 @@
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
-$themePath = Join-Path $projectRoot 'src\PancakeBoard\Themes\ThemeResources.xaml'
+$themePath = Join-Path $projectRoot 'src\Pancake\Themes\ThemeResources.xaml'
 $sourcePaths = @(
-    (Join-Path $projectRoot 'src\PancakeBoard\MainWindow.xaml'),
-    (Join-Path $projectRoot 'src\PancakeBoard\Controls\SubjectTileControl.cs')
+    (Join-Path $projectRoot 'src\Pancake\MainWindow.xaml'),
+    (Join-Path $projectRoot 'src\Pancake\Controls\SubjectTileControl.cs')
 )
 
 $theme = Get-Content -Raw $themePath
