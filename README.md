@@ -125,4 +125,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\verify-interaction-c
 
 ## 📄 许可证
 
-仓库目前没有提供开源许可证。在许可证补充前，代码版权归仓库所有者保留；公开可见不等于允许复制、修改或分发。
+本项目采用 [GNU General Public License v3.0](LICENSE) 开源许可证。你可以在遵守 GPL-3.0 条款的前提下使用、修改和分发本项目；分发衍生作品时需以 GPL-3.0 提供对应源代码。
