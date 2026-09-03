@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("PancakeBoard")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0817d2afcbc9482c24cddf95925a59615d56fdf8")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2453af06eaeb9a94a3418fcd66ee61126eb86705")]
 [assembly: System.Reflection.AssemblyProductAttribute("PancakeBoard")]
 [assembly: System.Reflection.AssemblyTitleAttribute("PancakeBoard")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

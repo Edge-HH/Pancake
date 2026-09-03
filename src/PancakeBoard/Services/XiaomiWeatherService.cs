@@ -1,91 +1,41 @@
-using System.Net.Http;
+using System.Globalization;
 using System.Text.Json;
 
 namespace PancakeBoard.Services;
 
 public sealed record WeatherSnapshot(string Condition, double TemperatureCelsius);
 
-/// <summary>
-/// Calls a user-supplied Xiaomi weather endpoint template without embedding private or undocumented endpoints.
-/// Supported placeholders are {city} and {key}; response field discovery accepts common weather JSON names.
-/// </summary>
+/// <summary>按 XiaomiWeather.md 描述调用小米天气市场接口。</summary>
 public sealed class XiaomiWeatherService
 {
-    private static readonly string[] TemperatureKeys = ["temperature", "temp", "current_temperature", "currentTemperature"];
-    private static readonly string[] ConditionKeys = ["weather", "condition", "text", "weatherText"];
+    private const string Endpoint = "https://weatherapi.market.xiaomi.com/wtr-v3/weather/all";
+    private const string Signature = "zUFJoAR2ZVrDy1vF3D07";
     private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(12) };
 
-    public async Task<WeatherSnapshot> GetCurrentAsync(string endpointTemplate, string city, string apiKey, CancellationToken cancellationToken = default)
+    public async Task<WeatherSnapshot> GetCurrentAsync(string cityCode, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(endpointTemplate))
-        {
-            throw new InvalidOperationException("请先填写小米天气 API 的官方端点模板。");
-        }
-
-        string requestUrl = endpointTemplate
-            .Replace("{city}", Uri.EscapeDataString(city), StringComparison.Ordinal)
-            .Replace("{key}", Uri.EscapeDataString(apiKey), StringComparison.Ordinal);
-        using HttpResponseMessage response = await _httpClient.GetAsync(requestUrl, cancellationToken);
+        if (string.IsNullOrWhiteSpace(cityCode)) throw new InvalidOperationException("请先选择地区。");
+        string query = $"latitude=0&longitude=0&locationKey={Uri.EscapeDataString("weathercn:" + cityCode)}&days=5&appKey=weather20151024&sign={Signature}&isGlobal=false&locale=zh_cn";
+        using HttpResponseMessage response = await _httpClient.GetAsync($"{Endpoint}?{query}", cancellationToken);
         response.EnsureSuccessStatusCode();
         await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-
-        if (!TryFindNumber(document.RootElement, TemperatureKeys, out double temperature) ||
-            !TryFindString(document.RootElement, ConditionKeys, out string? condition))
-        {
-            throw new InvalidDataException("天气响应中没有找到温度或天气状态字段，请提供接口文档以补充精确映射。");
-        }
-
-        return new WeatherSnapshot(condition!, temperature);
+        JsonElement current = document.RootElement.GetProperty("current");
+        string temperatureText = current.GetProperty("temperature").GetProperty("value").GetString() ?? "";
+        string weatherCode = current.GetProperty("weather").GetString() ?? "";
+        if (!double.TryParse(temperatureText, NumberStyles.Float, CultureInfo.InvariantCulture, out double temperature))
+            throw new InvalidDataException("小米天气响应中的当前温度无效。");
+        return new WeatherSnapshot(GetCondition(weatherCode), temperature);
     }
 
-    private static bool TryFindNumber(JsonElement element, IReadOnlyCollection<string> keys, out double result)
+    private static string GetCondition(string code) => code switch
     {
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            foreach (JsonProperty property in element.EnumerateObject())
-            {
-                if (keys.Contains(property.Name, StringComparer.OrdinalIgnoreCase))
-                {
-                    if (property.Value.TryGetDouble(out result)) return true;
-                    if (property.Value.ValueKind == JsonValueKind.String && double.TryParse(property.Value.GetString(), out result)) return true;
-                }
-                if (TryFindNumber(property.Value, keys, out result)) return true;
-            }
-        }
-        else if (element.ValueKind == JsonValueKind.Array)
-        {
-            foreach (JsonElement item in element.EnumerateArray())
-            {
-                if (TryFindNumber(item, keys, out result)) return true;
-            }
-        }
-        result = 0;
-        return false;
-    }
-
-    private static bool TryFindString(JsonElement element, IReadOnlyCollection<string> keys, out string? result)
-    {
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            foreach (JsonProperty property in element.EnumerateObject())
-            {
-                if (keys.Contains(property.Name, StringComparer.OrdinalIgnoreCase) && property.Value.ValueKind == JsonValueKind.String)
-                {
-                    result = property.Value.GetString();
-                    return !string.IsNullOrWhiteSpace(result);
-                }
-                if (TryFindString(property.Value, keys, out result)) return true;
-            }
-        }
-        else if (element.ValueKind == JsonValueKind.Array)
-        {
-            foreach (JsonElement item in element.EnumerateArray())
-            {
-                if (TryFindString(item, keys, out result)) return true;
-            }
-        }
-        result = null;
-        return false;
-    }
+        "0" => "晴", "1" => "多云", "2" => "阴", "3" => "阵雨", "4" => "雷阵雨",
+        "5" => "雷阵雨伴冰雹", "6" => "雨夹雪", "7" => "小雨", "8" => "中雨", "9" => "大雨",
+        "10" => "暴雨", "11" => "大暴雨", "12" => "特大暴雨", "13" => "阵雪", "14" => "小雪",
+        "15" => "中雪", "16" => "大雪", "17" => "暴雪", "18" => "雾", "19" => "冻雨",
+        "20" => "沙尘暴", "21" => "小到中雨", "22" => "中到大雨", "23" => "大到暴雨", "24" => "暴雨到大暴雨",
+        "25" => "大暴雨到特大暴雨", "26" => "小到中雪", "27" => "中到大雪", "28" => "大到暴雪",
+        "29" => "浮尘", "30" => "扬沙", "31" => "强沙尘暴", "53" => "霾", _ => $"天气代码 {code}"
+    };
 }

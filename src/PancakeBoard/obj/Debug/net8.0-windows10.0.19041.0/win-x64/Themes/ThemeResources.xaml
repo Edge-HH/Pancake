@@ -37,6 +37,13 @@
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
 
+    <!-- Segoe MDL2 Assets is available on supported Windows 10 and Windows 11 versions. -->
+    <FontFamily x:Key="BoardIconFontFamily">Segoe MDL2 Assets</FontFamily>
+
+    <Style TargetType="FontIcon">
+        <Setter Property="FontFamily" Value="{StaticResource BoardIconFontFamily}" />
+    </Style>
+
     <Style x:Key="BoardIconButtonStyle" TargetType="Button">
         <Setter Property="MinWidth" Value="44" />
         <Setter Property="MinHeight" Value="44" />

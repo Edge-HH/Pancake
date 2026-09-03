@@ -9,6 +9,22 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
+        UnhandledException += (_, args) => WriteCrashLog(args.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) => WriteCrashLog(args.ExceptionObject as Exception);
+    }
+
+    private static void WriteCrashLog(Exception? exception)
+    {
+        try
+        {
+            string directory = Path.Combine(AppContext.BaseDirectory, "data");
+            Directory.CreateDirectory(directory);
+            File.AppendAllText(Path.Combine(directory, "crash.log"), $"[{DateTimeOffset.Now:O}] {exception}\n");
+        }
+        catch
+        {
+            // 崩溃记录不能覆盖原始异常。
+        }
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

@@ -233,10 +233,10 @@ namespace PancakeBoard.PancakeBoard_XamlTypeInfo
             _typeNameTable[3] = "Boolean";
             _typeNameTable[4] = "Microsoft.UI.Xaml.Controls.InfoBar";
             _typeNameTable[5] = "Microsoft.UI.Xaml.Controls.Control";
-            _typeNameTable[6] = "String";
-            _typeNameTable[7] = "Microsoft.UI.Xaml.Controls.InfoBarSeverity";
-            _typeNameTable[8] = "System.Enum";
-            _typeNameTable[9] = "System.ValueType";
+            _typeNameTable[6] = "Microsoft.UI.Xaml.Controls.InfoBarSeverity";
+            _typeNameTable[7] = "System.Enum";
+            _typeNameTable[8] = "System.ValueType";
+            _typeNameTable[9] = "String";
             _typeNameTable[10] = "Microsoft.UI.Xaml.Controls.Primitives.ButtonBase";
             _typeNameTable[11] = "System.Windows.Input.ICommand";
             _typeNameTable[12] = "Microsoft.UI.Xaml.Style";
@@ -259,10 +259,10 @@ namespace PancakeBoard.PancakeBoard_XamlTypeInfo
             _typeTable[3] = typeof(global::System.Boolean);
             _typeTable[4] = typeof(global::Microsoft.UI.Xaml.Controls.InfoBar);
             _typeTable[5] = typeof(global::Microsoft.UI.Xaml.Controls.Control);
-            _typeTable[6] = typeof(global::System.String);
-            _typeTable[7] = typeof(global::Microsoft.UI.Xaml.Controls.InfoBarSeverity);
-            _typeTable[8] = typeof(global::System.Enum);
-            _typeTable[9] = typeof(global::System.ValueType);
+            _typeTable[6] = typeof(global::Microsoft.UI.Xaml.Controls.InfoBarSeverity);
+            _typeTable[7] = typeof(global::System.Enum);
+            _typeTable[8] = typeof(global::System.ValueType);
+            _typeTable[9] = typeof(global::System.String);
             _typeTable[10] = typeof(global::Microsoft.UI.Xaml.Controls.Primitives.ButtonBase);
             _typeTable[11] = typeof(global::System.Windows.Input.ICommand);
             _typeTable[12] = typeof(global::Microsoft.UI.Xaml.Style);
@@ -318,9 +318,9 @@ namespace PancakeBoard.PancakeBoard_XamlTypeInfo
         private object Activate_21_TreeViewNode() { return new global::Microsoft.UI.Xaml.Controls.TreeViewNode(); }
         private void StaticInitializer_0_XamlControlsResources() => global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(global::Microsoft.UI.Xaml.Controls.XamlControlsResources).TypeHandle);
         private void StaticInitializer_4_InfoBar() => global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(global::Microsoft.UI.Xaml.Controls.InfoBar).TypeHandle);
-        private void StaticInitializer_7_InfoBarSeverity() => global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(global::Microsoft.UI.Xaml.Controls.InfoBarSeverity).TypeHandle);
-        private void StaticInitializer_8_Enum() => global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(global::System.Enum).TypeHandle);
-        private void StaticInitializer_9_ValueType() => global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(global::System.ValueType).TypeHandle);
+        private void StaticInitializer_6_InfoBarSeverity() => global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(global::Microsoft.UI.Xaml.Controls.InfoBarSeverity).TypeHandle);
+        private void StaticInitializer_7_Enum() => global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(global::System.Enum).TypeHandle);
+        private void StaticInitializer_8_ValueType() => global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(global::System.ValueType).TypeHandle);
         private void StaticInitializer_11_ICommand() => global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(global::System.Windows.Input.ICommand).TypeHandle);
         private void StaticInitializer_15_InfoBarTemplateSettings() => global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(global::Microsoft.UI.Xaml.Controls.InfoBarTemplateSettings).TypeHandle);
         private void StaticInitializer_17_MainWindow() => global::System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(typeof(global::PancakeBoard.MainWindow).TypeHandle);
@@ -381,8 +381,8 @@ namespace PancakeBoard.PancakeBoard_XamlTypeInfo
                 userType.AddMemberName("Content");
                 userType.AddMemberName("IsClosable");
                 userType.AddMemberName("IsOpen");
-                userType.AddMemberName("Message");
                 userType.AddMemberName("Severity");
+                userType.AddMemberName("Message");
                 userType.AddMemberName("ActionButton");
                 userType.AddMemberName("CloseButtonCommand");
                 userType.AddMemberName("CloseButtonCommandParameter");
@@ -399,13 +399,9 @@ namespace PancakeBoard.PancakeBoard_XamlTypeInfo
                 xamlType = new global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlSystemBaseType(typeName, type);
                 break;
 
-            case 6:   //  String
-                xamlType = new global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlSystemBaseType(typeName, type);
-                break;
-
-            case 7:   //  Microsoft.UI.Xaml.Controls.InfoBarSeverity
+            case 6:   //  Microsoft.UI.Xaml.Controls.InfoBarSeverity
                 userType = new global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlUserType(this, typeName, type, GetXamlTypeByName("System.Enum"));
-                userType.StaticInitializer = StaticInitializer_7_InfoBarSeverity;
+                userType.StaticInitializer = StaticInitializer_6_InfoBarSeverity;
                 userType.AddEnumValue("Informational", global::Microsoft.UI.Xaml.Controls.InfoBarSeverity.Informational);
                 userType.AddEnumValue("Success", global::Microsoft.UI.Xaml.Controls.InfoBarSeverity.Success);
                 userType.AddEnumValue("Warning", global::Microsoft.UI.Xaml.Controls.InfoBarSeverity.Warning);
@@ -413,16 +409,20 @@ namespace PancakeBoard.PancakeBoard_XamlTypeInfo
                 xamlType = userType;
                 break;
 
-            case 8:   //  System.Enum
+            case 7:   //  System.Enum
                 userType = new global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlUserType(this, typeName, type, GetXamlTypeByName("System.ValueType"));
-                userType.StaticInitializer = StaticInitializer_8_Enum;
+                userType.StaticInitializer = StaticInitializer_7_Enum;
                 xamlType = userType;
                 break;
 
-            case 9:   //  System.ValueType
+            case 8:   //  System.ValueType
                 userType = new global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlUserType(this, typeName, type, GetXamlTypeByName("Object"));
-                userType.StaticInitializer = StaticInitializer_9_ValueType;
+                userType.StaticInitializer = StaticInitializer_8_ValueType;
                 xamlType = userType;
+                break;
+
+            case 9:   //  String
+                xamlType = new global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlSystemBaseType(typeName, type);
                 break;
 
             case 10:   //  Microsoft.UI.Xaml.Controls.Primitives.ButtonBase
@@ -611,25 +611,25 @@ namespace PancakeBoard.PancakeBoard_XamlTypeInfo
             var that = (global::Microsoft.UI.Xaml.Controls.InfoBar)instance;
             that.IsOpen = (global::System.Boolean)Value;
         }
-        private object get_4_InfoBar_Message(object instance)
-        {
-            var that = (global::Microsoft.UI.Xaml.Controls.InfoBar)instance;
-            return that.Message;
-        }
-        private void set_4_InfoBar_Message(object instance, object Value)
-        {
-            var that = (global::Microsoft.UI.Xaml.Controls.InfoBar)instance;
-            that.Message = (global::System.String)Value;
-        }
-        private object get_5_InfoBar_Severity(object instance)
+        private object get_4_InfoBar_Severity(object instance)
         {
             var that = (global::Microsoft.UI.Xaml.Controls.InfoBar)instance;
             return that.Severity;
         }
-        private void set_5_InfoBar_Severity(object instance, object Value)
+        private void set_4_InfoBar_Severity(object instance, object Value)
         {
             var that = (global::Microsoft.UI.Xaml.Controls.InfoBar)instance;
             that.Severity = (global::Microsoft.UI.Xaml.Controls.InfoBarSeverity)Value;
+        }
+        private object get_5_InfoBar_Message(object instance)
+        {
+            var that = (global::Microsoft.UI.Xaml.Controls.InfoBar)instance;
+            return that.Message;
+        }
+        private void set_5_InfoBar_Message(object instance, object Value)
+        {
+            var that = (global::Microsoft.UI.Xaml.Controls.InfoBar)instance;
+            that.Message = (global::System.String)Value;
         }
         private object get_6_InfoBar_ActionButton(object instance)
         {
@@ -807,19 +807,19 @@ namespace PancakeBoard.PancakeBoard_XamlTypeInfo
                 xamlMember.Getter = get_3_InfoBar_IsOpen;
                 xamlMember.Setter = set_3_InfoBar_IsOpen;
                 break;
-            case "Microsoft.UI.Xaml.Controls.InfoBar.Message":
-                userType = (global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlUserType)GetXamlTypeByName("Microsoft.UI.Xaml.Controls.InfoBar");
-                xamlMember = new global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlMember(this, "Message", "String");
-                xamlMember.SetIsDependencyProperty();
-                xamlMember.Getter = get_4_InfoBar_Message;
-                xamlMember.Setter = set_4_InfoBar_Message;
-                break;
             case "Microsoft.UI.Xaml.Controls.InfoBar.Severity":
                 userType = (global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlUserType)GetXamlTypeByName("Microsoft.UI.Xaml.Controls.InfoBar");
                 xamlMember = new global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlMember(this, "Severity", "Microsoft.UI.Xaml.Controls.InfoBarSeverity");
                 xamlMember.SetIsDependencyProperty();
-                xamlMember.Getter = get_5_InfoBar_Severity;
-                xamlMember.Setter = set_5_InfoBar_Severity;
+                xamlMember.Getter = get_4_InfoBar_Severity;
+                xamlMember.Setter = set_4_InfoBar_Severity;
+                break;
+            case "Microsoft.UI.Xaml.Controls.InfoBar.Message":
+                userType = (global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlUserType)GetXamlTypeByName("Microsoft.UI.Xaml.Controls.InfoBar");
+                xamlMember = new global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlMember(this, "Message", "String");
+                xamlMember.SetIsDependencyProperty();
+                xamlMember.Getter = get_5_InfoBar_Message;
+                xamlMember.Setter = set_5_InfoBar_Message;
                 break;
             case "Microsoft.UI.Xaml.Controls.InfoBar.ActionButton":
                 userType = (global::PancakeBoard.PancakeBoard_XamlTypeInfo.XamlUserType)GetXamlTypeByName("Microsoft.UI.Xaml.Controls.InfoBar");

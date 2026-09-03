@@ -93,7 +93,7 @@
                 </Border>
                 <Border Style="{StaticResource BoardCardStyle}">
                     <StackPanel Spacing="18">
-                        <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="小米天气 API" />
+                        <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="天气" />
                         <TextBlock FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="端点模板支持 {city} 和 {key} 占位符；密钥只保存在当前运行内存中。" />
                         <TextBox x:ConnectionId='22' x:Name="WeatherEndpointTextBox" Header="官方端点模板" PlaceholderText="https://example.xiaomi.com/weather?city={city}&amp;key={key}" />
                         <Grid ColumnSpacing="12">

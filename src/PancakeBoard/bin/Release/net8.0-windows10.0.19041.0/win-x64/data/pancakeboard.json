@@ -1,0 +1,107 @@
+{
+  "SchemaVersion": 1,
+  "Settings": {
+    "Theme": "Dark",
+    "MicrophoneSampleRate": 16000,
+    "MicrophoneCalibrationDb": 0,
+    "WeatherCityName": "\u5317\u4EAC",
+    "WeatherCityCode": "101010100",
+    "GridSnappingEnabled": true,
+    "AutoUpdateEnabled": true,
+    "UpdateRepository": "MEMZ-Edge01/PancakeBoard"
+  },
+  "Subjects": [
+    {
+      "Name": "\u6570\u5B66",
+      "AccentHex": "#65D46E",
+      "X": 0,
+      "Y": 0,
+      "Width": 376,
+      "Height": 261.3333435058594,
+      "Entries": [
+        {
+          "Content": "\u5B8C\u6210 P30 \u7EC3\u4E60\u9898\n\u590D\u4E60\u4E8C\u6B21\u51FD\u6570\u516C\u5F0F",
+          "RtfContent": "",
+          "HasHandwriting": true,
+          "Attachments": [
+            {
+              "Name": "\u4E8C\u6B21\u51FD\u6570\u4F8B\u9898.pdf",
+              "Kind": "PDF",
+              "Path": ""
+            }
+          ]
+        },
+        {
+          "Content": "\u6574\u7406\u8BFE\u5802\u9519\u9898\uFF0C\u5199\u51FA\u4E09\u79CD\u89E3\u6CD5",
+          "RtfContent": "",
+          "HasHandwriting": false,
+          "Attachments": []
+        }
+      ],
+      "InkStrokes": []
+    },
+    {
+      "Name": "\u82F1\u8BED",
+      "AccentHex": "#7567FF",
+      "X": 0,
+      "Y": 11.333343505859375,
+      "Width": 376,
+      "Height": 250,
+      "Entries": [
+        {
+          "Content": "\u80CC\u8BF5 Unit 3 \u5355\u8BCD\n\u5B8C\u6210\u9605\u8BFB\u7406\u89E3",
+          "RtfContent": "",
+          "HasHandwriting": false,
+          "Attachments": [
+            {
+              "Name": "Unit 3 \u8BCD\u6C47\u8868.jpg",
+              "Kind": "\u56FE\u7247",
+              "Path": ""
+            }
+          ]
+        }
+      ],
+      "InkStrokes": []
+    },
+    {
+      "Name": "\u7269\u7406",
+      "AccentHex": "#60A5FA",
+      "X": 0,
+      "Y": 0,
+      "Width": 376,
+      "Height": 261.3333435058594,
+      "Entries": [
+        {
+          "Content": "\u5B8C\u6210\u529B\u5B66\u7EC3\u4E60\u7B2C 1\u20148 \u9898\n\u9884\u4E60\u4E32\u5E76\u8054\u7535\u8DEF",
+          "RtfContent": "",
+          "HasHandwriting": true,
+          "Attachments": []
+        }
+      ],
+      "InkStrokes": []
+    },
+    {
+      "Name": "\u8BED\u6587",
+      "AccentHex": "#FBBF24",
+      "X": 0,
+      "Y": 0,
+      "Width": 376,
+      "Height": 261.3333435058594,
+      "Entries": [
+        {
+          "Content": "\u80CC\u8BF5\u300A\u8D64\u58C1\u8D4B\u300B\u7B2C\u4E8C\u6BB5\n\u6574\u7406\u4F5C\u6587\u7D20\u6750",
+          "RtfContent": "",
+          "HasHandwriting": false,
+          "Attachments": [
+            {
+              "Name": "\u4F5C\u6587\u7D20\u6750\u6E05\u5355.pdf",
+              "Kind": "PDF",
+              "Path": ""
+            }
+          ]
+        }
+      ],
+      "InkStrokes": []
+    }
+  ]
+}

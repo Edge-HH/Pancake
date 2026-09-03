@@ -91,3 +91,4 @@ D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Relea
 D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\NAudio.Wasapi.dll
 D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\NAudio.WinForms.dll
 D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\NAudio.WinMM.dll
+D:\Files\Codes\Projects\PancakeBoard\PancakeBoard\src\PancakeBoard\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\Assets\xiaomi_weather_cities.json

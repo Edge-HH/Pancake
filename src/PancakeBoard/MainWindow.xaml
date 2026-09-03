@@ -18,7 +18,7 @@
             <Grid x:Name="DragRegion" Background="Transparent">
                 <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center" IsHitTestVisible="False">
                     <Border Width="38" Height="38" Background="#101010" CornerRadius="8">
-                        <FontIcon FontFamily="Segoe Fluent Icons" FontSize="18" Foreground="{ThemeResource BoardBrandBrush}" Glyph="&#xE823;" />
+                        <FontIcon FontSize="18" Foreground="{ThemeResource BoardBrandBrush}" Glyph="&#xE823;" />
                     </Border>
                     <StackPanel VerticalAlignment="Center" Spacing="1">
                         <TextBlock FontSize="17" FontWeight="SemiBold" Foreground="White" Text="PancakeBoard" />
@@ -42,10 +42,10 @@
                         <TextBlock x:Name="ClockDateText" HorizontalAlignment="Center" FontSize="20" Foreground="#B4B4B4" />
                         <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
                             <Border Padding="16,10" Background="#151515" CornerRadius="8">
-                                <StackPanel Orientation="Horizontal" Spacing="9"><FontIcon FontFamily="Segoe Fluent Icons" Foreground="{ThemeResource BoardWarningBrush}" Glyph="&#xE706;" /><TextBlock x:Name="WeatherText" FontSize="14" Foreground="#DEDEDE" Text="天气未配置" /></StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="9"><FontIcon Foreground="{ThemeResource BoardWarningBrush}" Glyph="&#xE706;" /><TextBlock x:Name="WeatherText" FontSize="14" Foreground="#DEDEDE" Text="天气未配置" /></StackPanel>
                             </Border>
                             <Border Padding="16,10" Background="#151515" CornerRadius="8">
-                                <StackPanel Orientation="Horizontal" Spacing="9"><FontIcon FontFamily="Segoe Fluent Icons" Foreground="{ThemeResource BoardSuccessBrush}" Glyph="&#xE720;" /><TextBlock x:Name="NoiseText" FontSize="14" Foreground="#DEDEDE" Text="42 dB · 安静" /></StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="9"><FontIcon Foreground="{ThemeResource BoardSuccessBrush}" Glyph="&#xE720;" /><TextBlock x:Name="NoiseText" FontSize="14" Foreground="#DEDEDE" Text="42 dB · 安静" /></StackPanel>
                             </Border>
                         </StackPanel>
                     </StackPanel>
@@ -63,12 +63,12 @@
                             <TextBlock x:Name="SubjectCountText" FontSize="12" Foreground="#B9B9B9" />
                         </Border>
                     </Grid>
-                    <ScrollViewer x:Name="BoardScrollViewer" Grid.Row="1" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Auto" VerticalScrollMode="Enabled" ViewChanged="BoardScrollViewer_ViewChanged" ZoomMode="Disabled">
-                        <Grid x:Name="BoardSurface" Width="1100" Height="780" Background="#151515">
+                    <Grid x:Name="BoardViewport" Grid.Row="1" Background="#151515" SizeChanged="BoardViewport_SizeChanged">
+                        <Grid x:Name="BoardSurface" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#151515">
                             <Canvas x:Name="GridCanvas" IsHitTestVisible="False" />
                             <Canvas x:Name="BoardCanvas" />
                         </Grid>
-                    </ScrollViewer>
+                    </Grid>
                 </Grid>
             </Grid>
         </Grid>
@@ -93,17 +93,27 @@
                 </Border>
                 <Border Style="{StaticResource BoardCardStyle}">
                     <StackPanel Spacing="18">
-                        <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="小米天气 API" />
-                        <TextBlock FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="端点模板支持 {city} 和 {key} 占位符；密钥只保存在当前运行内存中。" />
-                        <TextBox x:Name="WeatherEndpointTextBox" Header="官方端点模板" PlaceholderText="https://example.xiaomi.com/weather?city={city}&amp;key={key}" />
+                        <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="天气" />
+                        <TextBlock FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="使用 小米天气API ，请在下方选择地区" />
                         <Grid ColumnSpacing="12">
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <TextBox x:Name="WeatherCityTextBox" Header="城市" Text="北京市" />
-                            <PasswordBox x:Name="WeatherApiKeyBox" Grid.Column="1" Header="API 密钥" />
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <TextBox x:Name="WeatherCityTextBox" Header="地区" Text="北京" IsReadOnly="True" />
+                            <Button Grid.Column="1" VerticalAlignment="Bottom" Click="ChooseWeatherCityButton_Click" Style="{StaticResource BoardSecondaryButtonStyle}" Content="选择地区" />
                         </Grid>
                         <StackPanel Orientation="Horizontal" Spacing="10">
                             <Button Click="RefreshWeatherButton_Click" Style="{StaticResource BoardPrimaryButtonStyle}" Content="测试并刷新" />
                             <TextBlock x:Name="WeatherStatusText" MaxWidth="560" VerticalAlignment="Center" FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="等待配置" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+                <Border Style="{StaticResource BoardCardStyle}">
+                    <StackPanel Spacing="18">
+                        <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="软件更新" />
+                        <ToggleSwitch x:Name="AutoUpdateToggle" Header="启动时自动检查 GitHub Release" IsOn="True" Toggled="AutoUpdateToggle_Toggled" />
+                        <TextBox x:Name="UpdateRepositoryTextBox" Header="GitHub 仓库" Text="MEMZ-Edge01/PancakeBoard" LostFocus="UpdateRepositoryTextBox_LostFocus" />
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Button Click="CheckUpdateButton_Click" Style="{StaticResource BoardPrimaryButtonStyle}" Content="立即检查" />
+                            <TextBlock x:Name="UpdateStatusText" MaxWidth="560" VerticalAlignment="Center" FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="尚未检查" TextWrapping="Wrap" />
                         </StackPanel>
                     </StackPanel>
                 </Border>
@@ -153,23 +163,37 @@
             Canvas.ZIndex="100">
             <StackPanel Orientation="Horizontal" Spacing="4">
                 <Button x:Name="BackToBoardButton" Click="BackToBoardButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="返回看板">
-                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE72B;" />
+                    <FontIcon Glyph="&#xE72B;" />
                 </Button>
                 <Button x:Name="DiscardEditButton" Click="DiscardEditButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="放弃修改">
-                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE711;" />
+                    <FontIcon Glyph="&#xE711;" />
                 </Button>
                 <Button x:Name="AddSubjectButton" Click="AddSubjectButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="添加科目">
-                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE710;" />
+                    <FontIcon Glyph="&#xE710;" />
                 </Button>
+                <ToggleButton
+                    x:Name="GridSnapToggleButton"
+                    Width="44"
+                    Height="44"
+                    Padding="10"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    IsChecked="True"
+                    Visibility="Collapsed"
+                    AutomationProperties.Name="网格吸附"
+                    Checked="GridSnapToggleButton_Checked"
+                    Unchecked="GridSnapToggleButton_Unchecked">
+                    <FontIcon FontSize="18" Glyph="&#xECA5;" />
+                </ToggleButton>
                 <Button x:Name="EditBoardButton" Click="EditBoardButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="编辑看板">
-                    <FontIcon x:Name="EditBoardIcon" FontFamily="Segoe Fluent Icons" Glyph="&#xE70F;" />
+                    <FontIcon x:Name="EditBoardIcon" Glyph="&#xE70F;" />
                 </Button>
                 <Button x:Name="SettingsButton" Click="SettingsButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="设置">
-                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE713;" />
+                    <FontIcon Glyph="&#xE713;" />
                 </Button>
                 <Button x:Name="FullScreenButton" Click="FullScreenButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="进入全屏">
                     <StackPanel Orientation="Horizontal" Spacing="7">
-                        <FontIcon x:Name="FullScreenIcon" FontFamily="Segoe Fluent Icons" Glyph="&#xE740;" />
+                        <FontIcon x:Name="FullScreenIcon" Glyph="&#xE740;" />
                         <TextBlock x:Name="FullScreenLabel" Text="退出全屏" Visibility="Collapsed" />
                     </StackPanel>
                 </Button>

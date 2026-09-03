@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Shapes;
 using PancakeBoard.Models;
 using PancakeBoard.ViewModels;
 using Windows.Foundation;
+using Microsoft.UI.Text;
 
 namespace PancakeBoard.Controls;
 
@@ -20,7 +21,7 @@ public sealed class SubjectTileControl : Grid
     private const double InkSurfaceWidth = 1000;
     private const double InkSurfaceHeight = 600;
     private const double MinimumTileWidth = 280;
-    private const double MinimumTileHeight = 190;
+    internal const double MinimumTileHeight = 96;
     private const double MaximumTileWidth = 900;
     private const double MaximumTileHeight = 680;
     private const double EdgeHitTarget = 22;
@@ -32,6 +33,7 @@ public sealed class SubjectTileControl : Grid
     private readonly Action<SubjectBoard> _layoutCommitted;
     private readonly Action<bool> _interactionChanged;
     private readonly Func<HomeworkEntry, Task> _addAttachment;
+    private readonly Action _contentChanged;
     private readonly Canvas _inkCanvas = new()
     {
         Width = InkSurfaceWidth,
@@ -44,6 +46,9 @@ public sealed class SubjectTileControl : Grid
     private readonly StackPanel _editingTools = new() { Orientation = Orientation.Horizontal, Spacing = 2 };
     private readonly Border _penModeToolbar;
     private readonly TextBox _nameEditor;
+    private readonly Thumb _headerMoveThumb;
+    private readonly Border _frame;
+    private readonly TextBlock _watermark;
     private readonly ToggleButton _drawButton;
     private ToggleButton _penButton = null!;
     private ToggleButton _eraserButton = null!;
@@ -62,7 +67,8 @@ public sealed class SubjectTileControl : Grid
         Action<SubjectBoard> layoutChanged,
         Action<SubjectBoard> layoutCommitted,
         Action<bool> interactionChanged,
-        Func<HomeworkEntry, Task> addAttachment)
+        Func<HomeworkEntry, Task> addAttachment,
+        Action contentChanged)
     {
         _subject = subject;
         _deleteSubject = deleteSubject;
@@ -70,6 +76,7 @@ public sealed class SubjectTileControl : Grid
         _layoutCommitted = layoutCommitted;
         _interactionChanged = interactionChanged;
         _addAttachment = addAttachment;
+        _contentChanged = contentChanged;
 
         Width = subject.TileWidth;
         Height = subject.TileHeight;
@@ -77,22 +84,22 @@ public sealed class SubjectTileControl : Grid
         MinHeight = MinimumTileHeight;
         ManipulationMode = ManipulationModes.None;
 
-        Border frame = new()
+        _frame = new Border
         {
             Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 31, 31, 31)),
             BorderBrush = subject.AccentBrush,
             BorderThickness = new Thickness(3),
             CornerRadius = new CornerRadius(3)
         };
-        Children.Add(frame);
+        Children.Add(_frame);
 
         Grid content = new() { Padding = new Thickness(14, 10, 10, 10) };
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        frame.Child = content;
+        _frame.Child = content;
 
-        TextBlock watermark = new()
+        _watermark = new TextBlock
         {
             Text = subject.Watermark,
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -104,8 +111,8 @@ public sealed class SubjectTileControl : Grid
             Opacity = 0.16,
             IsHitTestVisible = false
         };
-        Grid.SetRowSpan(watermark, 3);
-        content.Children.Add(watermark);
+        Grid.SetRowSpan(_watermark, 3);
+        content.Children.Add(_watermark);
 
         Grid header = new() { ColumnSpacing = 8 };
         header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -113,12 +120,41 @@ public sealed class SubjectTileControl : Grid
         content.Children.Add(header);
         Canvas.SetZIndex(header, 30);
 
+        _headerMoveThumb = new Thumb
+        {
+            Name = "HeaderMoveThumb",
+            Height = EdgeHitTarget,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Top,
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
+            ManipulationMode = ManipulationModes.None
+        };
+        _headerMoveThumb.DragStarted += (_, _) => _interactionChanged(true);
+        _headerMoveThumb.DragDelta += (_, args) =>
+        {
+            _subject.X = Math.Max(0, _subject.X + args.HorizontalChange);
+            _subject.Y = Math.Max(0, _subject.Y + args.VerticalChange);
+            _layoutChanged(_subject);
+        };
+        _headerMoveThumb.DragCompleted += (_, _) =>
+        {
+            _layoutCommitted(_subject);
+            _interactionChanged(false);
+        };
+        // 顶部边缘统一用于移动，并覆盖左右缩放区在顶部的交叉部分。
+        Canvas.SetZIndex(_headerMoveThumb, 70);
+        Children.Add(_headerMoveThumb);
+
         _nameEditor = CreateInlineEditor(subject.Name, 29, subject.AccentBrush, true);
         _nameEditor.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
+        _nameEditor.HorizontalAlignment = HorizontalAlignment.Left;
+        _nameEditor.MinWidth = 120;
+        _nameEditor.MaxWidth = 240;
         _nameEditor.TextChanged += (_, _) =>
         {
             _subject.Name = _nameEditor.Text;
-            watermark.Text = _subject.Watermark;
+            _watermark.Text = _subject.Watermark;
+            _contentChanged();
         };
         header.Children.Add(_nameEditor);
 
@@ -128,22 +164,8 @@ public sealed class SubjectTileControl : Grid
         _editingTools.Children.Add(_drawButton);
         _editingTools.Children.Add(CreateIconButton("\uE7A7", "撤销最后一笔", (_, _) => UndoLastStroke()));
         _editingTools.Children.Add(CreateIconButton("\uE710", "添加一条作业", (_, _) => AddHomework()));
+        _editingTools.Children.Add(CreateThemeButton());
 
-        Grid moveHandle = CreateThumbHandle("\uE759", "拖动磁贴");
-        Thumb moveThumb = moveHandle.Children.OfType<Thumb>().Single();
-        moveThumb.DragStarted += (_, _) => _interactionChanged(true);
-        moveThumb.DragDelta += (_, args) =>
-        {
-            _subject.X = Math.Max(0, _subject.X + args.HorizontalChange);
-            _subject.Y = Math.Max(0, _subject.Y + args.VerticalChange);
-            _layoutChanged(_subject);
-        };
-        moveThumb.DragCompleted += (_, _) =>
-        {
-            _layoutCommitted(_subject);
-            _interactionChanged(false);
-        };
-        _editingTools.Children.Add(moveHandle);
         _editingTools.Children.Add(CreateIconButton("\uE74D", "删除科目", (_, _) => _deleteSubject(_subject), true));
         Grid.SetColumn(_editingTools, 1);
         header.Children.Add(_editingTools);
@@ -197,6 +219,7 @@ public sealed class SubjectTileControl : Grid
     {
         _isEditing = editing;
         _editingTools.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
+        _headerMoveThumb.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
         foreach (Thumb thumb in Children.OfType<Thumb>())
         {
             thumb.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
@@ -284,11 +307,8 @@ public sealed class SubjectTileControl : Grid
     private void AddResizeHandles()
     {
         AddResizeHandle(ResizeEdge.Left, HorizontalAlignment.Left, VerticalAlignment.Stretch, EdgeHitTarget, double.NaN);
-        AddResizeHandle(ResizeEdge.Top, HorizontalAlignment.Stretch, VerticalAlignment.Top, double.NaN, EdgeHitTarget);
         AddResizeHandle(ResizeEdge.Right, HorizontalAlignment.Right, VerticalAlignment.Stretch, EdgeHitTarget, double.NaN);
         AddResizeHandle(ResizeEdge.Bottom, HorizontalAlignment.Stretch, VerticalAlignment.Bottom, double.NaN, EdgeHitTarget);
-        AddResizeHandle(ResizeEdge.TopLeft, HorizontalAlignment.Left, VerticalAlignment.Top, CornerHitTarget, CornerHitTarget);
-        AddResizeHandle(ResizeEdge.TopRight, HorizontalAlignment.Right, VerticalAlignment.Top, CornerHitTarget, CornerHitTarget);
         AddResizeHandle(ResizeEdge.BottomLeft, HorizontalAlignment.Left, VerticalAlignment.Bottom, CornerHitTarget, CornerHitTarget);
         AddResizeHandle(ResizeEdge.BottomRight, HorizontalAlignment.Right, VerticalAlignment.Bottom, CornerHitTarget, CornerHitTarget);
     }
@@ -312,7 +332,7 @@ public sealed class SubjectTileControl : Grid
             _layoutCommitted(_subject);
             _interactionChanged(false);
         };
-        Canvas.SetZIndex(thumb, edge is ResizeEdge.TopLeft or ResizeEdge.TopRight or ResizeEdge.BottomLeft or ResizeEdge.BottomRight ? 60 : 50);
+        Canvas.SetZIndex(thumb, edge is ResizeEdge.BottomLeft or ResizeEdge.BottomRight ? 60 : 50);
         Children.Add(thumb);
     }
 
@@ -326,22 +346,17 @@ public sealed class SubjectTileControl : Grid
         double nextWidth = _subject.TileWidth;
         double nextHeight = _subject.TileHeight;
 
-        if (edge is ResizeEdge.Left or ResizeEdge.TopLeft or ResizeEdge.BottomLeft)
+        if (edge is ResizeEdge.Left or ResizeEdge.BottomLeft)
         {
             nextWidth = Math.Clamp(_subject.TileWidth - e.HorizontalChange, MinimumTileWidth, MaximumTileWidth);
             nextX = Math.Max(0, right - nextWidth);
         }
-        else if (edge is ResizeEdge.Right or ResizeEdge.TopRight or ResizeEdge.BottomRight)
+        else if (edge is ResizeEdge.Right or ResizeEdge.BottomRight)
         {
             nextWidth = Math.Clamp(_subject.TileWidth + e.HorizontalChange, MinimumTileWidth, MaximumTileWidth);
         }
 
-        if (edge is ResizeEdge.Top or ResizeEdge.TopLeft or ResizeEdge.TopRight)
-        {
-            nextHeight = Math.Clamp(_subject.TileHeight - e.VerticalChange, MinimumTileHeight, MaximumTileHeight);
-            nextY = Math.Max(0, bottom - nextHeight);
-        }
-        else if (edge is ResizeEdge.Bottom or ResizeEdge.BottomLeft or ResizeEdge.BottomRight)
+        if (edge is ResizeEdge.Bottom or ResizeEdge.BottomLeft or ResizeEdge.BottomRight)
         {
             nextHeight = Math.Clamp(_subject.TileHeight + e.VerticalChange, MinimumTileHeight, MaximumTileHeight);
         }
@@ -373,14 +388,19 @@ public sealed class SubjectTileControl : Grid
                 Margin = new Thickness(0, 4, 0, 0)
             });
 
-            TextBox editor = CreateInlineEditor(homework.Content, 20, new SolidColorBrush(Windows.UI.Color.FromArgb(255, 245, 245, 247)), false);
-            editor.AcceptsReturn = true;
-            editor.TextWrapping = TextWrapping.Wrap;
-            editor.IsReadOnly = !_isEditing;
-            editor.IsHitTestVisible = _isEditing;
-            editor.TextChanged += (_, _) => homework.Content = editor.Text;
+            RichEditBox editor = CreateRichEditor(homework);
             Grid.SetColumn(editor, 1);
             row.Children.Add(editor);
+
+            if (_isEditing)
+            {
+                StackPanel formatting = BuildFormattingToolbar(editor, homework);
+                Grid.SetColumn(formatting, 1);
+                row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+                Grid.SetRow(formatting, 1);
+                row.Children.Add(formatting);
+            }
 
             if (_isEditing)
             {
@@ -405,6 +425,150 @@ public sealed class SubjectTileControl : Grid
         }
     }
 
+    private RichEditBox CreateRichEditor(HomeworkEntry homework)
+    {
+        RichEditBox editor = new()
+        {
+            FontSize = 20,
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(2, 0, 2, 0),
+            MinHeight = 42,
+            TextWrapping = TextWrapping.Wrap,
+            IsReadOnly = !_isEditing,
+            IsHitTestVisible = _isEditing
+        };
+        bool documentReady = false;
+        editor.TextChanged += (_, _) =>
+        {
+            if (!documentReady) return;
+            editor.Document.GetText(TextGetOptions.None, out string plain);
+            editor.Document.GetText(TextGetOptions.FormatRtf, out string rtf);
+            homework.Content = plain.TrimEnd('\r');
+            homework.RtfContent = rtf;
+            _contentChanged();
+        };
+        editor.Loaded += (_, _) =>
+        {
+            if (documentReady) return;
+            // WinUI 的只读 RichEdit 文档拒绝 SetText，初始化时短暂解除只读后再恢复。
+            bool readOnly = editor.IsReadOnly;
+            editor.IsReadOnly = false;
+            editor.Document.SetText(string.IsNullOrWhiteSpace(homework.RtfContent) ? TextSetOptions.None : TextSetOptions.FormatRtf,
+                string.IsNullOrWhiteSpace(homework.RtfContent) ? homework.Content : homework.RtfContent);
+            if (string.IsNullOrWhiteSpace(homework.RtfContent) && homework.Content.Length > 0)
+            {
+                editor.Document.GetRange(0, homework.Content.Length).CharacterFormat.ForegroundColor =
+                    Windows.UI.Color.FromArgb(255, 245, 245, 247);
+            }
+            editor.IsReadOnly = readOnly;
+            documentReady = true;
+        };
+        return editor;
+    }
+
+    private StackPanel BuildFormattingToolbar(RichEditBox editor, HomeworkEntry homework)
+    {
+        StackPanel tools = new() { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(0, 2, 0, 4) };
+        tools.Children.Add(CreateIconButton("\uE8DD", "加粗", (_, _) =>
+        {
+            editor.Document.Selection.CharacterFormat.Bold = FormatEffect.Toggle;
+            CaptureRichText(editor, homework);
+        }));
+        tools.Children.Add(CreateIconButton("\uE8DB", "斜体", (_, _) =>
+        {
+            editor.Document.Selection.CharacterFormat.Italic = FormatEffect.Toggle;
+            CaptureRichText(editor, homework);
+        }));
+        tools.Children.Add(CreateIconButton("\uE8DC", "下划线", (_, _) =>
+        {
+            var format = editor.Document.Selection.CharacterFormat;
+            format.Underline = format.Underline == UnderlineType.None ? UnderlineType.Single : UnderlineType.None;
+            CaptureRichText(editor, homework);
+        }));
+        tools.Children.Add(CreateColorFlyoutButton("\uE790", "文字颜色", editor, homework, false));
+        tools.Children.Add(CreateColorFlyoutButton("\uE7E6", "高光颜色", editor, homework, true));
+        return tools;
+    }
+
+    private void CaptureRichText(RichEditBox editor, HomeworkEntry homework)
+    {
+        editor.Document.GetText(TextGetOptions.None, out string plain);
+        editor.Document.GetText(TextGetOptions.FormatRtf, out string rtf);
+        homework.Content = plain.TrimEnd('\r');
+        homework.RtfContent = rtf;
+        _contentChanged();
+    }
+
+    private Button CreateColorFlyoutButton(string glyph, string tooltip, RichEditBox editor, HomeworkEntry homework, bool isHighlight)
+    {
+        int selectionStart = 0;
+        int selectionEnd = 0;
+        Button button = CreateIconButton(glyph, tooltip, (_, _) =>
+        {
+            // Flyout 会夺走编辑器焦点，必须在打开前保存文本选区。
+            selectionStart = editor.Document.Selection.StartPosition;
+            selectionEnd = editor.Document.Selection.EndPosition;
+        });
+        StackPanel colors = new() { Orientation = Orientation.Horizontal, Spacing = 6, Padding = new Thickness(8) };
+        foreach (string hex in new[] { "#F7F7F9", "#FBBF24", "#F87171", "#60A5FA", "#4ADE80", "#F472B6" })
+        {
+            Button swatch = CreateColorSwatch(hex, 30);
+            swatch.Click += (_, _) =>
+            {
+                var range = editor.Document.GetRange(selectionStart, selectionEnd);
+                if (isHighlight) range.CharacterFormat.BackgroundColor = MainViewModel.BrushFromHex(hex).Color;
+                else range.CharacterFormat.ForegroundColor = MainViewModel.BrushFromHex(hex).Color;
+                editor.Document.Selection.SetRange(selectionStart, selectionEnd);
+                CaptureRichText(editor, homework);
+                button.Flyout.Hide();
+                editor.Focus(FocusState.Programmatic);
+            };
+            colors.Children.Add(swatch);
+        }
+        button.Flyout = new Flyout { Content = colors };
+        return button;
+    }
+
+    private Button CreateThemeButton()
+    {
+        Button button = CreateIconButton("\uE790", "磁贴主题色", (_, _) => { });
+        StackPanel colors = new() { Orientation = Orientation.Horizontal, Spacing = 6, Padding = new Thickness(8) };
+        foreach (string hex in new[] { "#4ADE80", "#818CF8", "#60A5FA", "#FBBF24", "#F472B6", "#2DD4BF", "#F87171" })
+        {
+            Button swatch = CreateColorSwatch(hex, 32);
+            swatch.Click += (_, _) =>
+            {
+                _subject.AccentHex = hex;
+                _subject.AccentBrush = MainViewModel.BrushFromHex(hex);
+                _frame.BorderBrush = _subject.AccentBrush;
+                _nameEditor.Foreground = _subject.AccentBrush;
+                _watermark.Foreground = _subject.AccentBrush;
+                button.Flyout.Hide();
+                _contentChanged();
+            };
+            colors.Children.Add(swatch);
+        }
+        button.Flyout = new Flyout { Content = colors };
+        return button;
+    }
+
+    private static Button CreateColorSwatch(string hex, double size) => new()
+    {
+        Width = size,
+        Height = size,
+        Padding = new Thickness(5),
+        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
+        BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(90, 255, 255, 255)),
+        BorderThickness = new Thickness(1),
+        Content = new Ellipse
+        {
+            Width = size - 12,
+            Height = size - 12,
+            Fill = MainViewModel.BrushFromHex(hex)
+        }
+    };
+
     private static TextBox CreateInlineEditor(string text, double fontSize, Brush foreground, bool singleLine) => new()
     {
         Text = text, FontSize = fontSize, Foreground = foreground,
@@ -422,7 +586,7 @@ public sealed class SubjectTileControl : Grid
             Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)), BorderThickness = new Thickness(0),
             Content = new FontIcon
             {
-                Glyph = glyph, FontFamily = new FontFamily("Segoe Fluent Icons"), FontSize = 15,
+                Glyph = glyph, FontSize = 15,
                 Foreground = new SolidColorBrush(danger ? Windows.UI.Color.FromArgb(255, 248, 113, 113) : Windows.UI.Color.FromArgb(255, 235, 235, 240))
             }
         };
@@ -439,7 +603,7 @@ public sealed class SubjectTileControl : Grid
             Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)), BorderThickness = new Thickness(0),
             Content = new FontIcon
             {
-                Glyph = glyph, FontFamily = new FontFamily("Segoe Fluent Icons"), FontSize = 16,
+                Glyph = glyph, FontSize = 16,
                 Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 245, 245, 247))
             }
         };
@@ -447,34 +611,18 @@ public sealed class SubjectTileControl : Grid
         return button;
     }
 
-    private static Grid CreateThumbHandle(string glyph, string tooltip)
-    {
-        Grid handle = new() { Width = 38, Height = 38 };
-        handle.Children.Add(new FontIcon
-        {
-            Glyph = glyph, FontFamily = new FontFamily("Segoe Fluent Icons"), FontSize = 15,
-            Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 220, 220, 225)),
-            IsHitTestVisible = false, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
-        });
-        handle.Children.Add(new Thumb
-        {
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
-            ManipulationMode = ManipulationModes.None
-        });
-        ToolTipService.SetToolTip(handle, tooltip);
-        return handle;
-    }
-
     private void AddHomework()
     {
         _subject.Entries.Add(new HomeworkEntry { Content = "在这里输入作业内容" });
         _subject.NotifyEntriesChanged();
+        _contentChanged();
     }
 
     private void DeleteHomework(HomeworkEntry homework)
     {
         _subject.Entries.Remove(homework);
         _subject.NotifyEntriesChanged();
+        _contentChanged();
     }
 
     private void SetDrawing(bool drawing)
@@ -549,6 +697,7 @@ public sealed class SubjectTileControl : Grid
         _activeStrokeShape = null;
         _isErasing = false;
         _inkCanvas.ReleasePointerCapture(e.Pointer);
+        _contentChanged();
         e.Handled = true;
     }
 
@@ -561,6 +710,7 @@ public sealed class SubjectTileControl : Grid
         }
         _subject.InkStrokes.Remove(stroke);
         _inkCanvas.Children.Remove(shape);
+        _contentChanged();
     }
 
     private void RenderStoredStrokes()
@@ -590,14 +740,16 @@ public sealed class SubjectTileControl : Grid
         if (_subject.InkStrokes.Count == 0) return;
         _subject.InkStrokes.RemoveAt(_subject.InkStrokes.Count - 1);
         RenderStoredStrokes();
+        _contentChanged();
     }
 
     private void ClearStrokes()
     {
         _subject.InkStrokes.Clear();
         RenderStoredStrokes();
+        _contentChanged();
     }
 
     private enum InkTool { Pen, Eraser }
-    private enum ResizeEdge { Left, Top, Right, Bottom, TopLeft, TopRight, BottomLeft, BottomRight }
+    private enum ResizeEdge { Left, Right, Bottom, BottomLeft, BottomRight }
 }

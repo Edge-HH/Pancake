@@ -47,6 +47,12 @@ public sealed class MainViewModel : ObservableObject
 
     public void PublishEditing() => _editSnapshot = null;
 
+    public void ReplaceSubjects(IEnumerable<SubjectBoard> subjects)
+    {
+        Subjects = new ObservableCollection<SubjectBoard>(subjects);
+        SelectedSubject = Subjects.FirstOrDefault();
+    }
+
     public void DiscardEditing()
     {
         if (_editSnapshot is null)

@@ -37,6 +37,7 @@ public sealed class AttachmentItem : ObservableObject
 public sealed class HomeworkEntry : ObservableObject
 {
     private string _content = string.Empty;
+    private string _rtfContent = string.Empty;
     private bool _hasHandwriting;
 
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -45,6 +46,12 @@ public sealed class HomeworkEntry : ObservableObject
     {
         get => _content;
         set => SetProperty(ref _content, value);
+    }
+
+    public string RtfContent
+    {
+        get => _rtfContent;
+        set => SetProperty(ref _rtfContent, value);
     }
 
     public bool HasHandwriting
@@ -84,7 +91,7 @@ public sealed class HomeworkEntry : ObservableObject
 
     public HomeworkEntry Clone()
     {
-        HomeworkEntry clone = new() { Content = Content, HasHandwriting = HasHandwriting };
+        HomeworkEntry clone = new() { Content = Content, RtfContent = RtfContent, HasHandwriting = HasHandwriting };
         foreach (AttachmentItem attachment in Attachments)
         {
             clone.Attachments.Add(new AttachmentItem
@@ -120,9 +127,20 @@ public sealed class SubjectBoard : ObservableObject
     private double _y;
     private double _tileWidth = 430;
     private double _tileHeight = 320;
+    private string _accentHex = "#818CF8";
+    private SolidColorBrush _accentBrush = new(Windows.UI.Color.FromArgb(255, 129, 140, 248));
 
-    public required string AccentHex { get; init; }
-    public SolidColorBrush AccentBrush { get; init; } = new(Windows.UI.Color.FromArgb(255, 99, 102, 241));
+    public string AccentHex
+    {
+        get => _accentHex;
+        set => SetProperty(ref _accentHex, value);
+    }
+
+    public SolidColorBrush AccentBrush
+    {
+        get => _accentBrush;
+        set => SetProperty(ref _accentBrush, value);
+    }
     public ObservableCollection<HomeworkEntry> Entries { get; } = [];
     public ObservableCollection<InkStrokeData> InkStrokes { get; } = [];
 
