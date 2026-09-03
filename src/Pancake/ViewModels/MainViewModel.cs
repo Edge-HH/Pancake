@@ -112,20 +112,17 @@ public sealed class MainViewModel : ObservableObject
     private static ObservableCollection<SubjectBoard> CreateSampleSubjects()
     {
         SubjectBoard math = CreateSubject("数学", "#65D46E", 36, 36, 430, 360);
-        math.Entries.Add(CreateHomework("完成 P30 练习题\n复习二次函数公式", true,
-            new AttachmentItem { Name = "二次函数例题.pdf", Kind = "PDF" }));
+        math.Entries.Add(CreateHomework("完成 P30 练习题\n复习二次函数公式", true));
         math.Entries.Add(CreateHomework("整理课堂错题，写出三种解法", false));
 
         SubjectBoard english = CreateSubject("英语", "#7567FF", 500, 36, 430, 250);
-        english.Entries.Add(CreateHomework("背诵 Unit 3 单词\n完成阅读理解", false,
-            new AttachmentItem { Name = "Unit 3 词汇表.jpg", Kind = "图片" }));
+        english.Entries.Add(CreateHomework("背诵 Unit 3 单词\n完成阅读理解", false));
 
         SubjectBoard physics = CreateSubject("物理", "#60A5FA", 500, 320, 520, 300);
         physics.Entries.Add(CreateHomework("完成力学练习第 1—8 题\n预习串并联电路", true));
 
         SubjectBoard chinese = CreateSubject("语文", "#FBBF24", 36, 430, 430, 280);
-        chinese.Entries.Add(CreateHomework("背诵《赤壁赋》第二段\n整理作文素材", false,
-            new AttachmentItem { Name = "作文素材清单.pdf", Kind = "PDF" }));
+        chinese.Entries.Add(CreateHomework("背诵《赤壁赋》第二段\n整理作文素材", false));
 
         return [math, english, physics, chinese];
     }

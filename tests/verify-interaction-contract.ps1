@@ -4,6 +4,7 @@ $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $windowCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.xaml.cs'))
 $windowXaml = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.xaml'))
 $tileCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\SubjectTileControl.cs'))
+$attachmentImageCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\AttachmentImageControl.cs'))
 $dataCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\AppDataStore.cs'))
 $weatherCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\XiaomiWeatherService.cs'))
 $weatherCatalogCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\WeatherCityCatalog.cs'))
@@ -72,6 +73,27 @@ if ($tileCode -notmatch 'RichEditBox' -or $tileCode -notmatch 'FormatEffect\.Tog
 
 if ($tileCode -notmatch 'CreateThemeButton' -or $tileCode -notmatch 'AccentHex') {
     $failures.Add('磁贴主题色切换尚未接入。')
+}
+
+if ($windowCode -match 'FileTypeFilter\.Add\("\*"\)' -or
+    $windowCode -notmatch '"\.png"' -or
+    $tileCode -notmatch 'AttachmentImageControl') {
+    $failures.Add('图片选择器仍允许非图片文件，或图片没有直接显示在磁贴中。')
+}
+
+if ($attachmentImageCode -notmatch 'ManipulationModes\.TranslateX' -or
+    $attachmentImageCode -notmatch 'ManipulationModes\.Scale' -or
+    $attachmentImageCode -notmatch 'PointerWheelChanged' -or
+    $attachmentImageCode -notmatch 'Microsoft\.UI\.Input\.PointerDeviceType\.Mouse' -or
+    $attachmentImageCode -notmatch 'RectangleGeometry' -or
+    $attachmentImageCode -notmatch 'ViewportHeight') {
+    $failures.Add('磁贴图片缺少移动、缩放或非破坏性裁切交互。')
+}
+
+if ($dataCode -notmatch 'Scale = a\.Scale' -or
+    $dataCode -notmatch 'OffsetX = a\.OffsetX' -or
+    $dataCode -notmatch 'ViewportHeight = a\.ViewportHeight') {
+    $failures.Add('图片缩放、位置或裁切视窗没有持久化。')
 }
 
 if ($dataCode -notmatch 'AppContext\.BaseDirectory' -or $dataCode -notmatch 'pancake\.json' -or $windowCode -notmatch 'ScheduleSave') {

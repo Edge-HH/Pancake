@@ -405,24 +405,36 @@ public sealed class SubjectTileControl : Grid
             if (_isEditing)
             {
                 StackPanel actions = new() { Orientation = Orientation.Horizontal };
-                actions.Children.Add(CreateIconButton("\uE723", "添加附件", async (_, _) => await _addAttachment(homework)));
+                actions.Children.Add(CreateIconButton("\uE723", "添加图片", async (_, _) => await _addAttachment(homework)));
                 actions.Children.Add(CreateIconButton("\uE74D", "删除这条作业", (_, _) => DeleteHomework(homework), true));
                 Grid.SetColumn(actions, 2);
                 row.Children.Add(actions);
             }
 
             _entriesPanel.Children.Add(row);
-            if (homework.Attachments.Count > 0)
+            foreach (AttachmentItem attachment in homework.Attachments.Where(item => item.Kind == "图片" && !string.IsNullOrWhiteSpace(item.Path)))
             {
-                _entriesPanel.Children.Add(new TextBlock
+                AttachmentImageControl image = new(
+                    attachment,
+                    () => DeleteAttachment(homework, attachment),
+                    _contentChanged,
+                    _interactionChanged)
                 {
-                    Text = $"{homework.Attachments.Count} 个附件", FontSize = 11,
-                    Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 164, 164, 180)),
-                    Margin = new Thickness(29, -5, 0, 2)
-                });
+                    Margin = new Thickness(29, -4, 4, 4)
+                };
+                image.SetEditing(_isEditing);
+                _entriesPanel.Children.Add(image);
             }
             index++;
         }
+    }
+
+    private void DeleteAttachment(HomeworkEntry homework, AttachmentItem attachment)
+    {
+        homework.Attachments.Remove(attachment);
+        homework.NotifyAttachmentsChanged();
+        RebuildEntries();
+        _contentChanged();
     }
 
     private RichEditBox CreateRichEditor(HomeworkEntry homework)
@@ -442,11 +454,7 @@ public sealed class SubjectTileControl : Grid
         editor.TextChanged += (_, _) =>
         {
             if (!documentReady) return;
-            editor.Document.GetText(TextGetOptions.None, out string plain);
-            editor.Document.GetText(TextGetOptions.FormatRtf, out string rtf);
-            homework.Content = plain.TrimEnd('\r');
-            homework.RtfContent = rtf;
-            _contentChanged();
+            CaptureRichText(editor, homework);
         };
         editor.Loaded += (_, _) =>
         {
@@ -456,6 +464,7 @@ public sealed class SubjectTileControl : Grid
             editor.IsReadOnly = false;
             editor.Document.SetText(string.IsNullOrWhiteSpace(homework.RtfContent) ? TextSetOptions.None : TextSetOptions.FormatRtf,
                 string.IsNullOrWhiteSpace(homework.RtfContent) ? homework.Content : homework.RtfContent);
+            bool repairedTrailingParagraphs = RemoveGeneratedTrailingParagraphs(editor, homework.Content);
             if (string.IsNullOrWhiteSpace(homework.RtfContent) && homework.Content.Length > 0)
             {
                 editor.Document.GetRange(0, homework.Content.Length).CharacterFormat.ForegroundColor =
@@ -463,6 +472,10 @@ public sealed class SubjectTileControl : Grid
             }
             editor.IsReadOnly = readOnly;
             documentReady = true;
+            if (repairedTrailingParagraphs)
+            {
+                CaptureRichText(editor, homework);
+            }
         };
         return editor;
     }
@@ -493,11 +506,43 @@ public sealed class SubjectTileControl : Grid
 
     private void CaptureRichText(RichEditBox editor, HomeworkEntry homework)
     {
-        editor.Document.GetText(TextGetOptions.None, out string plain);
-        editor.Document.GetText(TextGetOptions.FormatRtf, out string rtf);
-        homework.Content = plain.TrimEnd('\r');
-        homework.RtfContent = rtf;
+        var contentRange = editor.Document.GetRange(0, int.MaxValue);
+        if (contentRange.EndPosition > 0)
+        {
+            // RichEditBox 的最后一个字符是控件维护的段落标记，不属于用户内容。
+            contentRange.EndPosition -= 1;
+        }
+
+        contentRange.GetText(TextGetOptions.None, out string plain);
+        contentRange.GetText(TextGetOptions.FormatRtf, out string rtf);
+        homework.Content = plain;
+        homework.RtfContent = rtf.TrimEnd('\0');
         _contentChanged();
+    }
+
+    private static bool RemoveGeneratedTrailingParagraphs(RichEditBox editor, string expectedPlainText)
+    {
+        editor.Document.GetText(TextGetOptions.None, out string loadedText);
+        string loadedContent = loadedText.EndsWith('\r') ? loadedText[..^1] : loadedText;
+        if (loadedContent.Length <= expectedPlainText.Length ||
+            !loadedContent.StartsWith(expectedPlainText, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> unexpectedTail = loadedContent.AsSpan(expectedPlainText.Length);
+        foreach (char character in unexpectedTail)
+        {
+            if (character is not ('\r' or '\n'))
+            {
+                return false;
+            }
+        }
+
+        // 旧版本把 RichEditBox 自动段落写进 RTF；纯文本是可信边界，只删除其后的换行。
+        var trailingRange = editor.Document.GetRange(expectedPlainText.Length, int.MaxValue);
+        trailingRange.SetText(TextSetOptions.None, string.Empty);
+        return true;
     }
 
     private Button CreateColorFlyoutButton(string glyph, string tooltip, RichEditBox editor, HomeworkEntry homework, bool isHighlight)

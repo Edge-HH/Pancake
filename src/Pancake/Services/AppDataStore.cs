@@ -7,7 +7,7 @@ namespace Pancake.Services;
 
 public sealed class AppState
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
     public BoardSettingsState Settings { get; set; } = new();
     public List<SubjectState> Subjects { get; set; } = [];
 }
@@ -49,6 +49,10 @@ public sealed class AttachmentState
     public string Name { get; set; } = string.Empty;
     public string Kind { get; set; } = "文件";
     public string Path { get; set; } = string.Empty;
+    public double Scale { get; set; } = 1;
+    public double OffsetX { get; set; }
+    public double OffsetY { get; set; }
+    public double ViewportHeight { get; set; } = 180;
 }
 
 public sealed class InkStrokeState
@@ -99,7 +103,16 @@ public sealed class AppDataStore
             {
                 HomeworkEntry homework = new() { Content = item.Content, RtfContent = item.RtfContent, HasHandwriting = item.HasHandwriting };
                 foreach (AttachmentState attachment in item.Attachments)
-                    homework.Attachments.Add(new AttachmentItem { Name = attachment.Name, Kind = attachment.Kind, Path = attachment.Path });
+                    homework.Attachments.Add(new AttachmentItem
+                    {
+                        Name = attachment.Name,
+                        Kind = attachment.Kind,
+                        Path = attachment.Path,
+                        Scale = attachment.Scale <= 0 ? 1 : attachment.Scale,
+                        OffsetX = attachment.OffsetX,
+                        OffsetY = attachment.OffsetY,
+                        ViewportHeight = attachment.ViewportHeight <= 0 ? 180 : attachment.ViewportHeight
+                    });
                 subject.Entries.Add(homework);
             }
             foreach (InkStrokeState item in saved.InkStrokes)
@@ -120,7 +133,16 @@ public sealed class AppDataStore
         Entries = subject.Entries.Select(item => new HomeworkState
         {
             Content = item.Content, RtfContent = item.RtfContent, HasHandwriting = item.HasHandwriting,
-            Attachments = item.Attachments.Select(a => new AttachmentState { Name = a.Name, Kind = a.Kind, Path = a.Path }).ToList()
+            Attachments = item.Attachments.Select(a => new AttachmentState
+            {
+                Name = a.Name,
+                Kind = a.Kind,
+                Path = a.Path,
+                Scale = a.Scale,
+                OffsetX = a.OffsetX,
+                OffsetY = a.OffsetY,
+                ViewportHeight = a.ViewportHeight
+            }).ToList()
         }).ToList(),
         InkStrokes = subject.InkStrokes.Select(stroke => new InkStrokeState
         {

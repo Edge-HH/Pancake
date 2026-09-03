@@ -28,10 +28,39 @@ public abstract class ObservableObject : INotifyPropertyChanged
 
 public sealed class AttachmentItem : ObservableObject
 {
+    private double _scale = 1;
+    private double _offsetX;
+    private double _offsetY;
+    private double _viewportHeight = 180;
+
     public required string Name { get; init; }
     public string Kind { get; init; } = "文件";
     public string Path { get; init; } = string.Empty;
     public string Glyph => Kind == "图片" ? "\uEB9F" : Kind == "PDF" ? "\uEA90" : "\uE8A5";
+
+    public double Scale
+    {
+        get => _scale;
+        set => SetProperty(ref _scale, value);
+    }
+
+    public double OffsetX
+    {
+        get => _offsetX;
+        set => SetProperty(ref _offsetX, value);
+    }
+
+    public double OffsetY
+    {
+        get => _offsetY;
+        set => SetProperty(ref _offsetY, value);
+    }
+
+    public double ViewportHeight
+    {
+        get => _viewportHeight;
+        set => SetProperty(ref _viewportHeight, value);
+    }
 }
 
 public sealed class HomeworkEntry : ObservableObject
@@ -80,7 +109,7 @@ public sealed class HomeworkEntry : ObservableObject
 
             if (Attachments.Count > 0)
             {
-                details.Add($"{Attachments.Count} 个附件");
+                details.Add($"{Attachments.Count} 张图片");
             }
 
             return details.Count == 0 ? "仅文字" : string.Join(" · ", details);
@@ -98,7 +127,11 @@ public sealed class HomeworkEntry : ObservableObject
             {
                 Name = attachment.Name,
                 Kind = attachment.Kind,
-                Path = attachment.Path
+                Path = attachment.Path,
+                Scale = attachment.Scale,
+                OffsetX = attachment.OffsetX,
+                OffsetY = attachment.OffsetY,
+                ViewportHeight = attachment.ViewportHeight
             });
         }
 

@@ -279,7 +279,7 @@ public sealed partial class MainWindow : Window
 
     private async void DeleteSubject(SubjectBoard subject)
     {
-        if (await ShowConfirmAsync("删除这个科目", $"确定删除“{subject.Name}”以及其中的文字、附件和笔迹吗？") != ContentDialogResult.Primary) return;
+        if (await ShowConfirmAsync("删除这个科目", $"确定删除“{subject.Name}”以及其中的文字、图片和笔迹吗？") != ContentDialogResult.Primary) return;
         ViewModel.Subjects.Remove(subject);
         BuildTiles();
         ScheduleSave();
@@ -317,21 +317,20 @@ public sealed partial class MainWindow : Window
     private async Task AddAttachmentAsync(HomeworkEntry homework)
     {
         FileOpenPicker picker = new();
-        picker.FileTypeFilter.Add("*");
+        foreach (string extension in new[] { ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif" })
+        {
+            picker.FileTypeFilter.Add(extension);
+        }
         nint windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         WinRT.Interop.InitializeWithWindow.Initialize(picker, windowHandle);
         StorageFile? file = await picker.PickSingleFileAsync();
         if (file is null) return;
-        string extension = file.FileType.ToLowerInvariant();
-        string kind = extension == ".pdf" ? "PDF" : IsImageExtension(extension) ? "图片" : "文件";
-        homework.Attachments.Add(new AttachmentItem { Name = file.Name, Kind = kind, Path = file.Path });
+        homework.Attachments.Add(new AttachmentItem { Name = file.Name, Kind = "图片", Path = file.Path });
         homework.NotifyAttachmentsChanged();
         BuildTiles();
         SetTilesEditing(_isEditing);
         ScheduleSave();
     }
-
-    private static bool IsImageExtension(string extension) => extension is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".webp";
 
     private void UpdateBoardBounds()
     {
@@ -586,7 +585,7 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void ExportDataButton_Click(object sender, RoutedEventArgs e) => await ShowMessageAsync("导出备份包", "完整功能阶段会把磁贴布局、文字、附件和可继续编辑的笔迹一起打包导出。", "完成");
+    private async void ExportDataButton_Click(object sender, RoutedEventArgs e) => await ShowMessageAsync("导出备份包", "完整功能阶段会把磁贴布局、文字、图片和可继续编辑的笔迹一起打包导出。", "完成");
     private async void ImportDataButton_Click(object sender, RoutedEventArgs e) => await ShowMessageAsync("导入备份包", "完整功能阶段会校验备份包，再恢复磁贴布局与内容。", "完成");
     private void FullScreenButton_Click(object sender, RoutedEventArgs e) => SetFullScreen(!_isFullScreen);
 
