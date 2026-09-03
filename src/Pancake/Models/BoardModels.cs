@@ -32,6 +32,11 @@ public sealed class AttachmentItem : ObservableObject
     private double _offsetX;
     private double _offsetY;
     private double _viewportHeight = 180;
+    private double _frameWidth = 360;
+    private double _aspectRatio;
+    private double _rotation;
+    private double _positionX;
+    private double _positionY;
 
     public required string Name { get; init; }
     public string Kind { get; init; } = "文件";
@@ -61,6 +66,12 @@ public sealed class AttachmentItem : ObservableObject
         get => _viewportHeight;
         set => SetProperty(ref _viewportHeight, value);
     }
+
+    public double FrameWidth { get => _frameWidth; set => SetProperty(ref _frameWidth, value); }
+    public double AspectRatio { get => _aspectRatio; set => SetProperty(ref _aspectRatio, value); }
+    public double Rotation { get => _rotation; set => SetProperty(ref _rotation, value); }
+    public double PositionX { get => _positionX; set => SetProperty(ref _positionX, value); }
+    public double PositionY { get => _positionY; set => SetProperty(ref _positionY, value); }
 }
 
 public sealed class HomeworkEntry : ObservableObject
@@ -131,7 +142,9 @@ public sealed class HomeworkEntry : ObservableObject
                 Scale = attachment.Scale,
                 OffsetX = attachment.OffsetX,
                 OffsetY = attachment.OffsetY,
-                ViewportHeight = attachment.ViewportHeight
+                ViewportHeight = attachment.ViewportHeight,
+                FrameWidth = attachment.FrameWidth, AspectRatio = attachment.AspectRatio, Rotation = attachment.Rotation,
+                PositionX = attachment.PositionX, PositionY = attachment.PositionY
             });
         }
 

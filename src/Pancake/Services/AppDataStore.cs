@@ -53,6 +53,11 @@ public sealed class AttachmentState
     public double OffsetX { get; set; }
     public double OffsetY { get; set; }
     public double ViewportHeight { get; set; } = 180;
+    public double FrameWidth { get; set; } = 360;
+    public double AspectRatio { get; set; }
+    public double Rotation { get; set; }
+    public double PositionX { get; set; }
+    public double PositionY { get; set; }
 }
 
 public sealed class InkStrokeState
@@ -111,7 +116,8 @@ public sealed class AppDataStore
                         Scale = attachment.Scale <= 0 ? 1 : attachment.Scale,
                         OffsetX = attachment.OffsetX,
                         OffsetY = attachment.OffsetY,
-                        ViewportHeight = attachment.ViewportHeight <= 0 ? 180 : attachment.ViewportHeight
+                        ViewportHeight = attachment.ViewportHeight <= 0 ? 180 : attachment.ViewportHeight,
+                        FrameWidth = attachment.FrameWidth <= 0 ? 360 : attachment.FrameWidth, AspectRatio = attachment.AspectRatio, Rotation = attachment.Rotation, PositionX = attachment.PositionX, PositionY = attachment.PositionY
                     });
                 subject.Entries.Add(homework);
             }
@@ -141,7 +147,8 @@ public sealed class AppDataStore
                 Scale = a.Scale,
                 OffsetX = a.OffsetX,
                 OffsetY = a.OffsetY,
-                ViewportHeight = a.ViewportHeight
+                ViewportHeight = a.ViewportHeight,
+                FrameWidth = a.FrameWidth, AspectRatio = a.AspectRatio, Rotation = a.Rotation, PositionX = a.PositionX, PositionY = a.PositionY
             }).ToList()
         }).ToList(),
         InkStrokes = subject.InkStrokes.Select(stroke => new InkStrokeState

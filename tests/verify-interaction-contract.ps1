@@ -82,14 +82,23 @@ if ($windowCode -match 'FileTypeFilter\.Add\("\*"\)' -or
 }
 
 if ($attachmentImageCode -notmatch 'ManipulationModes\.TranslateX' -or
-    $attachmentImageCode -notmatch 'ManipulationModes\.Scale' -or
-    $attachmentImageCode -notmatch 'PointerWheelChanged' -or
-    $attachmentImageCode -notmatch 'Microsoft\.UI\.Input\.PointerDeviceType\.Mouse' -or
-    $attachmentImageCode -notmatch 'RectangleGeometry' -or
-    $attachmentImageCode -notmatch 'ViewportHeight') {
-    $failures.Add('磁贴图片缺少移动、缩放或非破坏性裁切交互。')
+    $attachmentImageCode -notmatch 'Microsoft\.UI\.Input\.PointerDeviceType\.Mouse') {
+    $failures.Add('磁贴图片缺少中央拖拽移动交互。')
 }
 
+if (([regex]::Matches($attachmentImageCode, 'AddResizeHandle\(')).Count -lt 8 -or
+    $attachmentImageCode -notmatch 'ResizeDelta' -or
+    $attachmentImageCode -match 'PointerWheelChanged') {
+    $failures.Add('图片必须通过四角和四边中点拖拽缩放，不能依赖滚轮缩放。')
+}
+
+if ($attachmentImageCode -notmatch 'Name = "SelectionBorder"' -or
+    $attachmentImageCode -notmatch 'Grid\.SetRow\(_toolbar, 1\)' -or
+    $attachmentImageCode -notmatch 'CreateIconButton' -or
+    $attachmentImageCode -notmatch 'RotateImage\(90\)' -or
+    $attachmentImageCode -notmatch 'RotateImage\(-90\)') {
+    $failures.Add('点击图片后必须显示选中框和下方的图标控件。')
+}
 if ($dataCode -notmatch 'Scale = a\.Scale' -or
     $dataCode -notmatch 'OffsetX = a\.OffsetX' -or
     $dataCode -notmatch 'ViewportHeight = a\.ViewportHeight') {
