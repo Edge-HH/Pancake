@@ -27,7 +27,7 @@ try {
     "WeatherCityCode": "101010100",
     "GridSnappingEnabled": true,
     "AutoUpdateEnabled": false,
-    "UpdateRepository": "MEMZ-Edge01/Pancake"
+    "UpdateRepository": "Edge-HH/Pancake"
   },
   "Subjects": [
     { "Name": "Math", "AccentHex": "#65D46E", "X": 48, "Y": 48, "Width": 384, "Height": 240, "Entries": [], "InkStrokes": [] },

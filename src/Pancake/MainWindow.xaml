@@ -110,7 +110,7 @@
                     <StackPanel Spacing="18">
                         <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="软件更新" />
                         <ToggleSwitch x:Name="AutoUpdateToggle" Header="启动时自动检查 GitHub Release" IsOn="True" Toggled="AutoUpdateToggle_Toggled" />
-                        <TextBox x:Name="UpdateRepositoryTextBox" Header="GitHub 仓库" Text="MEMZ-Edge01/Pancake" LostFocus="UpdateRepositoryTextBox_LostFocus" />
+                        <TextBox x:Name="UpdateRepositoryTextBox" Header="GitHub 仓库" Text="Edge-HH/Pancake" LostFocus="UpdateRepositoryTextBox_LostFocus" />
                         <StackPanel Orientation="Horizontal" Spacing="10">
                             <Button Click="CheckUpdateButton_Click" Style="{StaticResource BoardPrimaryButtonStyle}" Content="立即检查" />
                             <TextBlock x:Name="UpdateStatusText" MaxWidth="560" VerticalAlignment="Center" FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="尚未检查" TextWrapping="Wrap" />

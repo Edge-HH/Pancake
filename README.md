@@ -50,7 +50,7 @@ Pancake 将时间、日期、天气、教室噪音和各科作业集中在一块
 ### 命令行
 
 ```powershell
-git clone https://github.com/MEMZ-Edge01/Pancake.git
+git clone https://github.com/Edge-HH/Pancake.git
 cd Pancake
 dotnet restore .\Pancake.slnx
 dotnet build .\Pancake.slnx -c Release -p:Platform=x64

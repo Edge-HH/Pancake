@@ -21,7 +21,7 @@ public sealed class BoardSettingsState
     public string WeatherCityCode { get; set; } = "101010100";
     public bool GridSnappingEnabled { get; set; } = true;
     public bool AutoUpdateEnabled { get; set; } = true;
-    public string UpdateRepository { get; set; } = "MEMZ-Edge01/Pancake";
+    public string UpdateRepository { get; set; } = "Edge-HH/Pancake";
 }
 
 public sealed class SubjectState
