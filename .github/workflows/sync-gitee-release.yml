@@ -1,7 +1,7 @@
 name: Sync Release to Gitee
 
 on:
-  # GitHub 发布 Release 后自动同步
+  # GitHub 发布 Release 时自动同步
   release:
     types:
       - published
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "要同步的 Release Tag，例如 v1.0.0"
+        description: "要同步的 GitHub Release Tag，例如 v1.0.0"
         required: true
         type: string
 
@@ -29,7 +29,7 @@ jobs:
 
     steps:
       # ============================================================
-      # 1. 获取需要同步的 Tag
+      # 1. 确定需要同步的 Tag
       # ============================================================
       - name: Resolve Release Tag
         id: release
@@ -77,7 +77,7 @@ jobs:
             > github-release.json
 
           echo ""
-          echo "Release 信息："
+          echo "GitHub Release 信息："
 
           jq '{
             tag: .tag_name,
@@ -90,12 +90,11 @@ jobs:
 
 
       # ============================================================
-      # 3. 等待 Gitee 自带镜像同步 Tag
+      # 3. 等待 Gitee 自带镜像把 Tag 同步过去
       #
-      # Gitee 的 GitHub 镜像同步可能比 GitHub Release Action 慞几十秒
-      # 所以这里最多等待约 5 分钟
-      #
-      # 注意：这里只查询 Tag，不上传任何 Git 对象
+      # 不 push 任何 Git 对象
+      # 这里只做 ls-remote 检查
+      # 最多等待约 5 分钟
       # ============================================================
       - name: Wait for Gitee Mirror Tag
         shell: bash
@@ -106,7 +105,7 @@ jobs:
           set -euo pipefail
 
           if [ -z "${GITEE_TOKEN}" ]; then
-            echo "❌ 没有设置 GITEE_TOKEN"
+            echo "❌ GitHub Secret GITEE_TOKEN 未配置"
             exit 1
           fi
 
@@ -119,11 +118,11 @@ jobs:
 
           GITEE_URL="https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}.git"
 
-          echo "等待 Gitee 镜像出现 Tag: ${TAG}"
+          echo "等待 Gitee 镜像同步 Tag: ${TAG}"
 
           for i in {1..20}; do
 
-            echo "检查 Tag，第 ${i}/20 次..."
+            echo "检查 ${i}/20 ..."
 
             if GIT_TERMINAL_PROMPT=0 \
               git \
@@ -132,11 +131,12 @@ jobs:
                 --tags \
                 "${GITEE_URL}" \
                 "refs/tags/${TAG}" \
+                2>/dev/null \
               | grep -q "refs/tags/${TAG}$"
             then
 
               echo ""
-              echo "✅ Gitee 已同步 Tag: ${TAG}"
+              echo "✅ Gitee 已存在 Tag: ${TAG}"
               exit 0
 
             fi
@@ -148,14 +148,14 @@ jobs:
           done
 
           echo ""
-          echo "❌ 等待 Gitee Tag 超时。"
+          echo "❌ 等待 Gitee Tag 超时"
           echo ""
           echo "请检查："
-          echo "1. Gitee 仓库镜像是否已经开启自动同步"
-          echo "2. GitHub 是否已经存在 ${TAG}"
-          echo "3. Gitee 镜像是否同步完成"
+          echo "1. Gitee 仓库镜像是否开启"
+          echo "2. 是否开启自动同步"
+          echo "3. Gitee 是否已经同步 ${TAG}"
           echo ""
-          echo "等 Gitee Tag 出现后，可以手动重新运行本 Workflow。"
+          echo "Tag 同步完成后，可以手动重新运行此 Workflow。"
 
           exit 1
 
@@ -175,14 +175,14 @@ jobs:
 
           ASSET_COUNT=$(jq '.assets | length' github-release.json)
 
-          echo "附件数量: ${ASSET_COUNT}"
+          echo "GitHub Release 附件数量: ${ASSET_COUNT}"
 
           if [ "${ASSET_COUNT}" -eq 0 ]; then
             echo "ℹ️ 当前 Release 没有附件"
             exit 0
           fi
 
-          echo "开始下载 GitHub Release 附件..."
+          echo "开始下载附件..."
 
           gh release download \
             "${TAG}" \
@@ -190,16 +190,21 @@ jobs:
             --dir assets
 
           echo ""
-          echo "下载完成："
+          echo "附件下载完成："
 
           ls -lh assets/
 
 
-         # ============================================================
-      # 5. 删除旧 Release，并重新创建
       # ============================================================
-      - name: Recreate Gitee Release
-        id: gitee_release
+      # 5. 查询 Gitee Release 列表
+      #
+      # 不再使用：
+      # /releases/tags/{tag}
+      #
+      # 因为你实际遇到了返回 200 但没有 id 的情况
+      # ============================================================
+      - name: Find Existing Gitee Release
+        id: find_release
         shell: bash
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
@@ -209,129 +214,318 @@ jobs:
 
           API_BASE="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
 
-          RELEASE_NAME=$(jq -r '.name // .tag_name' github-release.json)
-          RELEASE_BODY=$(jq -r '.body // ""' github-release.json)
+          echo "查找 Gitee Release: ${TAG}"
 
-          TAG_ENCODED=$(jq -rn \
-            --arg tag "${TAG}" \
-            '$tag | @uri')
+          FOUND_ID=""
 
-          echo "检查 Gitee 是否已有 Release: ${TAG}"
+          # 最多查询 10 页，每页 100 个 Release
+          for PAGE in {1..10}; do
 
-          HTTP_CODE=$(curl \
-            --silent \
-            --show-error \
-            --output old-release.json \
-            --write-out "%{http_code}" \
-            --retry 3 \
-            --retry-all-errors \
-            -H "Authorization: Bearer ${GITEE_TOKEN}" \
-            "${API_BASE}/releases/tags/${TAG_ENCODED}")
+            echo "查询 Release 列表，第 ${PAGE} 页..."
 
-          # 已存在 -> 删除整个 Release
-          if [ "${HTTP_CODE}" = "200" ]; then
+            RESPONSE_FILE="gitee-releases-${PAGE}.json"
 
-            OLD_RELEASE_ID=$(jq -r '.id' old-release.json)
-
-            echo "发现已有 Gitee Release"
-            echo "Release ID: ${OLD_RELEASE_ID}"
-            echo "删除旧 Release..."
-
-            DELETE_CODE=$(curl \
+            HTTP_CODE=$(curl \
               --silent \
               --show-error \
-              --output delete-response.txt \
+              --output "${RESPONSE_FILE}" \
               --write-out "%{http_code}" \
               --retry 3 \
+              --retry-delay 2 \
               --retry-all-errors \
-              -X DELETE \
               -H "Authorization: Bearer ${GITEE_TOKEN}" \
-              "${API_BASE}/releases/${OLD_RELEASE_ID}")
+              "${API_BASE}/releases?page=${PAGE}&per_page=100&direction=desc")
 
-            if [ "${DELETE_CODE}" -ge 200 ] && [ "${DELETE_CODE}" -lt 300 ]; then
-              echo "✅ 旧 Release 已删除"
-            else
-              echo "❌ 删除旧 Release 失败"
-              echo "HTTP: ${DELETE_CODE}"
-              cat delete-response.txt || true
+            if [ "${HTTP_CODE}" -lt 200 ] || [ "${HTTP_CODE}" -ge 300 ]; then
+
+              echo "❌ 获取 Gitee Release 列表失败"
+              echo "HTTP: ${HTTP_CODE}"
+
+              cat "${RESPONSE_FILE}" || true
+
               exit 1
+
             fi
 
-          elif [ "${HTTP_CODE}" = "404" ]; then
+            # 确认响应是数组
+            if ! jq -e 'type == "array"' "${RESPONSE_FILE}" >/dev/null; then
 
-            echo "当前 Tag 还没有 Gitee Release"
+              echo "❌ Gitee Release API 返回格式异常："
+
+              cat "${RESPONSE_FILE}"
+
+              exit 1
+
+            fi
+
+            FOUND_ID=$(jq -r \
+              --arg TAG "${TAG}" \
+              '.[] |
+               select(.tag_name == $TAG) |
+               .id // empty' \
+              "${RESPONSE_FILE}" \
+              | head -n 1)
+
+            if [ -n "${FOUND_ID}" ]; then
+              break
+            fi
+
+            COUNT=$(jq 'length' "${RESPONSE_FILE}")
+
+            # 少于 100 条说明已经到最后一页
+            if [ "${COUNT}" -lt 100 ]; then
+              break
+            fi
+
+          done
+
+          if [ -n "${FOUND_ID}" ]; then
+
+            echo ""
+            echo "✅ 找到已有 Gitee Release"
+            echo "Release ID: ${FOUND_ID}"
+
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "release_id=${FOUND_ID}" >> "$GITHUB_OUTPUT"
 
           else
 
-            echo "❌ 查询 Gitee Release 失败"
-            echo "HTTP: ${HTTP_CODE}"
-            cat old-release.json || true
-            exit 1
+            echo ""
+            echo "ℹ️ Gitee 中不存在 Release: ${TAG}"
+
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "release_id=" >> "$GITHUB_OUTPUT"
 
           fi
 
 
-          echo ""
-          echo "创建新的 Gitee Release..."
+      # ============================================================
+      # 6. 如果已有同 Tag Release，则删除
+      #
+      # Tag 不会被删除
+      # 这里只删除 Gitee Release 记录和其附件
+      # ============================================================
+      - name: Delete Existing Gitee Release
+        if: steps.find_release.outputs.exists == 'true'
+        shell: bash
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          RELEASE_ID: ${{ steps.find_release.outputs.release_id }}
+        run: |
+          set -euo pipefail
 
-          CREATE_CODE=$(curl \
+          API_BASE="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
+
+          if [ -z "${RELEASE_ID}" ] || [ "${RELEASE_ID}" = "null" ]; then
+
+            echo "❌ Release ID 无效"
+            echo "RELEASE_ID=${RELEASE_ID}"
+
+            exit 1
+
+          fi
+
+          echo "删除旧 Gitee Release..."
+          echo "Release ID: ${RELEASE_ID}"
+
+          RESPONSE_FILE=$(mktemp)
+
+          HTTP_CODE=$(curl \
             --silent \
             --show-error \
-            --output gitee-release.json \
+            --output "${RESPONSE_FILE}" \
             --write-out "%{http_code}" \
             --retry 3 \
+            --retry-delay 2 \
+            --retry-all-errors \
+            -X DELETE \
+            -H "Authorization: Bearer ${GITEE_TOKEN}" \
+            "${API_BASE}/releases/${RELEASE_ID}")
+
+          if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
+
+            echo "✅ 旧 Gitee Release 已删除"
+
+          else
+
+            echo "❌ 删除旧 Gitee Release 失败"
+            echo "HTTP: ${HTTP_CODE}"
+
+            cat "${RESPONSE_FILE}" || true
+
+            rm -f "${RESPONSE_FILE}"
+
+            exit 1
+
+          fi
+
+          rm -f "${RESPONSE_FILE}"
+
+
+      # ============================================================
+      # 7. 创建新的 Gitee Release
+      # ============================================================
+      - name: Create Gitee Release
+        id: create_release
+        shell: bash
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          API_BASE="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
+
+          RELEASE_NAME=$(jq -r '
+            if (.name // "") == ""
+            then .tag_name
+            else .name
+            end
+          ' github-release.json)
+
+          RELEASE_BODY=$(jq -r '.body // ""' github-release.json)
+
+          PRERELEASE=$(jq -r '.prerelease // false' github-release.json)
+
+          echo "创建 Gitee Release..."
+          echo "Tag: ${TAG}"
+          echo "Name: ${RELEASE_NAME}"
+
+          HTTP_CODE=$(curl \
+            --silent \
+            --show-error \
+            --output gitee-created-release.json \
+            --write-out "%{http_code}" \
+            --retry 3 \
+            --retry-delay 2 \
             --retry-all-errors \
             -X POST \
             -H "Authorization: Bearer ${GITEE_TOKEN}" \
             --data-urlencode "tag_name=${TAG}" \
             --data-urlencode "name=${RELEASE_NAME}" \
             --data-urlencode "body=${RELEASE_BODY}" \
+            --data-urlencode "prerelease=${PRERELEASE}" \
             "${API_BASE}/releases")
 
-          if [ "${CREATE_CODE}" -lt 200 ] || [ "${CREATE_CODE}" -ge 300 ]; then
+          if [ "${HTTP_CODE}" -lt 200 ] || [ "${HTTP_CODE}" -ge 300 ]; then
+
             echo "❌ 创建 Gitee Release 失败"
-            echo "HTTP: ${CREATE_CODE}"
-            cat gitee-release.json || true
+            echo "HTTP: ${HTTP_CODE}"
+
+            cat gitee-created-release.json || true
+
             exit 1
+
           fi
 
-          RELEASE_ID=$(jq -r '.id' gitee-release.json)
+          RELEASE_ID=$(jq -r '.id // empty' gitee-created-release.json)
 
-          if [ -z "${RELEASE_ID}" ] || [ "${RELEASE_ID}" = "null" ]; then
-            echo "❌ 没有获取到 Gitee Release ID"
-            cat gitee-release.json
-            exit 1
+          if [ -n "${RELEASE_ID}" ]; then
+
+            echo ""
+            echo "✅ Gitee Release 创建成功"
+            echo "Release ID: ${RELEASE_ID}"
+
+            echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+
+            exit 0
+
           fi
 
-          echo "✅ 新 Release 创建成功"
-          echo "Release ID: ${RELEASE_ID}"
+          # --------------------------------------------------------
+          # 创建响应没有 ID 时，再从 Release 列表重新查询
+          # --------------------------------------------------------
+          echo ""
+          echo "⚠️ 创建接口没有直接返回 Release ID"
+          echo "重新从 Release 列表查询..."
 
-          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+          FOUND_ID=""
+
+          for PAGE in {1..10}; do
+
+            RESPONSE_FILE="gitee-new-releases-${PAGE}.json"
+
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              --retry 3 \
+              --retry-delay 2 \
+              --retry-all-errors \
+              -H "Authorization: Bearer ${GITEE_TOKEN}" \
+              "${API_BASE}/releases?page=${PAGE}&per_page=100&direction=desc" \
+              > "${RESPONSE_FILE}"
+
+            FOUND_ID=$(jq -r \
+              --arg TAG "${TAG}" \
+              '.[] |
+               select(.tag_name == $TAG) |
+               .id // empty' \
+              "${RESPONSE_FILE}" \
+              | head -n 1)
+
+            if [ -n "${FOUND_ID}" ]; then
+              break
+            fi
+
+            COUNT=$(jq 'length' "${RESPONSE_FILE}")
+
+            if [ "${COUNT}" -lt 100 ]; then
+              break
+            fi
+
+          done
+
+          if [ -z "${FOUND_ID}" ] || [ "${FOUND_ID}" = "null" ]; then
+
+            echo "❌ 创建成功后仍然无法获取 Gitee Release ID"
+            echo ""
+            echo "创建接口响应："
+
+            cat gitee-created-release.json || true
+
+            exit 1
+
+          fi
+
+          echo ""
+          echo "✅ 找到新 Gitee Release"
+          echo "Release ID: ${FOUND_ID}"
+
+          echo "release_id=${FOUND_ID}" >> "$GITHUB_OUTPUT"
 
 
       # ============================================================
-      # 6. 上传 Release 附件
+      # 8. 上传 GitHub Release 附件到 Gitee
       # ============================================================
       - name: Upload Assets to Gitee
         shell: bash
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          RELEASE_ID: ${{ steps.gitee_release.outputs.release_id }}
+          RELEASE_ID: ${{ steps.create_release.outputs.release_id }}
         run: |
           set -euo pipefail
 
           API_BASE="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
+
+          if [ -z "${RELEASE_ID}" ] || [ "${RELEASE_ID}" = "null" ]; then
+
+            echo "❌ 无效的 Release ID: ${RELEASE_ID}"
+            exit 1
+
+          fi
 
           shopt -s nullglob
 
           FILES=(assets/*)
 
           if [ ${#FILES[@]} -eq 0 ]; then
-            echo "ℹ️ 没有附件需要上传"
+            echo "ℹ️ 当前 Release 没有附件需要上传"
             exit 0
           fi
 
           echo "准备上传 ${#FILES[@]} 个附件"
+          echo "Gitee Release ID: ${RELEASE_ID}"
 
           for FILE in "${FILES[@]}"; do
 
@@ -362,12 +556,14 @@ jobs:
 
             if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
 
+              echo ""
               echo "✅ 上传成功: ${FILE_NAME}"
 
-              DOWNLOAD_URL=$(jq -r \
-                '.browser_download_url // .download_url // empty' \
-                "${RESPONSE_FILE}" \
-                2>/dev/null || true)
+              DOWNLOAD_URL=$(jq -r '
+                .browser_download_url //
+                .download_url //
+                empty
+              ' "${RESPONSE_FILE}" 2>/dev/null || true)
 
               if [ -n "${DOWNLOAD_URL}" ]; then
                 echo "下载地址: ${DOWNLOAD_URL}"
@@ -375,8 +571,10 @@ jobs:
 
             else
 
+              echo ""
               echo "❌ 上传失败: ${FILE_NAME}"
               echo "HTTP: ${HTTP_CODE}"
+              echo ""
 
               cat "${RESPONSE_FILE}" || true
 
@@ -392,7 +590,7 @@ jobs:
 
 
       # ============================================================
-      # 7. 完成
+      # 9. 完成
       # ============================================================
       - name: Sync Completed
         shell: bash
@@ -404,10 +602,12 @@ jobs:
           echo "       ✅ Gitee Release 同步完成"
           echo "========================================"
           echo ""
-          echo "版本: ${TAG}"
+          echo "版本:"
+          echo "${TAG}"
           echo ""
-          echo "GitHub:"
+          echo "GitHub Release:"
           echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
           echo ""
-          echo "Gitee:"
+          echo "Gitee Release:"
           echo "https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}/releases"
+          echo ""
