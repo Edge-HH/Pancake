@@ -9,6 +9,7 @@
             <SolidColorBrush x:Key="BoardSurfaceSecondaryBrush" Color="#1E1E28" />
             <SolidColorBrush x:Key="BoardSurfaceElevatedBrush" Color="#252532" />
             <SolidColorBrush x:Key="BoardTextBrush" Color="#F0F0F5" />
+            <SolidColorBrush x:Key="GitHubIconBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="BoardTextSecondaryBrush" Color="#A4A4B4" />
             <SolidColorBrush x:Key="BoardTextMutedBrush" Color="#737386" />
             <SolidColorBrush x:Key="BoardLineBrush" Color="#2A2A35" />
@@ -28,6 +29,7 @@
             <SolidColorBrush x:Key="BoardSurfaceSecondaryBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="BoardSurfaceElevatedBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="BoardTextBrush" Color="#000000" />
+            <SolidColorBrush x:Key="GitHubIconBrush" Color="#000000" />
             <SolidColorBrush x:Key="BoardTextSecondaryBrush" Color="#555568" />
             <SolidColorBrush x:Key="BoardTextMutedBrush" Color="#747486" />
             <SolidColorBrush x:Key="BoardLineBrush" Color="#D9D9E6" />

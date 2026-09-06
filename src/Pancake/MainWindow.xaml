@@ -87,7 +87,7 @@
                 <NavigationViewItem Content="组件" Tag="Components"><NavigationViewItem.Icon><FontIcon Glyph="&#xE80A;" /></NavigationViewItem.Icon></NavigationViewItem>
             </NavigationView.MenuItems>
             <NavigationView.FooterMenuItems>
-                <NavigationViewItem Content="关于" Tag="About"><NavigationViewItem.Icon><FontIcon Glyph="&#xE90F;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="关于" Tag="About"><NavigationViewItem.Icon><FontIcon Glyph="&#xE946;" /></NavigationViewItem.Icon></NavigationViewItem>
             </NavigationView.FooterMenuItems>
             <ScrollViewer x:Name="SettingsContentScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
             <StackPanel Padding="32,28,32,100" Spacing="28">
@@ -106,7 +106,7 @@
                                 <ComboBoxItem Content="深色" Tag="Dark" /><ComboBoxItem Content="浅色" Tag="Light" /><ComboBoxItem Content="跟随系统" Tag="Default" />
                             </ComboBox>
                         </Grid>
-                        <ComboBox x:Name="PaletteComboBox" Header="色系 · 文字、高光和磁贴" SelectedIndex="0" SelectionChanged="PaletteComboBox_SelectionChanged">
+                        <ComboBox x:Name="PaletteComboBox" Header="色系" SelectedIndex="0" SelectionChanged="PaletteComboBox_SelectionChanged">
                             <ComboBoxItem Content="鲜艳" /><ComboBoxItem Content="马卡龙" />
                         </ComboBox>
                     </StackPanel>
@@ -154,11 +154,11 @@
                         <Slider x:Name="NoiseThresholdSlider" Minimum="20" Maximum="120" StepFrequency="1" Value="60" ValueChanged="NoiseThresholdSlider_ValueChanged" />
                         <StackPanel Orientation="Horizontal" Spacing="20">
                             <ToggleSwitch x:Name="NoiseAlertToggle" Header="吵闹时播放提示音" Toggled="NoiseAlertToggle_Toggled" />
-                            <Button Content="试听 · 嘀嘀嘀" Click="PreviewNoiseAlert_Click" VerticalAlignment="Bottom" Style="{StaticResource BoardSecondaryButtonStyle}" />
+                            <Button Content="试听" Click="PreviewNoiseAlert_Click" VerticalAlignment="Bottom" Style="{StaticResource BoardSecondaryButtonStyle}" />
                         </StackPanel>
                         <TextBlock Text="先选择当前环境的实际音量，再点击校准；更换麦克风后请重新校准。" TextWrapping="Wrap" />
                         <NumberBox x:Name="CalibrationTargetBox" Header="当前环境音量（dB）" Minimum="20" Maximum="120" Value="40" SmallChange="1" SpinButtonPlacementMode="Inline" />
-                        <Button Content="校准到此音量" Click="CalibrateMicrophone_Click" Style="{StaticResource BoardPrimaryButtonStyle}" />
+                        <Button Content="校准" Click="CalibrateMicrophone_Click" Style="{StaticResource BoardPrimaryButtonStyle}" />
                         <TextBlock x:Name="MicrophoneCalibrationLabel" Text="校准偏移 · 0 dB" />
                         <InfoBar x:Name="MicrophoneStatusInfoBar" IsClosable="False" IsOpen="True" Severity="Informational" Message="正在等待麦克风启动" />
                     </StackPanel>
@@ -179,7 +179,14 @@
                                 <TextBlock Text="项目仓库" VerticalAlignment="Center" />
                                 <HyperlinkButton Grid.Column="1" NavigateUri="https://github.com/Edge-HH/Pancake" Background="{ThemeResource BoardSurfaceSecondaryBrush}" CornerRadius="8" Padding="14,8">
                                     <StackPanel Orientation="Horizontal" Spacing="12">
-                                        <FontIcon Glyph="&#xE943;" VerticalAlignment="Center" />
+                                        <Viewbox Width="24" Height="24" VerticalAlignment="Center">
+                                            <Path
+                                                Width="98"
+                                                Height="96"
+                                                Fill="{ThemeResource GitHubIconBrush}"
+                                                Stretch="Uniform"
+                                                Data="M48.854,0 C21.839,0 0,22 0,49.217 C0,70.973 13.993,89.389 33.405,95.902 C35.832,96.352 36.72,94.843 36.72,93.546 C36.72,92.382 36.675,88.513 36.654,84.407 C23.064,87.379 20.193,78.602 20.193,78.602 C17.97,72.892 14.765,71.372 14.765,71.372 C10.322,68.315 15.099,68.377 15.099,68.377 C20.011,68.725 22.599,73.455 22.599,73.455 C26.966,80.995 34.049,78.815 36.842,77.555 C37.282,74.365 38.55,72.195 39.95,70.965 C29.102,69.721 17.699,65.485 17.699,46.578 C17.699,41.192 19.615,36.788 22.767,33.332 C22.256,32.085 20.572,27.076 23.243,20.292 C23.243,20.292 27.38,18.96 36.791,25.352 C40.712,24.255 44.933,23.705 49.122,23.685 C53.311,23.705 57.532,24.255 61.472,25.352 C70.873,18.96 75.005,20.292 75.005,20.292 C77.682,27.076 75.999,32.085 75.488,33.332 C78.646,36.788 80.55,41.192 80.55,46.578 C80.55,65.533 69.125,69.708 58.25,70.93 C60.006,72.455 61.568,75.449 61.568,80.035 C61.568,86.615 61.511,91.905 61.511,93.532 C61.511,94.838 62.386,96.359 64.848,95.882 C84.013,89.36 98,70.95 98,49.217 C98,22 76.161,0 48.854,0 Z" />
+                                        </Viewbox>
                                         <StackPanel><TextBlock Text="Edge-HH/Pancake" FontWeight="SemiBold" /><TextBlock Text="在 GitHub 中打开" FontSize="12" Foreground="{ThemeResource BoardTextSecondaryBrush}" /></StackPanel>
                                     </StackPanel>
                                 </HyperlinkButton>
@@ -190,7 +197,7 @@
                         <StackPanel Spacing="16">
                             <TextBlock FontSize="22" Text="更新" />
                             <TextBlock Text="从 GitHub Releases 获取并安装最新版本。" Foreground="{ThemeResource BoardTextSecondaryBrush}" />
-                            <ToggleSwitch x:Name="AutoUpdateToggle" Header="启动时自动检查 GitHub Release" IsOn="True" Toggled="AutoUpdateToggle_Toggled" />
+                            <ToggleSwitch x:Name="AutoUpdateToggle" Header="启动时自动检查更新" IsOn="True" Toggled="AutoUpdateToggle_Toggled" />
                             <Grid ColumnSpacing="20">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <TextBlock x:Name="UpdateStatusText" VerticalAlignment="Center" Foreground="{ThemeResource BoardTextSecondaryBrush}" Text="尚未检查" TextWrapping="Wrap" />
