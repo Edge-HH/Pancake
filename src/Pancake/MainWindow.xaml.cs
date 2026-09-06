@@ -1,4 +1,4 @@
-﻿using Microsoft.UI.Windowing;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -59,6 +59,7 @@ public sealed partial class MainWindow : Window
         _initialView = initialView;
         InitializeComponent();
         LoadPersistentState();
+        InitializeProjectCommands();
 
         RootShell.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(RootShell_GlobalPointerPressed), true);
         RootShell.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(RootShell_GlobalPointerMoved), true);
@@ -85,10 +86,13 @@ public sealed partial class MainWindow : Window
             _isLoaded = true;
             ApplyActualTheme();
             ShowInitialView();
-            StartNoiseMonitoring();
-            ScheduleSave();
-            _ = RefreshWeatherAsync();
-            if (_settings.AutoUpdateEnabled) _ = CheckForUpdatesAsync(false);
+            if (_initialView != "verification")
+            {
+                StartNoiseMonitoring();
+                ScheduleSave();
+                _ = RefreshWeatherAsync();
+                if (_settings.AutoUpdateEnabled) _ = CheckForUpdatesAsync(false);
+            }
             RootShell.Focus(FocusState.Programmatic);
             if (_startFullScreen)
             {
@@ -144,7 +148,7 @@ public sealed partial class MainWindow : Window
         MainTimeText.Text = now.ToString("HH:mm");
         SecondsText.Text = now.ToString("ss");
         ClockDateText.Text = dateText;
-        TopDateText.Text = dateText;
+
     }
 
     private static string GetChineseWeekday(DayOfWeek day) => day switch
@@ -162,12 +166,14 @@ public sealed partial class MainWindow : Window
         }
         ShowBoard();
         if (_initialView is "editor" or "ink") EnterEditing();
+        if (_initialView == "ink") GlobalPenButton.IsChecked = true;
     }
 
     private void ShowBoard()
     {
         DisplayRoot.Visibility = Visibility.Visible;
         SettingsRoot.Visibility = Visibility.Collapsed;
+        UpdateProjectCommands();
         BackToBoardButton.Visibility = Visibility.Collapsed;
         EditBoardButton.Visibility = Visibility.Visible;
         SettingsButton.Visibility = Visibility.Visible;
@@ -177,6 +183,8 @@ public sealed partial class MainWindow : Window
     {
         DisplayRoot.Visibility = Visibility.Collapsed;
         SettingsRoot.Visibility = Visibility.Visible;
+        ProjectCommands.Visibility = Visibility.Collapsed;
+        EmptyProjectPanel.Visibility = Visibility.Collapsed;
         BackToBoardButton.Visibility = Visibility.Visible;
         EditBoardButton.Visibility = Visibility.Collapsed;
         SettingsButton.Visibility = Visibility.Collapsed;
@@ -192,11 +200,11 @@ public sealed partial class MainWindow : Window
 
     private void EnterEditing()
     {
-        if (_isEditing) return;
+        if (_isEditing || CurrentProject is null) return;
         ViewModel.BeginEditing();
         _isEditing = true;
         UpdateRichTextToolbar();
-        EditBoardIcon.Glyph = "\uE73E";
+        EditBoardIcon.Glyph = FluentGlyphs.Checkmark;
         AutomationProperties.SetName(EditBoardButton, "完成编辑");
         AddSubjectButton.Visibility = Visibility.Visible;
         GridSnapToggleButton.Visibility = Visibility.Visible;
@@ -209,9 +217,10 @@ public sealed partial class MainWindow : Window
     {
         ViewModel.PublishEditing();
         _isEditing = false;
+        GlobalPenButton.IsChecked = false;
         UpdateRichTextToolbar();
         _activeTileInteractions = 0;
-        EditBoardIcon.Glyph = "\uE70F";
+        EditBoardIcon.Glyph = FluentGlyphs.Edit;
         AutomationProperties.SetName(EditBoardButton, "编辑看板");
         AddSubjectButton.Visibility = Visibility.Collapsed;
         GridSnapToggleButton.Visibility = Visibility.Collapsed;
@@ -225,10 +234,11 @@ public sealed partial class MainWindow : Window
     {
         ViewModel.DiscardEditing();
         _isEditing = false;
+        GlobalPenButton.IsChecked = false;
         UpdateRichTextToolbar();
         _activeTileInteractions = 0;
         BuildTiles();
-        EditBoardIcon.Glyph = "\uE70F";
+        EditBoardIcon.Glyph = FluentGlyphs.Edit;
         AddSubjectButton.Visibility = Visibility.Collapsed;
         GridSnapToggleButton.Visibility = Visibility.Collapsed;
         DiscardEditButton.Visibility = Visibility.Collapsed;
@@ -255,6 +265,7 @@ public sealed partial class MainWindow : Window
         UpdateRichTextToolbar();
         BoardCanvas.Children.Clear();
         foreach (SubjectBoard subject in ViewModel.Subjects) AddTile(subject);
+        ApplyGlobalInkMode();
         UpdateBoardBounds();
         UpdateSubjectCount();
     }
@@ -277,14 +288,15 @@ public sealed partial class MainWindow : Window
             if (active && _isEditing)
             {
                 RichTextToolbarHost.Content = toolbar;
-                RichTextToolbarHint.Visibility = Visibility.Collapsed;
+
             }
             else if (ReferenceEquals(RichTextToolbarHost.Content, toolbar))
             {
                 RichTextToolbarHost.Content = null;
-                RichTextToolbarHint.Visibility = Visibility.Visible;
+
             }
         };
+        tile.InkActivated += subject => { _activeInkSubject = subject; UpdateInkSubjectLabel(); };
         tile.SetEditing(_isEditing);
         Canvas.SetLeft(tile, subject.X);
         Canvas.SetTop(tile, subject.Y);
@@ -300,9 +312,9 @@ public sealed partial class MainWindow : Window
     {
         // 结束编辑或重建磁贴时释放旧编辑器，避免按钮继续修改已删除的作业。
         RichTextToolbarHost.Content = null;
-        RichTextToolbarHint.Visibility = Visibility.Visible;
+
         RichTextToolbar.Visibility = _isEditing ? Visibility.Visible : Visibility.Collapsed;
-        TopDateText.Visibility = _isEditing ? Visibility.Collapsed : Visibility.Visible;
+        UpdateProjectCommands();
     }
 
     private void SetTileInteractionActive(bool active)
@@ -366,8 +378,11 @@ public sealed partial class MainWindow : Window
         nint windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
         WinRT.Interop.InitializeWithWindow.Initialize(picker, windowHandle);
         StorageFile? file = await picker.PickSingleFileAsync();
-        if (file is null) return;
-        homework.Attachments.Add(new AttachmentItem { Name = file.Name, Kind = "图片", Path = file.Path });
+        if (file is null || CurrentProject is null) return;
+        string owned;
+        try { owned = _projectStore.CopyAttachment(CurrentProject.Id, file.Path); }
+        catch (Exception ex) { await ShowMessageAsync("添加图片失败", ex.Message, "知道了"); return; }
+        homework.Attachments.Add(new AttachmentItem { Name = file.Name, Kind = "图片", Path = owned });
         homework.NotifyAttachmentsChanged();
         BuildTiles();
         SetTilesEditing(_isEditing);
@@ -494,6 +509,7 @@ public sealed partial class MainWindow : Window
     {
         if (!_isLoaded) return;
         _settings.Palette = PaletteComboBox.SelectedIndex == 1 ? "Macaron" : "Vivid";
+        RememberAppearance();
         ApplyPalette();
         BuildTiles();
         ScheduleSave();
@@ -504,9 +520,7 @@ public sealed partial class MainWindow : Window
         ColorPalette.IsMacaron = _settings.Palette == "Macaron";
         foreach (var subject in ViewModel.Subjects)
         {
-            subject.AccentBrush = MainViewModel.BrushFromHex(subject.AccentHex);
-            foreach (var entry in subject.Entries)
-                entry.RtfContent = ColorPalette.ConvertRtf(entry.RtfContent, ColorPalette.IsMacaron);
+            subject.AccentBrush = MainViewModel.BrushFromHex(subject.AccentHex, !subject.IsAccentExplicit);
         }
     }
 
@@ -678,6 +692,7 @@ public sealed partial class MainWindow : Window
         if (ThemeComboBox.SelectedItem is not ComboBoxItem item || item.Tag is not string theme) return;
         RootShell.RequestedTheme = theme switch { "Light" => ElementTheme.Light, "Dark" => ElementTheme.Dark, _ => ElementTheme.Default };
         _settings.Theme = theme;
+        RememberAppearance();
         ScheduleSave();
     }
 
@@ -740,10 +755,10 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            AppState? state = _dataStore.Load();
-            if (state is null) return;
-            _settings = state.Settings;
-            if (state.Subjects.Count > 0) ViewModel.ReplaceSubjects(AppDataStore.RestoreSubjects(state.Subjects));
+            _library = _projectStore.Load();
+            _settings = _library.Settings;
+            _library.ActiveProjectId = CurrentProject?.Id ?? _library.Projects.OrderByDescending(p => p.LastUsedAt).FirstOrDefault()?.Id;
+            ViewModel.ReplaceSubjects(AppDataStore.RestoreSubjects(CurrentProject?.Subjects ?? []));
             ThemeComboBox.SelectedIndex = _settings.Theme switch { "Light" => 1, "Default" => 2, _ => 0 };
             PaletteComboBox.SelectedIndex = _settings.Palette == "Macaron" ? 1 : 0;
             NoiseIntervalSlider.Value = Math.Clamp(_settings.NoiseIntervalSeconds, 0.1, 2);
@@ -761,7 +776,9 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            UpdateStatusText.Text = $"读取软件目录配置失败：{exception.Message}";
+            _storageReady = false;
+            ViewModel.ReplaceSubjects([]);
+            ReportStorageError("读取项目失败，已停止写入以保护原数据", exception);
         }
     }
 
@@ -774,20 +791,21 @@ public sealed partial class MainWindow : Window
 
     private void SaveStateNow()
     {
+        if (!_storageReady) return;
         try
         {
             _settings.GridSnappingEnabled = IsGridSnappingEnabled;
             _settings.AutoUpdateEnabled = AutoUpdateToggle.IsOn;
-            _dataStore.Save(new AppState { Settings = _settings, Subjects = AppDataStore.CaptureSubjects(ViewModel.Subjects) });
+            CaptureCurrentProject();
+            _library.Settings = _settings;
+            _projectStore.Save(_library);
         }
         catch (Exception exception)
         {
-            if (UpdateStatusText is not null) UpdateStatusText.Text = $"保存到软件目录失败：{exception.Message}";
+            ReportStorageError("自动保存失败", exception);
         }
     }
 
-    private async void ExportDataButton_Click(object sender, RoutedEventArgs e) => await ShowMessageAsync("导出备份包", "完整功能阶段会把磁贴布局、文字、图片和可继续编辑的笔迹一起打包导出。", "完成");
-    private async void ImportDataButton_Click(object sender, RoutedEventArgs e) => await ShowMessageAsync("导入备份包", "完整功能阶段会校验备份包，再恢复磁贴布局与内容。", "完成");
     private void FullScreenButton_Click(object sender, RoutedEventArgs e) => SetFullScreen(!_isFullScreen);
 
     private void RootShell_GlobalPointerPressed(object sender, PointerRoutedEventArgs e)
@@ -836,7 +854,7 @@ public sealed partial class MainWindow : Window
         if (_appWindow is null || _isFullScreen == isFullScreen) return;
         _appWindow.SetPresenter(isFullScreen ? AppWindowPresenterKind.FullScreen : AppWindowPresenterKind.Overlapped);
         _isFullScreen = isFullScreen;
-        FullScreenIcon.Glyph = isFullScreen ? "\uE73F" : "\uE740";
+        FullScreenIcon.Glyph = isFullScreen ? FluentGlyphs.ExitFullScreen : FluentGlyphs.FullScreen;
         FullScreenLabel.Text = isFullScreen ? "退出全屏" : "进入全屏";
         HideFullScreenExitHint();
         AutomationProperties.SetName(FullScreenButton, isFullScreen ? "退出全屏" : "进入全屏");

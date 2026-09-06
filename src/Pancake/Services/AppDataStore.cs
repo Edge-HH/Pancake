@@ -1,84 +1,9 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Pancake.Models;
 using Pancake.ViewModels;
 using Windows.Foundation;
 
 namespace Pancake.Services;
-
-public sealed class AppState
-{
-    public int SchemaVersion { get; set; } = 2;
-    public BoardSettingsState Settings { get; set; } = new();
-    public List<SubjectState> Subjects { get; set; } = [];
-}
-
-public sealed class BoardSettingsState
-{
-    public string Theme { get; set; } = "Dark";
-    public string Palette { get; set; } = "Vivid";
-    public double NoiseIntervalSeconds { get; set; } = 0.1;
-    public string MicrophoneDeviceId { get; set; } = "";
-    public double NoiseThresholdDb { get; set; } = 60;
-    public bool NoiseAlertEnabled { get; set; }
-    public double CalibrationTargetDb { get; set; } = 40;
-    public bool ShowWeatherAlerts { get; set; } = true;
-    // 保留旧配置字段以兼容已有数据；共享采集格式现在由 Windows 输入设备决定。
-    public int MicrophoneSampleRate { get; set; } = 16000;
-    public double MicrophoneCalibrationDb { get; set; }
-    public string WeatherCityName { get; set; } = "北京";
-    public string WeatherCityCode { get; set; } = "101010100";
-    public bool GridSnappingEnabled { get; set; } = true;
-    public bool AutoUpdateEnabled { get; set; } = true;
-}
-
-public sealed class SubjectState
-{
-    public string Name { get; set; } = string.Empty;
-    public string AccentHex { get; set; } = "#818CF8";
-    public double X { get; set; }
-    public double Y { get; set; }
-    public double Width { get; set; }
-    public double Height { get; set; }
-    public List<HomeworkState> Entries { get; set; } = [];
-    public List<InkStrokeState> InkStrokes { get; set; } = [];
-}
-
-public sealed class HomeworkState
-{
-    public string Content { get; set; } = string.Empty;
-    public string RtfContent { get; set; } = string.Empty;
-    public bool HasHandwriting { get; set; }
-    public List<AttachmentState> Attachments { get; set; } = [];
-}
-
-public sealed class AttachmentState
-{
-    public string Name { get; set; } = string.Empty;
-    public string Kind { get; set; } = "文件";
-    public string Path { get; set; } = string.Empty;
-    public double Scale { get; set; } = 1;
-    public double OffsetX { get; set; }
-    public double OffsetY { get; set; }
-    public double ViewportHeight { get; set; } = 180;
-    public double FrameWidth { get; set; } = 360;
-    public double AspectRatio { get; set; }
-    public double Rotation { get; set; }
-    public double PositionX { get; set; }
-    public double PositionY { get; set; }
-}
-
-public sealed class InkStrokeState
-{
-    public string Color { get; set; } = "#FFF7F7F9";
-    public double Thickness { get; set; }
-    public List<PointState> Points { get; set; } = [];
-}
-
-public sealed class PointState
-{
-    public double X { get; set; }
-    public double Y { get; set; }
-}
 
 /// <summary>把可迁移数据固定存放在可执行文件旁的 data 目录。</summary>
 public sealed class AppDataStore
@@ -108,12 +33,12 @@ public sealed class AppDataStore
         {
             SubjectBoard subject = new()
             {
-                Name = saved.Name, AccentHex = saved.AccentHex, AccentBrush = MainViewModel.BrushFromHex(saved.AccentHex),
+                Name = saved.Name, AccentHex = saved.AccentHex, IsAccentExplicit = saved.IsAccentExplicit, AccentBrush = MainViewModel.BrushFromHex(saved.AccentHex, !saved.IsAccentExplicit),
                 X = saved.X, Y = saved.Y, TileWidth = saved.Width, TileHeight = saved.Height
             };
             foreach (HomeworkState item in saved.Entries)
             {
-                HomeworkEntry homework = new() { Content = item.Content, RtfContent = item.RtfContent, HasHandwriting = item.HasHandwriting };
+                HomeworkEntry homework = new() { Content = item.Content, RtfContent = item.RtfContent, HasHandwriting = item.HasHandwriting, FontFallbacks = ProjectStore.Clone(item.FontFallbacks ?? []) };
                 foreach (AttachmentState attachment in item.Attachments)
                     homework.Attachments.Add(new AttachmentItem
                     {
@@ -130,7 +55,7 @@ public sealed class AppDataStore
             }
             foreach (InkStrokeState item in saved.InkStrokes)
             {
-                InkStrokeData stroke = new() { Color = ParseColor(item.Color), Thickness = item.Thickness };
+                InkStrokeData stroke = new() { Color = ParseColor(item.Color), Thickness = item.Thickness, TipScaleX = item.TipScaleX, TipScaleY = item.TipScaleY };
                 stroke.Points.AddRange(item.Points.Select(point => new Point(point.X, point.Y)));
                 subject.InkStrokes.Add(stroke);
             }
@@ -141,11 +66,11 @@ public sealed class AppDataStore
 
     public static List<SubjectState> CaptureSubjects(IEnumerable<SubjectBoard> source) => source.Select(subject => new SubjectState
     {
-        Name = subject.Name, AccentHex = subject.AccentHex, X = subject.X, Y = subject.Y,
+        Name = subject.Name, AccentHex = subject.AccentHex, IsAccentExplicit = subject.IsAccentExplicit, InkCoordinateVersion = 1, X = subject.X, Y = subject.Y,
         Width = subject.TileWidth, Height = subject.TileHeight,
         Entries = subject.Entries.Select(item => new HomeworkState
         {
-            Content = item.Content, RtfContent = item.RtfContent, HasHandwriting = item.HasHandwriting,
+            Content = item.Content, RtfContent = item.RtfContent, HasHandwriting = item.HasHandwriting, FontFallbacks = ProjectStore.Clone(item.FontFallbacks ?? []),
             Attachments = item.Attachments.Select(a => new AttachmentState
             {
                 Name = a.Name,
@@ -161,7 +86,7 @@ public sealed class AppDataStore
         InkStrokes = subject.InkStrokes.Select(stroke => new InkStrokeState
         {
             Color = $"#{stroke.Color.A:X2}{stroke.Color.R:X2}{stroke.Color.G:X2}{stroke.Color.B:X2}",
-            Thickness = stroke.Thickness,
+            Thickness = stroke.Thickness, TipScaleX = stroke.TipScaleX, TipScaleY = stroke.TipScaleY,
             Points = stroke.Points.Select(point => new PointState { X = point.X, Y = point.Y }).ToList()
         }).ToList()
     }).ToList();

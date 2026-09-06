@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using Microsoft.UI.Xaml.Media;
 using Pancake.Models;
 
@@ -73,7 +73,7 @@ public sealed class MainViewModel : ObservableObject
         {
             Name = name,
             AccentHex = hex,
-            AccentBrush = BrushFromHex(hex),
+            AccentBrush = BrushFromHex(hex, true),
             X = 36 + (index % 2) * 470,
             Y = 36 + (index / 2) * 360
         };
@@ -96,9 +96,9 @@ public sealed class MainViewModel : ObservableObject
         return homework;
     }
 
-    public static SolidColorBrush BrushFromHex(string hex)
+    public static SolidColorBrush BrushFromHex(string hex, bool usePalette = false)
     {
-        string value = Pancake.Services.ColorPalette.Resolve(hex).TrimStart('#');
+        string value = (usePalette ? Pancake.Services.ColorPalette.Resolve(hex) : hex).TrimStart('#');
         return new SolidColorBrush(Windows.UI.Color.FromArgb(
             255,
             Convert.ToByte(value[..2], 16),

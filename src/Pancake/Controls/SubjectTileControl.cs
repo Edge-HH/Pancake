@@ -1,4 +1,4 @@
-﻿using Pancake.Services;
+using Pancake.Services;
 using System.Collections.Specialized;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -19,8 +19,6 @@ namespace Pancake.Controls;
 /// </summary>
 public sealed class SubjectTileControl : Grid
 {
-    private const double InkSurfaceWidth = 1000;
-    private const double InkSurfaceHeight = 600;
     private const double MinimumTileWidth = 280;
     internal const double MinimumTileHeight = 96;
     private const double MaximumTileWidth = 900;
@@ -38,30 +36,24 @@ public sealed class SubjectTileControl : Grid
     public event Action<FrameworkElement, bool>? FormattingToolbarChanged;
     private readonly Canvas _inkCanvas = new()
     {
-        Width = InkSurfaceWidth,
-        Height = InkSurfaceHeight,
         Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
         ManipulationMode = ManipulationModes.None
     };
     private readonly Dictionary<Polyline, InkStrokeData> _renderedStrokes = [];
     private readonly StackPanel _entriesPanel = new() { Spacing = 8 };
     private readonly StackPanel _editingTools = new() { Orientation = Orientation.Horizontal, Spacing = 2 };
-    private readonly Border _penModeToolbar;
     private readonly TextBox _nameEditor;
     private readonly Thumb _headerMoveThumb;
     private readonly Border _frame;
     private readonly TextBlock _watermark;
-    private readonly ToggleButton _drawButton;
-    private ToggleButton _penButton = null!;
-    private ToggleButton _eraserButton = null!;
+    private InkToolSettings _inkSettings = new();
+    private uint? _inkPointerId;
+    public event Action<SubjectBoard>? InkActivated;
     private bool _isEditing;
     private bool _isDrawing;
     private bool _isErasing;
     private InkStrokeData? _activeStrokeData;
     private Polyline? _activeStrokeShape;
-    private Windows.UI.Color InkColor = Windows.UI.Color.FromArgb(255, 247, 247, 249);
-    private double InkThickness = 5;
-    private InkTool _inkTool = InkTool.Pen;
 
     public SubjectTileControl(
         SubjectBoard subject,
@@ -160,15 +152,10 @@ public sealed class SubjectTileControl : Grid
         };
         header.Children.Add(_nameEditor);
 
-        _drawButton = CreateIconToggle("\uED63", "开启笔模式");
-        _drawButton.Checked += (_, _) => SetDrawing(true);
-        _drawButton.Unchecked += (_, _) => SetDrawing(false);
-        _editingTools.Children.Add(_drawButton);
-        _editingTools.Children.Add(CreateIconButton("\uE7A7", "撤销最后一笔", (_, _) => UndoLastStroke()));
-        _editingTools.Children.Add(CreateIconButton("\uE710", "添加一条作业", (_, _) => AddHomework()));
+        _editingTools.Children.Add(CreateIconButton(FluentGlyphs.Add, "添加一条作业", (_, _) => AddHomework()));
         _editingTools.Children.Add(CreateThemeButton());
 
-        _editingTools.Children.Add(CreateIconButton("\uE74D", "删除科目", (_, _) => _deleteSubject(_subject), true));
+        _editingTools.Children.Add(CreateIconButton(FluentGlyphs.Delete, "删除科目", (_, _) => _deleteSubject(_subject), true));
         Grid.SetColumn(_editingTools, 1);
         header.Children.Add(_editingTools);
 
@@ -183,26 +170,16 @@ public sealed class SubjectTileControl : Grid
         Grid.SetRow(entriesScroller, 1);
         content.Children.Add(entriesScroller);
 
-        _penModeToolbar = BuildPenModeToolbar();
-        _penModeToolbar.Name = "PenModeToolbar";
-        Grid.SetRow(_penModeToolbar, 2);
-        Canvas.SetZIndex(_penModeToolbar, 40);
-        content.Children.Add(_penModeToolbar);
-
-        Viewbox inkView = new()
-        {
-            Stretch = Stretch.Fill,
-            Child = _inkCanvas,
-            IsHitTestVisible = false
-        };
-        Grid.SetRowSpan(inkView, 3);
-        Canvas.SetZIndex(inkView, 20);
-        content.Children.Add(inkView);
+        // 画布直接覆盖磁贴，以 DIP 保存坐标；调整磁贴只改变裁剪范围，不缩放笔迹。
+        _inkCanvas.IsHitTestVisible = false;
+        Canvas.SetZIndex(_inkCanvas, 80);
+        Children.Add(_inkCanvas);
+        _inkCanvas.SizeChanged += (_, args) => _inkCanvas.Clip = new RectangleGeometry { Rect = new Rect(0, 0, args.NewSize.Width, args.NewSize.Height) };
         _inkCanvas.PointerPressed += InkCanvas_PointerPressed;
         _inkCanvas.PointerMoved += InkCanvas_PointerMoved;
         _inkCanvas.PointerReleased += InkCanvas_PointerReleased;
         _inkCanvas.PointerCanceled += InkCanvas_PointerReleased;
-        _drawButton.Tag = inkView;
+        _inkCanvas.PointerCaptureLost += InkCanvas_PointerReleased;
 
         AddResizeHandles();
         _subject.Entries.CollectionChanged += Entries_CollectionChanged;
@@ -229,81 +206,8 @@ public sealed class SubjectTileControl : Grid
 
         _nameEditor.IsReadOnly = !editing;
         _nameEditor.IsHitTestVisible = editing;
-        SetDrawing(false);
+        SetInkMode(false, _inkSettings);
         RebuildEntries();
-    }
-
-    private Border BuildPenModeToolbar()
-    {
-        StackPanel tools = new()
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        _penButton = CreateIconToggle("\uED63", "画笔");
-        _penButton.IsChecked = true;
-        _penButton.Checked += (_, _) => SelectInkTool(InkTool.Pen);
-        tools.Children.Add(_penButton);
-
-        foreach ((string hex, string name) in new[]
-        {
-            ("#F7F7F9", "默认文字色"),
-            ("#FBBF24", "黄色"),
-            ("#F87171", "红色"),
-            ("#60A5FA", "蓝色")
-        })
-        {
-            Button colorButton = new()
-            {
-                Width = 30,
-                Height = 30,
-                Padding = new Thickness(6),
-                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
-                BorderThickness = new Thickness(0),
-                Content = new Ellipse { Width = 16, Height = 16, Fill = new SolidColorBrush(BoardTheme.DisplayContentColor(MainViewModel.BrushFromHex(hex).Color)) },
-                Tag = hex
-            };
-            colorButton.Click += (_, _) =>
-            {
-                InkColor = MainViewModel.BrushFromHex((string)colorButton.Tag).Color;
-                SelectInkTool(InkTool.Pen);
-            };
-            ToolTipService.SetToolTip(colorButton, $"{name}画笔");
-            tools.Children.Add(colorButton);
-        }
-
-        Slider thicknessSlider = new()
-        {
-            Width = 108,
-            Minimum = 2,
-            Maximum = 18,
-            Value = InkThickness,
-            StepFrequency = 1,
-            Header = "粗细"
-        };
-        thicknessSlider.ValueChanged += (_, args) => InkThickness = args.NewValue;
-        tools.Children.Add(thicknessSlider);
-
-        _eraserButton = CreateIconToggle("\uE75C", "橡皮擦");
-        _eraserButton.Checked += (_, _) => SelectInkTool(InkTool.Eraser);
-        tools.Children.Add(_eraserButton);
-        tools.Children.Add(CreateIconButton("\uE74D", "清空笔迹", (_, _) => ClearStrokes(), true));
-
-        return new Border
-        {
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 5, 0, 0),
-            Padding = new Thickness(8, 4, 8, 4),
-            Background = BoardTheme.SurfaceBrush,
-            BorderBrush = BoardTheme.LineBrush,
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(10),
-            Child = tools,
-            Visibility = Visibility.Collapsed
-        };
     }
 
     private void AddResizeHandles()
@@ -412,8 +316,8 @@ public sealed class SubjectTileControl : Grid
             if (_isEditing)
             {
                 StackPanel actions = new() { Orientation = Orientation.Horizontal };
-                actions.Children.Add(CreateIconButton("\uE723", "添加图片", async (_, _) => await _addAttachment(homework)));
-                actions.Children.Add(CreateIconButton("\uE74D", "删除这条作业", (_, _) => DeleteHomework(homework), true));
+                actions.Children.Add(CreateIconButton(FluentGlyphs.ImageAdd, "添加图片", async (_, _) => await _addAttachment(homework)));
+                actions.Children.Add(CreateIconButton(FluentGlyphs.Delete, "删除这条作业", (_, _) => DeleteHomework(homework), true));
                 Grid.SetColumn(actions, 2);
                 row.Children.Add(actions);
             }
@@ -448,6 +352,7 @@ public sealed class SubjectTileControl : Grid
     {
         RichEditBox editor = new()
         {
+            FontFamily = FontService.DefaultFamily,
             FontSize = 20,
             Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
             BorderThickness = new Thickness(0),
@@ -477,6 +382,7 @@ public sealed class SubjectTileControl : Grid
                 editor.Document.GetRange(0, homework.Content.Length).CharacterFormat.ForegroundColor =
                     BoardTheme.TextColor;
             }
+            FontService.RebindBundledFont(editor, homework.FontFallbacks);
             editor.IsReadOnly = readOnly;
             documentReady = true;
             if (repairedTrailingParagraphs)
@@ -490,24 +396,25 @@ public sealed class SubjectTileControl : Grid
     private StackPanel BuildFormattingToolbar(RichEditBox editor, HomeworkEntry homework)
     {
         StackPanel tools = new() { Orientation = Orientation.Horizontal, Spacing = 2 };
-        tools.Children.Add(CreateIconButton("\uE8DD", "加粗", (_, _) =>
+        tools.Children.Add(FontService.CreateFontPicker(editor, () => CaptureRichText(editor, homework)));
+        tools.Children.Add(CreateIconButton(FluentGlyphs.Bold, "加粗", (_, _) =>
         {
             editor.Document.Selection.CharacterFormat.Bold = FormatEffect.Toggle;
             CaptureRichText(editor, homework);
         }));
-        tools.Children.Add(CreateIconButton("\uE8DB", "斜体", (_, _) =>
+        tools.Children.Add(CreateIconButton(FluentGlyphs.Italic, "斜体", (_, _) =>
         {
             editor.Document.Selection.CharacterFormat.Italic = FormatEffect.Toggle;
             CaptureRichText(editor, homework);
         }));
-        tools.Children.Add(CreateIconButton("\uE8DC", "下划线", (_, _) =>
+        tools.Children.Add(CreateIconButton(FluentGlyphs.Underline, "下划线", (_, _) =>
         {
             var format = editor.Document.Selection.CharacterFormat;
             format.Underline = format.Underline == UnderlineType.None ? UnderlineType.Single : UnderlineType.None;
             CaptureRichText(editor, homework);
         }));
-        tools.Children.Add(CreateColorFlyoutButton("\uE790", "文字颜色", editor, homework, false));
-        tools.Children.Add(CreateColorFlyoutButton("\uE7E6", "高光颜色", editor, homework, true));
+        tools.Children.Add(CreateColorFlyoutButton(FluentGlyphs.Color, "文字颜色", editor, homework, false));
+        tools.Children.Add(CreateColorFlyoutButton(FluentGlyphs.Highlight, "高光颜色", editor, homework, true));
         foreach (Button button in tools.Children.OfType<Button>())
         {
             // 点击顶栏时保持编辑器的焦点和选区；键盘仍可通过 Tab 访问按钮。
@@ -527,8 +434,9 @@ public sealed class SubjectTileControl : Grid
 
         contentRange.GetText(TextGetOptions.None, out string plain);
         contentRange.GetText(TextGetOptions.FormatRtf, out string rtf);
+        homework.FontFallbacks = FontService.CaptureFallbacks(editor);
         homework.Content = plain;
-        homework.RtfContent = DefaultContentColors.AdaptRtf(rtf.TrimEnd('\0'), BoardTheme.IsLight, saving: true);
+        homework.RtfContent = DefaultContentColors.AdaptRtf(FontService.NormalizeRtf(rtf.TrimEnd('\0')), BoardTheme.IsLight, saving: true);
         _contentChanged();
     }
 
@@ -624,13 +532,14 @@ public sealed class SubjectTileControl : Grid
 
     private Button CreateThemeButton()
     {
-        Button button = CreateIconButton("\uE790", "磁贴主题色", (_, _) => { });
+        Button button = CreateIconButton(FluentGlyphs.Color, "磁贴主题色", (_, _) => { });
         StackPanel colors = new() { Orientation = Orientation.Horizontal, Spacing = 6, Padding = new Thickness(8) };
         foreach (string hex in new[] { "#4ADE80", "#818CF8", "#60A5FA", "#FBBF24", "#F472B6", "#2DD4BF", "#F87171" })
         {
             Button swatch = CreateColorSwatch(hex, 32);
             swatch.Click += (_, _) =>
             {
+                _subject.IsAccentExplicit = true;
                 _subject.AccentHex = hex;
                 _subject.AccentBrush = MainViewModel.BrushFromHex(hex);
                 _frame.BorderBrush = _subject.AccentBrush;
@@ -711,38 +620,39 @@ public sealed class SubjectTileControl : Grid
         _contentChanged();
     }
 
-    private void SetDrawing(bool drawing)
+    public void SetInkMode(bool drawing, InkToolSettings settings)
     {
-        bool wasDrawing = _isDrawing;
+        _inkSettings = settings;
         _isDrawing = drawing && _isEditing;
-        _drawButton.IsChecked = _isDrawing;
-        _penModeToolbar.Visibility = _isDrawing ? Visibility.Visible : Visibility.Collapsed;
-        if (_drawButton.Tag is Viewbox inkView)
+        _inkCanvas.IsHitTestVisible = _isDrawing;
+        _entriesPanel.IsHitTestVisible = !_isDrawing;
+        _editingTools.Visibility = _isEditing && !_isDrawing ? Visibility.Visible : Visibility.Collapsed;
+        _nameEditor.IsHitTestVisible = _isEditing && !_isDrawing;
+        foreach (Thumb thumb in Children.OfType<Thumb>()) thumb.Visibility = _isEditing && !_isDrawing ? Visibility.Visible : Visibility.Collapsed;
+        if (!_isDrawing)
         {
-            inkView.IsHitTestVisible = _isDrawing;
-        }
-        if (wasDrawing != _isDrawing)
-        {
-            _interactionChanged(_isDrawing);
+            _inkPointerId = null;
+            _activeStrokeData = null;
+            _activeStrokeShape = null;
+            _isErasing = false;
+            _inkCanvas.ReleasePointerCaptures();
         }
     }
 
-    private void SelectInkTool(InkTool tool)
-    {
-        _inkTool = tool;
-        _penButton.IsChecked = tool == InkTool.Pen;
-        _eraserButton.IsChecked = tool == InkTool.Eraser;
-    }
+    private bool IsInInkBounds(Point point) => point.X >= 0 && point.Y >= 0 && point.X <= ActualWidth && point.Y <= ActualHeight;
 
     private void InkCanvas_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (!_isDrawing)
+        if (!_isDrawing || _inkPointerId is not null)
         {
             return;
         }
 
         Point point = e.GetCurrentPoint(_inkCanvas).Position;
-        if (_inkTool == InkTool.Eraser)
+        if (!IsInInkBounds(point)) return;
+        _inkPointerId = e.Pointer.PointerId;
+        InkActivated?.Invoke(_subject);
+        if (_inkSettings.Eraser)
         {
             _isErasing = true;
             EraseStrokeAt(point);
@@ -751,11 +661,13 @@ public sealed class SubjectTileControl : Grid
             return;
         }
 
-        _activeStrokeData = new InkStrokeData { Color = InkColor, Thickness = InkThickness };
+        _activeStrokeData = new InkStrokeData { Color = _inkSettings.Color, Thickness = _inkSettings.Thickness };
         _activeStrokeData.Points.Add(point);
+        _activeStrokeData.Points.Add(new Point(point.X + 0.01, point.Y));
         _subject.InkStrokes.Add(_activeStrokeData);
         _activeStrokeShape = CreateStrokeShape(_activeStrokeData);
         _activeStrokeShape.Points.Add(point);
+        _activeStrokeShape.Points.Add(new Point(point.X + 0.01, point.Y));
         _inkCanvas.Children.Add(_activeStrokeShape);
         _renderedStrokes[_activeStrokeShape] = _activeStrokeData;
         _inkCanvas.CapturePointer(e.Pointer);
@@ -764,7 +676,14 @@ public sealed class SubjectTileControl : Grid
 
     private void InkCanvas_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
+        if (_inkPointerId != e.Pointer.PointerId) return;
         Point point = e.GetCurrentPoint(_inkCanvas).Position;
+        if (!IsInInkBounds(point))
+        {
+            // 越界即结束当前笔段，避免重新进入时画出跨越空隙的连接线。
+            _activeStrokeData = null; _activeStrokeShape = null;
+            return;
+        }
         if (_isErasing)
         {
             EraseStrokeAt(point);
@@ -779,6 +698,8 @@ public sealed class SubjectTileControl : Grid
 
     private void InkCanvas_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
+        if (_inkPointerId != e.Pointer.PointerId) return;
+        _inkPointerId = null;
         _activeStrokeData = null;
         _activeStrokeShape = null;
         _isErasing = false;
@@ -789,11 +710,12 @@ public sealed class SubjectTileControl : Grid
 
     private void EraseStrokeAt(Point point)
     {
-        Polyline? shape = VisualTreeHelper.FindElementsInHostCoordinates(point, _inkCanvas).OfType<Polyline>().FirstOrDefault();
-        if (shape is null || !_renderedStrokes.Remove(shape, out InkStrokeData? stroke))
-        {
-            return;
-        }
+        var hit = _renderedStrokes.LastOrDefault(pair => InkGeometry.HitTest(pair.Value.Points.Select(p => (p.X, p.Y)).ToList(), point.X, point.Y,
+            Math.Max(8, pair.Value.Thickness * Math.Max(pair.Value.TipScaleX, pair.Value.TipScaleY))));
+        Polyline? shape = hit.Key;
+        if (shape is null) return;
+        InkStrokeData stroke = hit.Value;
+        _renderedStrokes.Remove(shape);
         _subject.InkStrokes.Remove(stroke);
         _inkCanvas.Children.Remove(shape);
         _contentChanged();
@@ -808,7 +730,7 @@ public sealed class SubjectTileControl : Grid
             Polyline shape = CreateStrokeShape(stroke);
             foreach (Point point in stroke.Points)
             {
-                shape.Points.Add(point);
+                shape.Points.Add(new Point(point.X / stroke.TipScaleX, point.Y / stroke.TipScaleY));
             }
             _inkCanvas.Children.Add(shape);
             _renderedStrokes[shape] = stroke;
@@ -818,6 +740,7 @@ public sealed class SubjectTileControl : Grid
     private static Polyline CreateStrokeShape(InkStrokeData stroke) => new()
     {
         Stroke = new SolidColorBrush(BoardTheme.DisplayContentColor(stroke.Color)), StrokeThickness = stroke.Thickness,
+        RenderTransform = new ScaleTransform { ScaleX = stroke.TipScaleX, ScaleY = stroke.TipScaleY },
         StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round
     };
 
@@ -829,13 +752,12 @@ public sealed class SubjectTileControl : Grid
         _contentChanged();
     }
 
-    private void ClearStrokes()
+    public void ClearStrokes()
     {
         _subject.InkStrokes.Clear();
         RenderStoredStrokes();
         _contentChanged();
     }
 
-    private enum InkTool { Pen, Eraser }
     private enum ResizeEdge { Left, Right, Bottom, BottomLeft, BottomRight }
 }

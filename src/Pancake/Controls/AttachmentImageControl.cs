@@ -1,4 +1,4 @@
-﻿using Pancake.Services;
+using Pancake.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -46,6 +46,8 @@ public sealed class AttachmentImageControl : Grid
     private double _resizeStartY;
     private ResizeHandle _activeResizeHandle;
     private double _imageAspect;
+    private readonly TaskCompletionSource<bool> _imageReady = new();
+    public Task<bool> ImageReady => _imageReady.Task;
 
     public AttachmentImageControl(AttachmentItem attachment, Action deleteAttachment, Action contentChanged, Action<bool> interactionChanged)
     {
@@ -111,11 +113,11 @@ public sealed class AttachmentImageControl : Grid
             Margin = new Thickness(0, 5, 0, 2),
             Visibility = Visibility.Collapsed
         };
-        _toolbar.Children.Add(CreateIconButton("\uE7A8", "裁切", (_, _) => ToggleCropMode()));
-        _toolbar.Children.Add(CreateIconButton("\uE7AD", "逆时针旋转", (_, _) => RotateImage(-90), true));
-        _toolbar.Children.Add(CreateIconButton("\uE7AD", "顺时针旋转", (_, _) => RotateImage(90)));
-        _toolbar.Children.Add(CreateIconButton("\uE777", "复位", (_, _) => ResetImage()));
-        _toolbar.Children.Add(CreateIconButton("\uE74D", "删除", (_, _) => _deleteAttachment()));
+        _toolbar.Children.Add(CreateIconButton(FluentGlyphs.Crop, "裁切", (_, _) => ToggleCropMode()));
+        _toolbar.Children.Add(CreateIconButton(FluentGlyphs.Rotate, "逆时针旋转", (_, _) => RotateImage(-90), true));
+        _toolbar.Children.Add(CreateIconButton(FluentGlyphs.Rotate, "顺时针旋转", (_, _) => RotateImage(90)));
+        _toolbar.Children.Add(CreateIconButton(FluentGlyphs.Reset, "复位", (_, _) => ResetImage()));
+        _toolbar.Children.Add(CreateIconButton(FluentGlyphs.Delete, "删除", (_, _) => _deleteAttachment()));
         Grid.SetRow(_toolbar, 1);
         Children.Add(_toolbar);
 
@@ -127,6 +129,7 @@ public sealed class AttachmentImageControl : Grid
         _imageFrame.ManipulationStarted += (_, _) => BeginInteraction();
         _imageFrame.ManipulationDelta += ImageFrame_ManipulationDelta;
         _imageFrame.ManipulationCompleted += (_, _) => EndInteraction();
+        ApplyTransforms();
         Loaded += async (_, _) => await LoadImageAsync();
     }
 
@@ -160,9 +163,11 @@ public sealed class AttachmentImageControl : Grid
                     _contentChanged();
                 }
             }
+            _imageReady.TrySetResult(true);
         }
         catch
         {
+            _imageReady.TrySetResult(false);
             _imageFrame.Children.Insert(1, new TextBlock
             {
                 Text = $"无法读取图片：{_attachment.Name}",

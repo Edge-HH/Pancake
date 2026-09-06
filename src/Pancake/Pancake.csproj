@@ -23,6 +23,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="Assets\Fonts\**\*" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Assets\xiaomi_weather_cities.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(EnableUiVerification)' == 'true'">
+    <DefineConstants>$(DefineConstants);PANCAKE_UI_TESTS</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(EnableUiVerification)' == 'true'">
+    <Compile Include="../../tests/UiVerification.cs" Link="UiVerification.cs" />
   </ItemGroup>
 </Project>

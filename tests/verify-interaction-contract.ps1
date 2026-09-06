@@ -37,11 +37,9 @@ if ($tileCode -notmatch 'internal\s+const\s+double\s+MinimumTileHeight\s*=\s*96\
     $failures.Add('磁贴最小高度未统一降低到两个 48px 网格单元。')
 }
 
-if ($tileCode -notmatch 'PenModeToolbar' -or
-    $tileCode -notmatch 'InkColor' -or
-    $tileCode -notmatch 'InkThickness' -or
-    $tileCode -notmatch 'InkTool\.Eraser') {
-    $failures.Add('磁贴下方缺少居中的笔模式栏，或颜色、粗细、橡皮擦状态不完整。')
+if ($windowXaml -notmatch 'GlobalInkToolbar' -or $tileCode -notmatch 'SetInkMode' -or
+    $tileCode -match 'Viewbox inkView' -or $tileCode -notmatch '_inkSettings.Eraser') {
+    $failures.Add('全局画笔栏、共享工具状态或固定坐标画布缺失。')
 }
 
 if ($windowXaml -match 'x:Name="BoardScrollViewer"' -or $windowXaml -notmatch 'x:Name="BoardViewport"') {

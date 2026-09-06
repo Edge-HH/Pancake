@@ -58,7 +58,8 @@ try {
         throw 'The test process did not close normally within five seconds.'
     }
 
-    $after = [System.IO.File]::ReadAllText($statePath) | ConvertFrom-Json
+    $library = [System.IO.File]::ReadAllText((Join-Path $dataDirectory 'projects.json')) | ConvertFrom-Json
+    $after = [PSCustomObject]@{ Settings = $library.Settings; Subjects = $library.Projects[0].Subjects }
     if ($after.Settings.Theme -ne $Theme) { throw 'The selected theme was not preserved.' }
     $beforeLayout = $before.Subjects | ForEach-Object { "$($_.Name):$($_.X),$($_.Y),$($_.Width),$($_.Height)" }
     $afterLayout = $after.Subjects | ForEach-Object { "$($_.Name):$($_.X),$($_.Y),$($_.Width),$($_.Height)" }

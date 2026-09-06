@@ -1,3 +1,5 @@
+using Pancake.Services;
+using Pancake.Controls;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -41,7 +43,7 @@ public sealed class AttachmentItem : ObservableObject
     public required string Name { get; init; }
     public string Kind { get; init; } = "文件";
     public string Path { get; init; } = string.Empty;
-    public string Glyph => Kind == "图片" ? "\uEB9F" : Kind == "PDF" ? "\uEA90" : "\uE8A5";
+    public string Glyph => Kind == "图片" ? FluentGlyphs.Image : Kind == "PDF" ? FluentGlyphs.Pdf : FluentGlyphs.Document;
 
     public double Scale
     {
@@ -107,6 +109,7 @@ public sealed class HomeworkEntry : ObservableObject
     }
 
     public ObservableCollection<AttachmentItem> Attachments { get; } = [];
+    public List<FontFallbackState> FontFallbacks { get; set; } = [];
 
     public string SupplementSummary
     {
@@ -131,7 +134,7 @@ public sealed class HomeworkEntry : ObservableObject
 
     public HomeworkEntry Clone()
     {
-        HomeworkEntry clone = new() { Content = Content, RtfContent = RtfContent, HasHandwriting = HasHandwriting };
+        HomeworkEntry clone = new() { Content = Content, RtfContent = RtfContent, HasHandwriting = HasHandwriting, FontFallbacks = FontFallbacks.Select(f => new FontFallbackState { Start = f.Start, Length = f.Length, Family = f.Family }).ToList() };
         foreach (AttachmentItem attachment in Attachments)
         {
             clone.Attachments.Add(new AttachmentItem
@@ -156,11 +159,13 @@ public sealed class InkStrokeData
 {
     public Windows.UI.Color Color { get; init; } = Windows.UI.Color.FromArgb(255, 245, 245, 247);
     public double Thickness { get; init; } = 5;
+    public double TipScaleX { get; init; } = 1;
+    public double TipScaleY { get; init; } = 1;
     public List<Point> Points { get; } = [];
 
     public InkStrokeData Clone()
     {
-        InkStrokeData clone = new() { Color = Color, Thickness = Thickness };
+        InkStrokeData clone = new() { Color = Color, Thickness = Thickness, TipScaleX = TipScaleX, TipScaleY = TipScaleY };
         clone.Points.AddRange(Points);
         return clone;
     }
@@ -175,6 +180,8 @@ public sealed class SubjectBoard : ObservableObject
     private double _tileHeight = 320;
     private string _accentHex = "#818CF8";
     private SolidColorBrush _accentBrush = new(Windows.UI.Color.FromArgb(255, 129, 140, 248));
+
+    public bool IsAccentExplicit { get; set; }
 
     public string AccentHex
     {
@@ -238,6 +245,7 @@ public sealed class SubjectBoard : ObservableObject
         {
             Name = Name,
             AccentHex = AccentHex,
+            IsAccentExplicit = IsAccentExplicit,
             AccentBrush = new SolidColorBrush(AccentBrush.Color),
             X = X,
             Y = Y,

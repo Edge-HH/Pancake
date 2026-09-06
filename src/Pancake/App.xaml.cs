@@ -38,6 +38,15 @@ public partial class App : Application
                 : commandLine.Contains("--view=ink", StringComparison.OrdinalIgnoreCase)
                     ? "ink"
                     : "display";
+#if PANCAKE_UI_TESTS
+        if (commandLine.Contains("--verify-ui", StringComparison.OrdinalIgnoreCase))
+        {
+            _window = new MainWindow(false, "verification");
+            _window.ScheduleUiVerification();
+            _window.Activate();
+            return;
+        }
+#endif
         _window = new MainWindow(startFullScreen, initialView);
         _window.Activate();
     }

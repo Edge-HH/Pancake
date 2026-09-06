@@ -50,6 +50,9 @@ jobs:
       - name: Run settings logic tests
         run: dotnet run --project .\tests\SettingsLogic\SettingsLogic.csproj -c Release
 
+      - name: Run project and package tests
+        run: dotnet run --project .\tests\ProjectLogic\ProjectLogic.csproj -c Release
+
       - name: Run static contract tests
         shell: pwsh
         run: |

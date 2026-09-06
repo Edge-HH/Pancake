@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Pancake/Services/ProjectState.cs" Link="ProjectState.cs" />
+    <Compile Include="../../src/Pancake/Services/ProjectStore.cs" Link="ProjectStore.cs" />
+    <Compile Include="../../src/Pancake/Services/ExportLayout.cs" Link="ExportLayout.cs" />
+    <Compile Include="../../src/Pancake/Services/InkGeometry.cs" Link="InkGeometry.cs" />
+  </ItemGroup>
+</Project>
