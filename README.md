@@ -61,6 +61,21 @@ dotnet run --project .\src\Pancake\Pancake.csproj -c Release -p:Platform=x64
 
 也可以使用 Visual Studio 打开 `Pancake.slnx`，选择 `x64` 后启动 `Pancake` 项目。
 
+### 自动构建与发布
+
+- 推送 `v主版本.次版本.修订版本` 格式的标签（例如 `v1.2.3`）时，GitHub Actions 会执行 Release x64 构建、设置逻辑测试和静态交互契约检查。
+- 检查通过后，工作流会生成包含 .NET 与 Windows App SDK 运行时的 x64 便携版 ZIP，并自动创建同名 GitHub Release。
+- 在 Actions 页手动运行 `Release` 工作流只会生成 ZIP 产物供检查，不会创建 GitHub Release。
+
+正式发布示例：
+
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+请等待 `Release` 工作流成功后再把 Release 地址发给用户。用户解压 ZIP 后运行 `Pancake.exe` 即可；便携版会把数据保存在解压目录旁。当前应用内更新器不支持直接安装 ZIP，需要用户手动下载和替换。
+
 ### 启动参数
 
 | 参数 | 作用 |
@@ -116,7 +131,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\verify-interaction-c
 ## 🚧 当前限制
 
 - “导出备份包”和“导入备份包”目前是界面占位功能，尚未实际读写数据。
-- 当前 GitHub 仓库必须先发布带 `.exe`、`.msix` 或 `.msixbundle` 资产的 Release，自动更新才有可安装内容。
+- 自动更新只识别 Release 中的 `.exe`、`.msix` 或 `.msixbundle` 安装资产；当前发布工作流生成便携版 ZIP，因此需要手动下载更新。
 - 小米天气来自第三方整理的非正式接口文档，服务端兼容性不由本项目控制。
 - 噪音数值是基于 PCM 电平和校准偏移的估算值，不等同于经过认证的声级计读数。
 - 原生触屏手势和视觉比例仍需在目标教室设备上完成最终验收。

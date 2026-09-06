@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "要构建的版本号，例如 1.2.3（手动运行只生成产物，不创建 Release）"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Resolve and validate version
+        id: version
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TAG_NAME: ${{ github.ref_name }}
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          $version = if ($env:EVENT_NAME -eq 'push') { $env:TAG_NAME.TrimStart('v', 'V') } else { $env:MANUAL_VERSION }
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "版本号必须使用 major.minor.patch 格式，例如 1.2.3。"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Restore
+        run: dotnet restore .\Pancake.slnx
+
+      - name: Build Release x64
+        run: dotnet build .\Pancake.slnx -c Release -p:Platform=x64 --no-restore --nologo
+
+      - name: Run settings logic tests
+        run: dotnet run --project .\tests\SettingsLogic\SettingsLogic.csproj -c Release
+
+      - name: Run static contract tests
+        shell: pwsh
+        run: |
+          .\tests\verify-color-formatting-contract.ps1
+          .\tests\verify-icon-font-contract.ps1
+          .\tests\verify-interaction-contract.ps1
+          .\tests\verify-rich-text-roundtrip.ps1
+
+      - name: Publish self-contained app
+        shell: pwsh
+        run: |
+          dotnet publish .\src\Pancake\Pancake.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:Platform=x64 `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:Version=${{ steps.version.outputs.version }} `
+            -o .\artifacts\publish `
+            --nologo
+
+      - name: Create portable archive
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path .\artifacts\publish\* `
+            -DestinationPath .\artifacts\Pancake-win-x64-${{ steps.version.outputs.version }}.zip `
+            -CompressionLevel Optimal
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pancake-win-x64-${{ steps.version.outputs.version }}
+          path: .\artifacts\Pancake-win-x64-${{ steps.version.outputs.version }}.zip
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            .\artifacts\Pancake-win-x64-${{ steps.version.outputs.version }}.zip `
+            --repo "${{ github.repository }}" `
+            --verify-tag `
+            --generate-notes `
+            --title "Pancake ${{ github.ref_name }}"
+
+    permissions:
+      contents: write
