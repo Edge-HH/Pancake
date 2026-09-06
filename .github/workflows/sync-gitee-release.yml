@@ -1,102 +1,328 @@
 name: Sync Release to Gitee
 
 on:
+  # GitHub 发布 Release 时自动运行
   release:
-    types: [published]
+    types:
+      - published
+
+  # 允许手动运行
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要同步的 GitHub Release Tag，例如 v1.0.0"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   sync:
+    name: Sync to Gitee
     runs-on: ubuntu-latest
 
     env:
-      # ↓↓↓ 修改这里 ↓↓↓
+      # ==========================
+      # 修改下面这三个值
+      # ==========================
+
+      # Gitee 用户名
       GITEE_USERNAME: EdgeHH
       GITEE_OWNER: EdgeHH
       GITEE_REPO: Pancake
 
+      # ==========================
+
     steps:
-      # 1. 同步 GitHub 仓库、分支和 Tag 到 Gitee
-      - name: Sync repository to Gitee
+      # --------------------------------------------------
+      # 1. 确定需要同步哪个 Release
+      # --------------------------------------------------
+      - name: Resolve Release Tag
+        id: release
+        shell: bash
+        env:
+          MANUAL_TAG: ${{ inputs.tag }}
+          AUTO_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${MANUAL_TAG}"
+          else
+            TAG="${AUTO_TAG}"
+          fi
+
+          if [ -z "${TAG}" ]; then
+            echo "错误：没有获取到 Release Tag"
+            exit 1
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "准备同步 Release: ${TAG}"
+
+
+      # --------------------------------------------------
+      # 2. 获取 GitHub Release 信息
+      # --------------------------------------------------
+      - name: Get GitHub Release Information
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "读取 GitHub Release: ${TAG}"
+
+          gh api \
+            "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            > github-release.json
+
+          echo "Release 信息："
+          jq '{
+            tag_name,
+            name,
+            published_at,
+            assets: [.assets[].name]
+          }' github-release.json
+
+
+      # --------------------------------------------------
+      # 3. 同步 GitHub 仓库到 Gitee
+      # --------------------------------------------------
+      - name: Sync Repository to Gitee
         env:
           GH_TOKEN: ${{ github.token }}
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        shell: bash
         run: |
           set -euo pipefail
+
+          if [ -z "${GITEE_TOKEN}" ]; then
+            echo "错误：没有配置 GITEE_TOKEN"
+            exit 1
+          fi
+
+          echo "克隆 GitHub 仓库..."
 
           git clone --bare \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
             repo.git
 
-          git -C repo.git push --mirror \
-            "https://${GITEE_USERNAME}:${GITEE_TOKEN}@gitee.com/${GITEE_OWNER}/${GITEE_REPO}.git"
+          cd repo.git
 
-      # 2. 下载 GitHub Release 中的所有附件
-      - name: Download GitHub Release assets
+          echo "准备认证 Gitee..."
+
+          # Gitee HTTPS：
+          # 用户名 = Gitee 用户名
+          # 密码   = 私人令牌
+          AUTH=$(printf '%s:%s' "${GITEE_USERNAME}" "${GITEE_TOKEN}" | base64 -w 0)
+
+          # 避免认证信息出现在日志
+          echo "::add-mask::${AUTH}"
+
+          GITEE_URL="https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}.git"
+
+          echo "同步所有分支到 Gitee..."
+
+          git \
+            -c http.extraheader="Authorization: Basic ${AUTH}" \
+            push \
+            "${GITEE_URL}" \
+            '+refs/heads/*:refs/heads/*' \
+            --force \
+            --prune
+
+          echo "同步所有 Tag 到 Gitee..."
+
+          git \
+            -c http.extraheader="Authorization: Basic ${AUTH}" \
+            push \
+            "${GITEE_URL}" \
+            '+refs/tags/*:refs/tags/*' \
+            --force \
+            --prune
+
+          cd ..
+
+          echo "仓库同步完成。"
+
+
+      # --------------------------------------------------
+      # 4. 下载 GitHub Release 附件
+      # --------------------------------------------------
+      - name: Download GitHub Release Assets
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
         run: |
+          set -euo pipefail
+
           mkdir -p assets
 
+          ASSET_COUNT=$(jq '.assets | length' github-release.json)
+
+          echo "GitHub Release 附件数量：${ASSET_COUNT}"
+
+          if [ "${ASSET_COUNT}" -eq 0 ]; then
+            echo "这个 Release 没有上传附件。"
+            exit 0
+          fi
+
+          echo "下载 Release 附件..."
+
           gh release download \
-            "${{ github.event.release.tag_name }}" \
+            "${TAG}" \
             --repo "${GITHUB_REPOSITORY}" \
             --dir assets
 
-      # 3. 在 Gitee 创建 Release
-      - name: Create Gitee Release
-        id: release
+          echo "下载完成："
+
+          ls -lah assets/
+
+
+      # --------------------------------------------------
+      # 5. 获取或创建 Gitee Release
+      # --------------------------------------------------
+      - name: Create or Find Gitee Release
+        id: gitee_release
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
-          RELEASE_NAME: ${{ github.event.release.name }}
-          RELEASE_BODY: ${{ github.event.release.body }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
         run: |
           set -euo pipefail
 
-          # 先检查对应 Release 是否已经存在
-          RELEASE_ID=$(curl -fsS \
-            -H "Authorization: Bearer ${GITEE_TOKEN}" \
-            "https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases?per_page=100" \
-            | jq -r --arg TAG "$TAG" \
-            '.[] | select(.tag_name == $TAG) | .id' \
-            | head -n1)
+          RELEASE_NAME=$(jq -r '.name // .tag_name' github-release.json)
+          RELEASE_BODY=$(jq -r '.body // ""' github-release.json)
 
-          # 不存在则创建
-          if [ -z "$RELEASE_ID" ]; then
-            RESPONSE=$(curl -fsS -X POST \
+          # Tag 放进 URL 前进行编码
+          TAG_ENCODED=$(jq -rn --arg tag "${TAG}" '$tag | @uri')
+
+          API_BASE="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
+
+          echo "检查 Gitee 是否已经存在 Release: ${TAG}"
+
+          HTTP_CODE=$(curl \
+            -sS \
+            -o gitee-release.json \
+            -w "%{http_code}" \
+            -H "Authorization: Bearer ${GITEE_TOKEN}" \
+            "${API_BASE}/releases/tags/${TAG_ENCODED}")
+
+          if [ "${HTTP_CODE}" = "200" ]; then
+
+            echo "Gitee Release 已经存在。"
+
+            RELEASE_ID=$(jq -r '.id' gitee-release.json)
+
+          elif [ "${HTTP_CODE}" = "404" ]; then
+
+            echo "Gitee Release 不存在，开始创建..."
+
+            curl \
+              -fsS \
+              -X POST \
               -H "Authorization: Bearer ${GITEE_TOKEN}" \
               --data-urlencode "tag_name=${TAG}" \
-              --data-urlencode "name=${RELEASE_NAME:-$TAG}" \
+              --data-urlencode "name=${RELEASE_NAME}" \
               --data-urlencode "body=${RELEASE_BODY}" \
-              "https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases")
+              "${API_BASE}/releases" \
+              > gitee-release.json
 
-            RELEASE_ID=$(echo "$RESPONSE" | jq -r '.id')
+            RELEASE_ID=$(jq -r '.id' gitee-release.json)
+
+            if [ -z "${RELEASE_ID}" ] || [ "${RELEASE_ID}" = "null" ]; then
+              echo "错误：创建 Gitee Release 失败"
+              cat gitee-release.json
+              exit 1
+            fi
+
+            echo "Gitee Release 创建成功。"
+
+          else
+
+            echo "错误：检查 Gitee Release 失败"
+            echo "HTTP 状态码：${HTTP_CODE}"
+
+            cat gitee-release.json || true
+
+            exit 1
+
           fi
+
+          echo "Gitee Release ID: ${RELEASE_ID}"
 
           echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
 
-      # 4. 把 GitHub Release 附件上传到 Gitee
-      - name: Upload assets to Gitee
+
+      # --------------------------------------------------
+      # 6. 上传 GitHub Release 附件到 Gitee
+      # --------------------------------------------------
+      - name: Upload Release Assets to Gitee
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+          RELEASE_ID: ${{ steps.gitee_release.outputs.release_id }}
+        shell: bash
         run: |
           set -euo pipefail
 
+          API_BASE="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}"
+
           shopt -s nullglob
 
-          for FILE in assets/*; do
-            echo "Uploading $(basename "$FILE") ..."
+          FILES=(assets/*)
 
-            curl -fsS -X POST \
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "没有需要上传的 Release 附件。"
+            exit 0
+          fi
+
+          echo "准备上传 ${#FILES[@]} 个附件..."
+
+          for FILE in "${FILES[@]}"; do
+
+            FILE_NAME=$(basename "${FILE}")
+
+            echo ""
+            echo "----------------------------------------"
+            echo "上传：${FILE_NAME}"
+            echo "----------------------------------------"
+
+            curl \
+              -fsS \
+              -X POST \
               -H "Authorization: Bearer ${GITEE_TOKEN}" \
               -F "file=@${FILE}" \
-              "https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases/${RELEASE_ID}/attach_files"
+              "${API_BASE}/releases/${RELEASE_ID}/attach_files"
 
-            echo
+            echo ""
+            echo "上传完成：${FILE_NAME}"
+
           done
 
-          echo "Gitee Release sync completed."
+
+      # --------------------------------------------------
+      # 7. 输出结果
+      # --------------------------------------------------
+      - name: Sync Completed
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "            同步完成"
+          echo "=========================================="
+          echo ""
+          echo "Release:"
+          echo "${TAG}"
+          echo ""
+          echo "GitHub:"
+          echo "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+          echo ""
+          echo "Gitee:"
+          echo "https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}/releases"
+          echo ""
