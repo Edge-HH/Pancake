@@ -1,0 +1,102 @@
+name: Sync Release to Gitee
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    env:
+      # ↓↓↓ 修改这里 ↓↓↓
+      GITEE_USERNAME: EdgeHH
+      GITEE_OWNER: EdgeHH
+      GITEE_REPO: Pancake
+
+    steps:
+      # 1. 同步 GitHub 仓库、分支和 Tag 到 Gitee
+      - name: Sync repository to Gitee
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git clone --bare \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            repo.git
+
+          git -C repo.git push --mirror \
+            "https://${GITEE_USERNAME}:${GITEE_TOKEN}@gitee.com/${GITEE_OWNER}/${GITEE_REPO}.git"
+
+      # 2. 下载 GitHub Release 中的所有附件
+      - name: Download GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p assets
+
+          gh release download \
+            "${{ github.event.release.tag_name }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir assets
+
+      # 3. 在 Gitee 创建 Release
+      - name: Create Gitee Release
+        id: release
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          set -euo pipefail
+
+          # 先检查对应 Release 是否已经存在
+          RELEASE_ID=$(curl -fsS \
+            -H "Authorization: Bearer ${GITEE_TOKEN}" \
+            "https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases?per_page=100" \
+            | jq -r --arg TAG "$TAG" \
+            '.[] | select(.tag_name == $TAG) | .id' \
+            | head -n1)
+
+          # 不存在则创建
+          if [ -z "$RELEASE_ID" ]; then
+            RESPONSE=$(curl -fsS -X POST \
+              -H "Authorization: Bearer ${GITEE_TOKEN}" \
+              --data-urlencode "tag_name=${TAG}" \
+              --data-urlencode "name=${RELEASE_NAME:-$TAG}" \
+              --data-urlencode "body=${RELEASE_BODY}" \
+              "https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases")
+
+            RELEASE_ID=$(echo "$RESPONSE" | jq -r '.id')
+          fi
+
+          echo "release_id=${RELEASE_ID}" >> "$GITHUB_OUTPUT"
+
+      # 4. 把 GitHub Release 附件上传到 Gitee
+      - name: Upload assets to Gitee
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          RELEASE_ID: ${{ steps.release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+
+          shopt -s nullglob
+
+          for FILE in assets/*; do
+            echo "Uploading $(basename "$FILE") ..."
+
+            curl -fsS -X POST \
+              -H "Authorization: Bearer ${GITEE_TOKEN}" \
+              -F "file=@${FILE}" \
+              "https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases/${RELEASE_ID}/attach_files"
+
+            echo
+          done
+
+          echo "Gitee Release sync completed."
