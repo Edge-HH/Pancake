@@ -126,9 +126,12 @@ jobs:
 
           echo "同步所有分支到 Gitee..."
 
+          GIT_TERMINAL_PROMPT=0 \
           git \
             -c http.extraheader="Authorization: Basic ${AUTH}" \
             push \
+            --verbose \
+            --progress \
             "${GITEE_URL}" \
             '+refs/heads/*:refs/heads/*' \
             --force \
