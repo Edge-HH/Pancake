@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using Microsoft.UI.Xaml.Media;
 using Pancake.Models;
 
@@ -98,7 +98,7 @@ public sealed class MainViewModel : ObservableObject
 
     public static SolidColorBrush BrushFromHex(string hex)
     {
-        string value = hex.TrimStart('#');
+        string value = Pancake.Services.ColorPalette.Resolve(hex).TrimStart('#');
         return new SolidColorBrush(Windows.UI.Color.FromArgb(
             255,
             Convert.ToByte(value[..2], 16),

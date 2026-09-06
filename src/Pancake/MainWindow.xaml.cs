@@ -1,4 +1,4 @@
-using Microsoft.UI.Windowing;
+﻿using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -39,6 +39,11 @@ public sealed partial class MainWindow : Window
     private bool _isEditing;
     private bool _isFullScreen;
     private bool _isLoaded;
+    private bool _refreshingDevices;
+    private readonly NoiseAlertGate _noiseAlertGate = new();
+    private readonly NoiseAlertPlayer _noiseAlertPlayer = new();
+    private readonly System.Diagnostics.Stopwatch _noiseAlertClock = System.Diagnostics.Stopwatch.StartNew();
+    private WeatherSnapshot? _lastWeather;
     private int _activeTileInteractions;
     private double _renderedGridWidth;
     private double _renderedGridHeight;
@@ -59,8 +64,16 @@ public sealed partial class MainWindow : Window
         RootShell.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(RootShell_GlobalPointerMoved), true);
         RootShell.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(RootShell_GlobalPointerReleased), true);
         RootShell.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(RootShell_GlobalPointerReleased), true);
+        RootShell.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(RootShell_GlobalPointerReleased), true);
 
-        RootShell.RequestedTheme = ElementTheme.Dark;
+        RootShell.RequestedTheme = _settings.Theme switch { "Light" => ElementTheme.Light, "Default" => ElementTheme.Default, _ => ElementTheme.Dark };
+        ApplyPalette();
+        RootShell.ActualThemeChanged += (_, _) => ApplyActualTheme();
+        BoardTheme.IsLight = RootShell.ActualTheme == ElementTheme.Light;
+        AppVersionText.Text = typeof(MainWindow).Assembly.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion
+            ?? typeof(MainWindow).Assembly.GetName().Version?.ToString() ?? "未知版本";
+        RefreshMicrophoneDevices();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragRegion);
         SystemBackdrop = new MicaBackdrop();
@@ -70,7 +83,7 @@ public sealed partial class MainWindow : Window
         RootShell.Loaded += (_, _) =>
         {
             _isLoaded = true;
-            BuildTiles();
+            ApplyActualTheme();
             ShowInitialView();
             StartNoiseMonitoring();
             ScheduleSave();
@@ -84,10 +97,12 @@ public sealed partial class MainWindow : Window
         };
         Closed += (_, _) =>
         {
+            _isLoaded = false;
             _clockTimer.Stop();
             _weatherTimer.Stop();
             SaveStateNow();
             _noiseMonitor.Dispose();
+            _noiseAlertPlayer.Dispose();
         };
     }
 
@@ -104,6 +119,7 @@ public sealed partial class MainWindow : Window
         _weatherTimer.Tick += async (_, _) => await RefreshWeatherAsync();
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); SaveStateNow(); };
 
+        _noiseMonitor.FastLevelAvailable += (_, level) => DispatcherQueue.TryEnqueue(() => ProcessNoiseAlert(level));
         _noiseMonitor.LevelAvailable += (_, level) => DispatcherQueue.TryEnqueue(() => UpdateNoiseDisplay(level));
         _noiseMonitor.CaptureFailed += (_, message) => DispatcherQueue.TryEnqueue(() =>
         {
@@ -179,6 +195,7 @@ public sealed partial class MainWindow : Window
         if (_isEditing) return;
         ViewModel.BeginEditing();
         _isEditing = true;
+        UpdateRichTextToolbar();
         EditBoardIcon.Glyph = "\uE73E";
         AutomationProperties.SetName(EditBoardButton, "完成编辑");
         AddSubjectButton.Visibility = Visibility.Visible;
@@ -192,6 +209,7 @@ public sealed partial class MainWindow : Window
     {
         ViewModel.PublishEditing();
         _isEditing = false;
+        UpdateRichTextToolbar();
         _activeTileInteractions = 0;
         EditBoardIcon.Glyph = "\uE70F";
         AutomationProperties.SetName(EditBoardButton, "编辑看板");
@@ -207,6 +225,7 @@ public sealed partial class MainWindow : Window
     {
         ViewModel.DiscardEditing();
         _isEditing = false;
+        UpdateRichTextToolbar();
         _activeTileInteractions = 0;
         BuildTiles();
         EditBoardIcon.Glyph = "\uE70F";
@@ -233,6 +252,7 @@ public sealed partial class MainWindow : Window
 
     private void BuildTiles()
     {
+        UpdateRichTextToolbar();
         BoardCanvas.Children.Clear();
         foreach (SubjectBoard subject in ViewModel.Subjects) AddTile(subject);
         UpdateBoardBounds();
@@ -252,6 +272,19 @@ public sealed partial class MainWindow : Window
         {
             DataContext = subject
         };
+        tile.FormattingToolbarChanged += (toolbar, active) =>
+        {
+            if (active && _isEditing)
+            {
+                RichTextToolbarHost.Content = toolbar;
+                RichTextToolbarHint.Visibility = Visibility.Collapsed;
+            }
+            else if (ReferenceEquals(RichTextToolbarHost.Content, toolbar))
+            {
+                RichTextToolbarHost.Content = null;
+                RichTextToolbarHint.Visibility = Visibility.Visible;
+            }
+        };
         tile.SetEditing(_isEditing);
         Canvas.SetLeft(tile, subject.X);
         Canvas.SetTop(tile, subject.Y);
@@ -261,6 +294,15 @@ public sealed partial class MainWindow : Window
     private void SetTilesEditing(bool editing)
     {
         foreach (SubjectTileControl tile in BoardCanvas.Children.OfType<SubjectTileControl>()) tile.SetEditing(editing);
+    }
+
+    private void UpdateRichTextToolbar()
+    {
+        // 结束编辑或重建磁贴时释放旧编辑器，避免按钮继续修改已删除的作业。
+        RichTextToolbarHost.Content = null;
+        RichTextToolbarHint.Visibility = Visibility.Visible;
+        RichTextToolbar.Visibility = _isEditing ? Visibility.Visible : Visibility.Collapsed;
+        TopDateText.Visibility = _isEditing ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void SetTileInteractionActive(bool active)
@@ -415,38 +457,197 @@ public sealed partial class MainWindow : Window
 
     private void UpdateSubjectCount() => SubjectCountText.Text = $"{ViewModel.Subjects.Count} 个科目";
 
+    private void SettingsNavigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    {
+        if (AppearanceSettingsPanel is null || ComponentSettingsPanel is null || AboutSettingsPanel is null) return;
+        string page = (args.SelectedItem as NavigationViewItem)?.Tag?.ToString() ?? "Appearance";
+        AppearanceSettingsPanel.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
+        ComponentSettingsPanel.Visibility = page == "Components" ? Visibility.Visible : Visibility.Collapsed;
+        AboutSettingsPanel.Visibility = page == "About" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPageTitle.Text = page switch { "Components" => "组件", "About" => "关于", _ => "外观" };
+        SettingsPageDescription.Text = page switch
+        {
+            "Components" => "设置天气和麦克风噪音检测。",
+            "About" => "查看版本信息并访问 Pancake 项目仓库。",
+            _ => "调整界面主题和看板色系。"
+        };
+        SettingsContentScrollViewer.ChangeView(null, 0, null, true);
+    }
+
+    private void ApplyActualTheme()
+    {
+        BoardTheme.IsLight = RootShell.ActualTheme == ElementTheme.Light;
+        if (!_isLoaded) return;
+        // 已有笔迹保留原始颜色；富文本在加载和保存时进行默认内容色转换。
+        BuildTiles();
+        HideFullScreenExitHint();
+        if (_appWindow is not null)
+        {
+            _appWindow.TitleBar.ButtonForegroundColor = BoardTheme.TextColor;
+            _appWindow.TitleBar.ButtonInactiveForegroundColor = BoardTheme.TextColor;
+            _appWindow.TitleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+            _appWindow.TitleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+        }
+    }
+
+    private void PaletteComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_isLoaded) return;
+        _settings.Palette = PaletteComboBox.SelectedIndex == 1 ? "Macaron" : "Vivid";
+        ApplyPalette();
+        BuildTiles();
+        ScheduleSave();
+    }
+
+    private void ApplyPalette()
+    {
+        ColorPalette.IsMacaron = _settings.Palette == "Macaron";
+        foreach (var subject in ViewModel.Subjects)
+        {
+            subject.AccentBrush = MainViewModel.BrushFromHex(subject.AccentHex);
+            foreach (var entry in subject.Entries)
+                entry.RtfContent = ColorPalette.ConvertRtf(entry.RtfContent, ColorPalette.IsMacaron);
+        }
+    }
+
     private void StartNoiseMonitoring()
     {
-        int sampleRate = GetSelectedSampleRate();
+        _noiseMonitor.IntervalSeconds = _settings.NoiseIntervalSeconds;
+        _noiseMonitor.CalibrationOffsetDb = _settings.MicrophoneCalibrationDb;
         MicrophoneStatusInfoBar.Severity = InfoBarSeverity.Informational;
-        MicrophoneStatusInfoBar.Message = $"正在以 {sampleRate} Hz 采样，只计算音量";
-        _noiseMonitor.Start(sampleRate);
+        MicrophoneStatusInfoBar.Message = "正在启动输入设备…";
+        _noiseAlertGate.Reset();
+        _noiseMonitor.Start(_settings.MicrophoneDeviceId);
+        if (_settings.NoiseAlertEnabled) PrepareNoiseAlert();
     }
 
-    private int GetSelectedSampleRate()
+    private void RefreshMicrophoneDevices_Click(object sender, RoutedEventArgs e) => RefreshMicrophoneDevices();
+
+    private void RefreshMicrophoneDevices()
     {
-        if (MicrophoneSampleRateComboBox.SelectedItem is ComboBoxItem item && int.TryParse(item.Tag?.ToString(), out int sampleRate)) return sampleRate;
-        return 16000;
+        _refreshingDevices = true;
+        try
+        {
+            var devices = NoiseMonitorService.GetDevices();
+            // 保留失联设备的选择，避免悄悄切换到另一支未经校准的麦克风。
+            if (!devices.Any(device => device.Id == _settings.MicrophoneDeviceId))
+                devices.Add(new(_settings.MicrophoneDeviceId, "已选择的设备不可用（请选择其他输入设备）"));
+            MicrophoneDeviceComboBox.DisplayMemberPath = "Name";
+            MicrophoneDeviceComboBox.ItemsSource = devices;
+            MicrophoneDeviceComboBox.SelectedItem = devices.First(device => device.Id == _settings.MicrophoneDeviceId);
+        }
+        catch (Exception exception) { MicrophoneStatusInfoBar.Message = exception.Message; }
+        finally { _refreshingDevices = false; }
+        if (_isLoaded) StartNoiseMonitoring();
     }
 
-    private void MicrophoneSampleRateComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void MicrophoneDeviceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isLoaded) { StartNoiseMonitoring(); ScheduleSave(); }
+        if (!_isLoaded || _refreshingDevices || MicrophoneDeviceComboBox.SelectedItem is not MicrophoneDevice device) return;
+        _settings.MicrophoneDeviceId = device.Id;
+        _settings.MicrophoneCalibrationDb = 0;
+        MicrophoneCalibrationLabel.Text = "校准偏移 · 0 dB（请重新校准）";
+        StartNoiseMonitoring();
+        ScheduleSave();
     }
 
-    private void MicrophoneCalibrationSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    private void NoiseIntervalSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
     {
-        _noiseMonitor.CalibrationOffsetDb = e.NewValue;
-        if (MicrophoneCalibrationLabel is not null) MicrophoneCalibrationLabel.Text = $"校准偏移 · {e.NewValue:+0;-0;0} dB";
+        if (NoiseIntervalLabel is not null) NoiseIntervalLabel.Text = $"检测间隔 · {e.NewValue:0.0} 秒";
+        if (!_isLoaded) return;
+        _settings.NoiseIntervalSeconds = Math.Round(e.NewValue, 1);
+        _noiseMonitor.IntervalSeconds = _settings.NoiseIntervalSeconds;
+        ScheduleSave();
+    }
+
+    private void NoiseThresholdSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (NoiseThresholdLabel is not null) NoiseThresholdLabel.Text = $"吵闹阈值 · {e.NewValue:0} dB";
+        if (!_isLoaded) return;
+        _settings.NoiseThresholdDb = e.NewValue;
+        ScheduleSave();
+    }
+
+    private void NoiseAlertToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_isLoaded) return;
+        _settings.NoiseAlertEnabled = NoiseAlertToggle.IsOn;
+        _noiseAlertGate.Reset();
+        if (_settings.NoiseAlertEnabled) PrepareNoiseAlert();
+        else _noiseAlertPlayer.Dispose();
+        ScheduleSave();
+    }
+
+    private void CalibrateMicrophone_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_noiseMonitor.TryCalibrate(CalibrationTargetBox.Value))
+        {
+            MicrophoneStatusInfoBar.Severity = InfoBarSeverity.Warning;
+            MicrophoneStatusInfoBar.Message = "请填写 20–120 dB 的环境音量，并等待麦克风产生有效读数后再校准。";
+            return;
+        }
+        _settings.CalibrationTargetDb = CalibrationTargetBox.Value;
+        _settings.MicrophoneCalibrationDb = _noiseMonitor.CalibrationOffsetDb;
+        MicrophoneCalibrationLabel.Text = $"校准偏移 · {_settings.MicrophoneCalibrationDb:+0.0;-0.0;0} dB";
         ScheduleSave();
     }
 
     private void UpdateNoiseDisplay(double level)
     {
-        string state = level < 45 ? "安静" : level < 60 ? "适中" : "偏吵";
+        bool noisy = level >= _settings.NoiseThresholdDb;
+        string state = noisy ? "吵闹" : level < Math.Min(45, _settings.NoiseThresholdDb) ? "安静" : "适中";
         NoiseText.Text = $"{level:0} dB · {state}";
-        MicrophoneStatusInfoBar.Severity = InfoBarSeverity.Success;
+        MicrophoneStatusInfoBar.Severity = noisy ? InfoBarSeverity.Warning : InfoBarSeverity.Success;
         MicrophoneStatusInfoBar.Message = $"麦克风工作正常 · {level:0.0} dB";
+    }
+
+    private void PrepareNoiseAlert()
+    {
+        try { _noiseAlertPlayer.Prepare(); }
+        catch (Exception exception) { MicrophoneStatusInfoBar.Message = $"提示音设备不可用：{exception.Message}"; }
+    }
+
+    private void ProcessNoiseAlert(double level)
+    {
+        if (!_isLoaded) return;
+        if (_noiseAlertGate.ShouldPlay(level, _settings.NoiseThresholdDb, _settings.NoiseAlertEnabled, _noiseAlertClock.Elapsed.TotalSeconds))
+            PlayNoiseAlert();
+    }
+
+    private void PreviewNoiseAlert_Click(object sender, RoutedEventArgs e)
+    {
+        _noiseAlertGate.Reset();
+        _noiseAlertGate.ShouldPlay(_settings.NoiseThresholdDb, _settings.NoiseThresholdDb, true, _noiseAlertClock.Elapsed.TotalSeconds);
+        PlayNoiseAlert();
+    }
+
+    private void PlayNoiseAlert()
+    {
+        try { _noiseAlertPlayer.Play(); }
+        catch (Exception exception)
+        {
+            MicrophoneStatusInfoBar.Severity = InfoBarSeverity.Warning;
+            MicrophoneStatusInfoBar.Message = $"提示音播放失败：{exception.Message}";
+        }
+    }
+
+    private void WeatherAlertsToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_isLoaded) return;
+        _settings.ShowWeatherAlerts = WeatherAlertsToggle.IsOn;
+        DisplayWeather();
+        ScheduleSave();
+    }
+
+    private void DisplayWeather()
+    {
+        if (_lastWeather is not WeatherSnapshot snapshot) return;
+        string alerts = _settings.ShowWeatherAlerts ? string.Join("；", snapshot.Alerts.Select(alert => alert.Title)) : "";
+        WeatherText.Text = $"{snapshot.Condition}  {snapshot.TemperatureCelsius:0.#}°C" + (alerts.Length > 0 ? $" · {alerts}" : "");
+        ToolTipService.SetToolTip(WeatherText, string.Join("\n\n", snapshot.Alerts.Select(alert => $"{alert.Title}\n{alert.Detail}")));
+        WeatherAlertsText.Text = _settings.ShowWeatherAlerts
+            ? (snapshot.Alerts.Count == 0 ? "当前地区暂无预警" : string.Join("\n\n", snapshot.Alerts.Select(alert => $"{alert.Title}\n{alert.Detail}")))
+            : "已关闭预警显示";
     }
 
     private async void RefreshWeatherButton_Click(object sender, RoutedEventArgs e) => await RefreshWeatherAsync();
@@ -457,12 +658,16 @@ public sealed partial class MainWindow : Window
         try
         {
             WeatherSnapshot snapshot = await _weatherService.GetCurrentAsync(_settings.WeatherCityCode);
-            WeatherText.Text = $"{snapshot.Condition}  {snapshot.TemperatureCelsius:0.#}°C";
+            _lastWeather = snapshot;
+            DisplayWeather();
             WeatherStatusText.Text = $"更新于 {DateTime.Now:HH:mm}";
             if (!_weatherTimer.IsEnabled) _weatherTimer.Start();
         }
         catch (Exception exception)
         {
+            _lastWeather = null;
+            WeatherAlertsText.Text = "预警更新失败，请稍后重试。";
+            ToolTipService.SetToolTip(WeatherText, null);
             WeatherText.Text = "天气不可用";
             WeatherStatusText.Text = exception.Message;
         }
@@ -505,12 +710,6 @@ public sealed partial class MainWindow : Window
         ScheduleSave();
     }
 
-    private void UpdateRepositoryTextBox_LostFocus(object sender, RoutedEventArgs e)
-    {
-        _settings.UpdateRepository = UpdateRepositoryTextBox.Text.Trim();
-        ScheduleSave();
-    }
-
     private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e) => await CheckForUpdatesAsync(true);
 
     private async Task CheckForUpdatesAsync(bool interactive)
@@ -518,7 +717,7 @@ public sealed partial class MainWindow : Window
         try
         {
             UpdateStatusText.Text = "正在检查 GitHub Release…";
-            GitHubReleaseUpdate? update = await _updateService.CheckAsync(_settings.UpdateRepository);
+            GitHubReleaseUpdate? update = await _updateService.CheckAsync("Edge-HH/Pancake");
             if (update is null)
             {
                 UpdateStatusText.Text = "当前已是最新版，或最新 Release 没有可安装资产。";
@@ -546,14 +745,19 @@ public sealed partial class MainWindow : Window
             _settings = state.Settings;
             if (state.Subjects.Count > 0) ViewModel.ReplaceSubjects(AppDataStore.RestoreSubjects(state.Subjects));
             ThemeComboBox.SelectedIndex = _settings.Theme switch { "Light" => 1, "Default" => 2, _ => 0 };
-            MicrophoneCalibrationSlider.Value = _settings.MicrophoneCalibrationDb;
-            for (int index = 0; index < MicrophoneSampleRateComboBox.Items.Count; index++)
-                if (MicrophoneSampleRateComboBox.Items[index] is ComboBoxItem item && item.Tag?.ToString() == _settings.MicrophoneSampleRate.ToString()) MicrophoneSampleRateComboBox.SelectedIndex = index;
+            PaletteComboBox.SelectedIndex = _settings.Palette == "Macaron" ? 1 : 0;
+            NoiseIntervalSlider.Value = Math.Clamp(_settings.NoiseIntervalSeconds, 0.1, 2);
+            _settings.NoiseIntervalSeconds = NoiseIntervalSlider.Value;
+            NoiseThresholdSlider.Value = Math.Clamp(_settings.NoiseThresholdDb, 20, 120);
+            _settings.NoiseThresholdDb = NoiseThresholdSlider.Value;
+            NoiseAlertToggle.IsOn = _settings.NoiseAlertEnabled;
+            CalibrationTargetBox.Value = _settings.CalibrationTargetDb;
+            MicrophoneCalibrationLabel.Text = $"校准偏移 · {_settings.MicrophoneCalibrationDb:+0.0;-0.0;0} dB";
+            WeatherAlertsToggle.IsOn = _settings.ShowWeatherAlerts;
             WeatherCityTextBox.Text = _settings.WeatherCityName;
             IsGridSnappingEnabled = _settings.GridSnappingEnabled;
             GridSnapToggleButton.IsChecked = IsGridSnappingEnabled;
             AutoUpdateToggle.IsOn = _settings.AutoUpdateEnabled;
-            UpdateRepositoryTextBox.Text = _settings.UpdateRepository;
         }
         catch (Exception exception)
         {
@@ -573,10 +777,7 @@ public sealed partial class MainWindow : Window
         try
         {
             _settings.GridSnappingEnabled = IsGridSnappingEnabled;
-            _settings.MicrophoneSampleRate = GetSelectedSampleRate();
-            _settings.MicrophoneCalibrationDb = MicrophoneCalibrationSlider.Value;
             _settings.AutoUpdateEnabled = AutoUpdateToggle.IsOn;
-            _settings.UpdateRepository = UpdateRepositoryTextBox.Text.Trim();
             _dataStore.Save(new AppState { Settings = _settings, Subjects = AppDataStore.CaptureSubjects(ViewModel.Subjects) });
         }
         catch (Exception exception)
@@ -591,7 +792,8 @@ public sealed partial class MainWindow : Window
 
     private void RootShell_GlobalPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (_isEditing || !_isFullScreen || _globalGesturePointerId is not null) return;
+        if (_isEditing || !_isFullScreen) return;
+        // 子控件可能接管指针且不再把释放事件路由到根容器；新的按下必须能覆盖陈旧状态。
         _globalGesturePointerId = e.Pointer.PointerId;
         _globalGestureStart = e.GetCurrentPoint(RootShell).Position;
     }
@@ -616,7 +818,7 @@ public sealed partial class MainWindow : Window
         if (_isEditing || !_isFullScreen) return;
         FullScreenLabel.Visibility = Visibility.Visible;
         FullScreenButton.Background = FullScreenHintBrush;
-        FullScreenButton.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 255, 255));
+        FullScreenButton.Foreground = BoardTheme.TextBrush;
         _fullScreenLabelTimer.Stop();
         _fullScreenLabelTimer.Start();
     }
@@ -626,7 +828,7 @@ public sealed partial class MainWindow : Window
         _fullScreenLabelTimer.Stop();
         FullScreenLabel.Visibility = Visibility.Collapsed;
         FullScreenButton.Background = ToolbarButtonBrush;
-        FullScreenButton.Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 255, 255, 255));
+        FullScreenButton.Foreground = BoardTheme.TextBrush;
     }
 
     private void SetFullScreen(bool isFullScreen)

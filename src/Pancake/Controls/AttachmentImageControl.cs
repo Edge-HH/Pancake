@@ -1,3 +1,4 @@
+﻿using Pancake.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
@@ -44,6 +45,7 @@ public sealed class AttachmentImageControl : Grid
     private double _resizeStartX;
     private double _resizeStartY;
     private ResizeHandle _activeResizeHandle;
+    private double _imageAspect;
 
     public AttachmentImageControl(AttachmentItem attachment, Action deleteAttachment, Action contentChanged, Action<bool> interactionChanged)
     {
@@ -64,7 +66,7 @@ public sealed class AttachmentImageControl : Grid
         {
             Width = Width,
             Height = initialHeight,
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 18, 18, 20)),
+            Background = BoardTheme.SurfaceBrush,
             Clip = new RectangleGeometry(),
             ManipulationMode = ManipulationModes.None
         };
@@ -146,13 +148,17 @@ public sealed class AttachmentImageControl : Grid
             BitmapImage bitmap = new();
             await bitmap.SetSourceAsync(stream);
             _image.Source = bitmap;
-            if (bitmap.PixelWidth > 0 && bitmap.PixelHeight > 0 && _attachment.AspectRatio <= 0)
+            if (bitmap.PixelWidth > 0 && bitmap.PixelHeight > 0)
             {
-                _attachment.AspectRatio = (double)bitmap.PixelWidth / bitmap.PixelHeight;
-                _imageFrame.Width = Width;
-                _imageFrame.Height = Width / _attachment.AspectRatio;
-                Height = _imageFrame.Height + 40;
-                _contentChanged();
+                _imageAspect = (double)bitmap.PixelWidth / bitmap.PixelHeight;
+                if (_attachment.AspectRatio <= 0)
+                {
+                    _attachment.AspectRatio = _imageAspect;
+                    _imageFrame.Width = Width;
+                    _imageFrame.Height = Width / _attachment.AspectRatio;
+                    Height = _imageFrame.Height + 40;
+                    _contentChanged();
+                }
             }
         }
         catch
@@ -193,8 +199,8 @@ public sealed class AttachmentImageControl : Grid
     {
         if (!_isSelected) return;
         _activeResizeHandle = (ResizeHandle)((Thumb)sender).Tag;
-        _resizeStartWidth = Width;
-        _resizeStartHeight = Height;
+        _resizeStartWidth = _imageFrame.Width;
+        _resizeStartHeight = _imageFrame.Height;
         _resizeStartX = _attachment.PositionX;
         _resizeStartY = _attachment.PositionY;
         BeginInteraction();
@@ -208,6 +214,9 @@ public sealed class AttachmentImageControl : Grid
         bool corner = _activeResizeHandle is ResizeHandle.TopLeft or ResizeHandle.TopRight or ResizeHandle.BottomLeft or ResizeHandle.BottomRight;
         double newWidth = _resizeStartWidth;
         double newHeight = _resizeStartHeight;
+        double oldFrameWidth = _imageFrame.Width;
+        double oldFrameHeight = _imageFrame.Height;
+        (double oldContentWidth, double oldContentHeight) = _isCropping ? GetVisualContentSize() : (0, 0);
 
         if (_isCropping)
         {
@@ -244,12 +253,29 @@ public sealed class AttachmentImageControl : Grid
         _imageFrame.Width = newWidth;
         _imageFrame.Height = newHeight;
         _attachment.FrameWidth = newWidth;
+        _attachment.ViewportHeight = newHeight;
         if (_activeResizeHandle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft)
             _attachment.PositionX = _resizeStartX + _resizeStartWidth - newWidth;
         else _attachment.PositionX = _resizeStartX;
         if (_activeResizeHandle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight)
             _attachment.PositionY = _resizeStartY + _resizeStartHeight - newHeight;
         else _attachment.PositionY = _resizeStartY;
+        if (_isCropping)
+        {
+            // 取景框比例随裁切结果更新并持久化，避免退出裁切或重启后按原图比例弹回。
+            _attachment.AspectRatio = newWidth / newHeight;
+            // 补偿取景框尺寸变化造成的画面滑动，让静止一侧的画面保持不动。
+            (double contentWidth, double contentHeight) = GetVisualContentSize();
+            if (_activeResizeHandle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft)
+                _attachment.OffsetX += (newWidth - oldFrameWidth) / 2 + (oldContentWidth - contentWidth) / 2;
+            else if (_activeResizeHandle is ResizeHandle.Right or ResizeHandle.TopRight or ResizeHandle.BottomRight)
+                _attachment.OffsetX += (oldFrameWidth - newWidth) / 2 + (contentWidth - oldContentWidth) / 2;
+            if (_activeResizeHandle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight)
+                _attachment.OffsetY += (newHeight - oldFrameHeight) / 2 + (oldContentHeight - contentHeight) / 2;
+            else if (_activeResizeHandle is ResizeHandle.Bottom or ResizeHandle.BottomLeft or ResizeHandle.BottomRight)
+                _attachment.OffsetY += (oldFrameHeight - newHeight) / 2 + (contentHeight - oldContentHeight) / 2;
+            ClampCropOffsets();
+        }
         ApplyTransforms();
     }
 
@@ -327,6 +353,8 @@ public sealed class AttachmentImageControl : Grid
         _imageFrame.Width = Width;
         _imageFrame.Height = Width / GetAspectRatio();
         Height = _imageFrame.Height + 40;
+        _attachment.ViewportHeight = _imageFrame.Height;
+        ClampCropOffsets();
         ApplyTransforms();
         _contentChanged();
     }
@@ -358,10 +386,28 @@ public sealed class AttachmentImageControl : Grid
 
     private void ClampCropOffsets()
     {
-        double maxX = Math.Max(0, Width * (_attachment.Scale - 1) / 2);
-        double maxY = Math.Max(0, Height * (_attachment.Scale - 1) / 2);
+        // 可移动范围 = 画面按 UniformToFill 填充（含旋转）后超出取景框的部分，保证画面始终覆盖取景框。
+        (double contentWidth, double contentHeight) = GetVisualContentSize();
+        double maxX = Math.Max(0, (contentWidth - _imageFrame.Width) / 2);
+        double maxY = Math.Max(0, (contentHeight - _imageFrame.Height) / 2);
         _attachment.OffsetX = Math.Clamp(_attachment.OffsetX, -maxX, maxX);
         _attachment.OffsetY = Math.Clamp(_attachment.OffsetY, -maxY, maxY);
+    }
+
+    private (double Width, double Height) GetVisualContentSize()
+    {
+        double frameWidth = _imageFrame.Width;
+        double frameHeight = _imageFrame.Height;
+        if (frameWidth <= 0 || frameHeight <= 0) return (0, 0);
+        // 图片未加载成功时按无溢出处理，此时裁切拖动中央不产生位移。
+        double imageAspect = _imageAspect > 0 ? _imageAspect : frameWidth / frameHeight;
+        bool widthOverflow = imageAspect >= frameWidth / frameHeight;
+        double fillWidth = widthOverflow ? frameHeight * imageAspect : frameWidth;
+        double fillHeight = widthOverflow ? frameHeight : frameWidth / imageAspect;
+        bool rotated = _attachment.Rotation % 180 is not 0;
+        return rotated
+            ? (fillHeight * _attachment.Scale, fillWidth * _attachment.Scale)
+            : (fillWidth * _attachment.Scale, fillHeight * _attachment.Scale);
     }
 
     private void ApplyTransforms()
@@ -391,8 +437,9 @@ public sealed class AttachmentImageControl : Grid
             Margin = new Thickness(1, 0, 1, 0),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(235, 39, 39, 42)),
+            Background = BoardTheme.SurfaceBrush,
             BorderThickness = new Thickness(0),
+            Foreground = BoardTheme.TextBrush,
             Content = icon
         };
         ToolTipService.SetToolTip(button, tooltip);

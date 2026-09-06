@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Pancake/Services/ColorPalette.cs" Link="ColorPalette.cs" />
+    <Compile Include="../../src/Pancake/Services/XiaomiWeatherService.cs" Link="XiaomiWeatherService.cs" />
+    <Compile Include="../../src/Pancake/Services/DefaultContentColors.cs" Link="DefaultContentColors.cs" />
+    <Compile Include="../../src/Pancake/Services/NoiseAlertGate.cs" Link="NoiseAlertGate.cs" />
+    <Compile Include="../../src/Pancake/Services/NoiseAlertTone.cs" Link="NoiseAlertTone.cs" />
+  </ItemGroup>
+</Project>

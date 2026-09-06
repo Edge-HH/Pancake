@@ -1,3 +1,7 @@
+param(
+    [ValidateSet('Dark', 'Light')] [string]$Theme = 'Dark',
+    [ValidateSet('display', 'settings')] [string]$View = 'display'
+)
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -36,23 +40,26 @@ try {
   ]
 }
 '@
+    $fixture = $fixture.Replace('"Theme": "Dark"', ('"Theme": "' + $Theme + '"'))
     [System.IO.File]::WriteAllText($statePath, $fixture)
     $before = [System.IO.File]::ReadAllText($statePath) | ConvertFrom-Json
 
     $process = Start-Process `
         -FilePath (Join-Path $testRoot 'Pancake.exe') `
-        -ArgumentList '--windowed', '--view=display' `
+        -ArgumentList '--windowed', "--view=$View" `
         -WorkingDirectory $testRoot `
         -WindowStyle Hidden `
         -PassThru
 
     Start-Sleep -Seconds 4
+    if ($process.HasExited) { throw 'The test process exited before normal shutdown.' }
     $null = $process.CloseMainWindow()
     if (-not $process.WaitForExit(5000)) {
         throw 'The test process did not close normally within five seconds.'
     }
 
     $after = [System.IO.File]::ReadAllText($statePath) | ConvertFrom-Json
+    if ($after.Settings.Theme -ne $Theme) { throw 'The selected theme was not preserved.' }
     $beforeLayout = $before.Subjects | ForEach-Object { "$($_.Name):$($_.X),$($_.Y),$($_.Width),$($_.Height)" }
     $afterLayout = $after.Subjects | ForEach-Object { "$($_.Name):$($_.X),$($_.Y),$($_.Width),$($_.Height)" }
 
@@ -61,7 +68,7 @@ try {
         exit 1
     }
 
-    Write-Output 'PASS: Startup and normal shutdown preserve the tile layout.'
+    Write-Output "PASS: $Theme / $View startup and normal shutdown preserve theme and tile layout."
 }
 finally {
     if ($process -and -not $process.HasExited) {

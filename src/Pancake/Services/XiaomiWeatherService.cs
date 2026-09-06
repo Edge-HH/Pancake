@@ -1,9 +1,10 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 
 namespace Pancake.Services;
 
-public sealed record WeatherSnapshot(string Condition, double TemperatureCelsius);
+public sealed record WeatherAlert(string Title, string Detail);
+public sealed record WeatherSnapshot(string Condition, double TemperatureCelsius, IReadOnlyList<WeatherAlert> Alerts);
 
 /// <summary>按 XiaomiWeather.md 描述调用小米天气市场接口。</summary>
 public sealed class XiaomiWeatherService
@@ -20,12 +21,30 @@ public sealed class XiaomiWeatherService
         response.EnsureSuccessStatusCode();
         await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using JsonDocument document = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
-        JsonElement current = document.RootElement.GetProperty("current");
+        return ParseSnapshot(document.RootElement);
+    }
+
+    public static WeatherSnapshot ParseSnapshot(JsonElement root)
+    {
+        JsonElement current = root.GetProperty("current");
         string temperatureText = current.GetProperty("temperature").GetProperty("value").GetString() ?? "";
         string weatherCode = current.GetProperty("weather").GetString() ?? "";
         if (!double.TryParse(temperatureText, NumberStyles.Float, CultureInfo.InvariantCulture, out double temperature))
             throw new InvalidDataException("小米天气响应中的当前温度无效。");
-        return new WeatherSnapshot(GetCondition(weatherCode), temperature);
+        List<WeatherAlert> alerts = [];
+        // 预警类型由服务端提供，不用普通天气代码白名单过滤强对流、海区大风等类型。
+        if (root.TryGetProperty("alerts", out JsonElement alertList) && alertList.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement alert in alertList.EnumerateArray())
+            {
+                if (alert.ValueKind != JsonValueKind.Object) continue;
+                string Read(string name) => alert.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : "";
+                string title = Read("title");
+                if (string.IsNullOrWhiteSpace(title)) title = Read("type") + Read("level");
+                if (!string.IsNullOrWhiteSpace(title)) alerts.Add(new(title, Read("detail")));
+            }
+        }
+        return new WeatherSnapshot(GetCondition(weatherCode), temperature, alerts.Distinct().ToList());
     }
 
     private static string GetCondition(string code) => code switch

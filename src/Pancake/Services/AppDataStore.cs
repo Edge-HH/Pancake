@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Pancake.Models;
 using Pancake.ViewModels;
 using Windows.Foundation;
@@ -15,13 +15,20 @@ public sealed class AppState
 public sealed class BoardSettingsState
 {
     public string Theme { get; set; } = "Dark";
+    public string Palette { get; set; } = "Vivid";
+    public double NoiseIntervalSeconds { get; set; } = 0.1;
+    public string MicrophoneDeviceId { get; set; } = "";
+    public double NoiseThresholdDb { get; set; } = 60;
+    public bool NoiseAlertEnabled { get; set; }
+    public double CalibrationTargetDb { get; set; } = 40;
+    public bool ShowWeatherAlerts { get; set; } = true;
+    // 保留旧配置字段以兼容已有数据；共享采集格式现在由 Windows 输入设备决定。
     public int MicrophoneSampleRate { get; set; } = 16000;
     public double MicrophoneCalibrationDb { get; set; }
     public string WeatherCityName { get; set; } = "北京";
     public string WeatherCityCode { get; set; } = "101010100";
     public bool GridSnappingEnabled { get; set; } = true;
     public bool AutoUpdateEnabled { get; set; } = true;
-    public string UpdateRepository { get; set; } = "Edge-HH/Pancake";
 }
 
 public sealed class SubjectState

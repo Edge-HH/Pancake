@@ -1,3 +1,4 @@
+﻿using Pancake.Services;
 using System.Collections.Specialized;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -34,6 +35,7 @@ public sealed class SubjectTileControl : Grid
     private readonly Action<bool> _interactionChanged;
     private readonly Func<HomeworkEntry, Task> _addAttachment;
     private readonly Action _contentChanged;
+    public event Action<FrameworkElement, bool>? FormattingToolbarChanged;
     private readonly Canvas _inkCanvas = new()
     {
         Width = InkSurfaceWidth,
@@ -86,7 +88,7 @@ public sealed class SubjectTileControl : Grid
 
         _frame = new Border
         {
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 31, 31, 31)),
+            Background = BoardTheme.SurfaceBrush,
             BorderBrush = subject.AccentBrush,
             BorderThickness = new Thickness(3),
             CornerRadius = new CornerRadius(3)
@@ -248,7 +250,7 @@ public sealed class SubjectTileControl : Grid
 
         foreach ((string hex, string name) in new[]
         {
-            ("#F7F7F9", "白色"),
+            ("#F7F7F9", "默认文字色"),
             ("#FBBF24", "黄色"),
             ("#F87171", "红色"),
             ("#60A5FA", "蓝色")
@@ -261,7 +263,7 @@ public sealed class SubjectTileControl : Grid
                 Padding = new Thickness(6),
                 Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
                 BorderThickness = new Thickness(0),
-                Content = new Ellipse { Width = 16, Height = 16, Fill = MainViewModel.BrushFromHex(hex) },
+                Content = new Ellipse { Width = 16, Height = 16, Fill = new SolidColorBrush(BoardTheme.DisplayContentColor(MainViewModel.BrushFromHex(hex).Color)) },
                 Tag = hex
             };
             colorButton.Click += (_, _) =>
@@ -295,8 +297,8 @@ public sealed class SubjectTileControl : Grid
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 5, 0, 0),
             Padding = new Thickness(8, 4, 8, 4),
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(244, 9, 9, 11)),
-            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 70, 70, 74)),
+            Background = BoardTheme.SurfaceBrush,
+            BorderBrush = BoardTheme.LineBrush,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(10),
             Child = tools,
@@ -384,7 +386,7 @@ public sealed class SubjectTileControl : Grid
             row.Children.Add(new TextBlock
             {
                 Text = $"{index}.", FontSize = 20,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 245, 245, 247)),
+                Foreground = BoardTheme.TextBrush,
                 Margin = new Thickness(0, 4, 0, 0)
             });
 
@@ -394,12 +396,17 @@ public sealed class SubjectTileControl : Grid
 
             if (_isEditing)
             {
-                StackPanel formatting = BuildFormattingToolbar(editor, homework);
-                Grid.SetColumn(formatting, 1);
-                row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-                Grid.SetRow(formatting, 1);
-                row.Children.Add(formatting);
+                StackPanel? formatting = null;
+                editor.GotFocus += (_, _) =>
+                {
+                    // 工具栏由窗口统一承载，只在当前作业获得焦点时创建并切换。
+                    formatting ??= BuildFormattingToolbar(editor, homework);
+                    FormattingToolbarChanged?.Invoke(formatting, true);
+                };
+                editor.Unloaded += (_, _) =>
+                {
+                    if (formatting is not null) FormattingToolbarChanged?.Invoke(formatting, false);
+                };
             }
 
             if (_isEditing)
@@ -463,12 +470,12 @@ public sealed class SubjectTileControl : Grid
             bool readOnly = editor.IsReadOnly;
             editor.IsReadOnly = false;
             editor.Document.SetText(string.IsNullOrWhiteSpace(homework.RtfContent) ? TextSetOptions.None : TextSetOptions.FormatRtf,
-                string.IsNullOrWhiteSpace(homework.RtfContent) ? homework.Content : homework.RtfContent);
+                string.IsNullOrWhiteSpace(homework.RtfContent) ? homework.Content : DefaultContentColors.AdaptRtf(homework.RtfContent, BoardTheme.IsLight));
             bool repairedTrailingParagraphs = RemoveGeneratedTrailingParagraphs(editor, homework.Content);
             if (string.IsNullOrWhiteSpace(homework.RtfContent) && homework.Content.Length > 0)
             {
                 editor.Document.GetRange(0, homework.Content.Length).CharacterFormat.ForegroundColor =
-                    Windows.UI.Color.FromArgb(255, 245, 245, 247);
+                    BoardTheme.TextColor;
             }
             editor.IsReadOnly = readOnly;
             documentReady = true;
@@ -482,7 +489,7 @@ public sealed class SubjectTileControl : Grid
 
     private StackPanel BuildFormattingToolbar(RichEditBox editor, HomeworkEntry homework)
     {
-        StackPanel tools = new() { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(0, 2, 0, 4) };
+        StackPanel tools = new() { Orientation = Orientation.Horizontal, Spacing = 2 };
         tools.Children.Add(CreateIconButton("\uE8DD", "加粗", (_, _) =>
         {
             editor.Document.Selection.CharacterFormat.Bold = FormatEffect.Toggle;
@@ -501,6 +508,11 @@ public sealed class SubjectTileControl : Grid
         }));
         tools.Children.Add(CreateColorFlyoutButton("\uE790", "文字颜色", editor, homework, false));
         tools.Children.Add(CreateColorFlyoutButton("\uE7E6", "高光颜色", editor, homework, true));
+        foreach (Button button in tools.Children.OfType<Button>())
+        {
+            // 点击顶栏时保持编辑器的焦点和选区；键盘仍可通过 Tab 访问按钮。
+            button.AllowFocusOnInteraction = false;
+        }
         return tools;
     }
 
@@ -516,7 +528,7 @@ public sealed class SubjectTileControl : Grid
         contentRange.GetText(TextGetOptions.None, out string plain);
         contentRange.GetText(TextGetOptions.FormatRtf, out string rtf);
         homework.Content = plain;
-        homework.RtfContent = rtf.TrimEnd('\0');
+        homework.RtfContent = DefaultContentColors.AdaptRtf(rtf.TrimEnd('\0'), BoardTheme.IsLight, saving: true);
         _contentChanged();
     }
 
@@ -556,14 +568,49 @@ public sealed class SubjectTileControl : Grid
             selectionEnd = editor.Document.Selection.EndPosition;
         });
         StackPanel colors = new() { Orientation = Orientation.Horizontal, Spacing = 6, Padding = new Thickness(8) };
+        if (isHighlight)
+        {
+            Button clearHighlight = CreateColorSwatch("#FFFFFF", 30);
+            clearHighlight.Content = new Grid
+            {
+                Width = 30,
+                Height = 30,
+                IsHitTestVisible = false,
+                Children =
+                {
+                    new Line
+                    {
+                        X1 = 2,
+                        Y1 = 2,
+                        X2 = 28,
+                        Y2 = 28,
+                        Stroke = MainViewModel.BrushFromHex("#EF4444"),
+                        StrokeThickness = 2
+                    }
+                }
+            };
+            ToolTipService.SetToolTip(clearHighlight, "取消高光");
+            clearHighlight.Click += (_, _) =>
+            {
+                var range = editor.Document.GetRange(selectionStart, selectionEnd);
+                // RichEdit 的自动背景色表示“无高光”；透明黑色会被当成黑色背景持久化。
+                range.CharacterFormat.BackgroundColor = TextConstants.AutoColor;
+                editor.Document.Selection.SetRange(selectionStart, selectionEnd);
+                CaptureRichText(editor, homework);
+                button.Flyout.Hide();
+                editor.Focus(FocusState.Programmatic);
+            };
+            colors.Children.Add(clearHighlight);
+        }
+
         foreach (string hex in new[] { "#F7F7F9", "#FBBF24", "#F87171", "#60A5FA", "#4ADE80", "#F472B6" })
         {
             Button swatch = CreateColorSwatch(hex, 30);
             swatch.Click += (_, _) =>
             {
                 var range = editor.Document.GetRange(selectionStart, selectionEnd);
-                if (isHighlight) range.CharacterFormat.BackgroundColor = MainViewModel.BrushFromHex(hex).Color;
-                else range.CharacterFormat.ForegroundColor = MainViewModel.BrushFromHex(hex).Color;
+                if (isHighlight) range.CharacterFormat.BackgroundColor = BoardTheme.DisplayContentColor(MainViewModel.BrushFromHex(hex).Color);
+                else range.CharacterFormat.ForegroundColor = BoardTheme.DisplayContentColor(MainViewModel.BrushFromHex(hex).Color);
                 editor.Document.Selection.SetRange(selectionStart, selectionEnd);
                 CaptureRichText(editor, homework);
                 button.Flyout.Hide();
@@ -602,16 +649,10 @@ public sealed class SubjectTileControl : Grid
     {
         Width = size,
         Height = size,
-        Padding = new Thickness(5),
-        Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
-        BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(90, 255, 255, 255)),
+        Padding = new Thickness(0),
+        Background = new SolidColorBrush(BoardTheme.DisplayContentColor(MainViewModel.BrushFromHex(hex).Color)),
+        BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(80, 0, 0, 0)),
         BorderThickness = new Thickness(1),
-        Content = new Ellipse
-        {
-            Width = size - 12,
-            Height = size - 12,
-            Fill = MainViewModel.BrushFromHex(hex)
-        }
     };
 
     private static TextBox CreateInlineEditor(string text, double fontSize, Brush foreground, bool singleLine) => new()
@@ -632,7 +673,7 @@ public sealed class SubjectTileControl : Grid
             Content = new FontIcon
             {
                 Glyph = glyph, FontSize = 15,
-                Foreground = new SolidColorBrush(danger ? Windows.UI.Color.FromArgb(255, 248, 113, 113) : Windows.UI.Color.FromArgb(255, 235, 235, 240))
+                Foreground = new SolidColorBrush(danger ? Windows.UI.Color.FromArgb(255, 248, 113, 113) : BoardTheme.TextColor)
             }
         };
         button.Click += click;
@@ -649,7 +690,7 @@ public sealed class SubjectTileControl : Grid
             Content = new FontIcon
             {
                 Glyph = glyph, FontSize = 16,
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 245, 245, 247))
+                Foreground = BoardTheme.TextBrush
             }
         };
         ToolTipService.SetToolTip(button, tooltip);
@@ -776,7 +817,7 @@ public sealed class SubjectTileControl : Grid
 
     private static Polyline CreateStrokeShape(InkStrokeData stroke) => new()
     {
-        Stroke = new SolidColorBrush(stroke.Color), StrokeThickness = stroke.Thickness,
+        Stroke = new SolidColorBrush(BoardTheme.DisplayContentColor(stroke.Color)), StrokeThickness = stroke.Thickness,
         StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round
     };
 
