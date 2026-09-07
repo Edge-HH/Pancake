@@ -148,7 +148,7 @@ public sealed partial class MainWindow
                 Check(FontService.CaptureFallbacks(missingProbe)[0].Family == "Pancake Missing Typeface", "missing font name survives fallback roundtrip");
                 ExportOverlay.Children.Clear(); ExportOverlay.Visibility = Visibility.Collapsed;
                 Check(new FluentIcon().Glyph == FluentGlyphs.Info, "default Info icon is initialized without a property change");
-                Check(((FluentIcon)((NavigationViewItem)SettingsRoot.FooterMenuItems[0]).Icon).Glyph == FluentGlyphs.Info, "settings About item has an Info glyph");
+                Check(((FluentIcon)AboutNavigationGroup.Icon).Glyph == FluentGlyphs.Info, "settings About item has an Info glyph");
                 Check(FindVisuals<FluentIcon>(ProjectPicker).Any(icon => icon.Glyph == FluentGlyphs.Folder), "project name uses the bundled folder icon");
                 Check(ReferenceEquals(ToolbarItems.Children.Last(), EditBoardButton), "save remains last in edit mode");
                 FinishEditing(); await NextLayoutAsync();
@@ -202,7 +202,8 @@ public sealed partial class MainWindow
                 InvokeButton(highlightSwatches[0]); await NextLayoutAsync();
                 Check(paletteEditor.Document.GetRange(0, 2).CharacterFormat.BackgroundColor.Equals(TextConstants.AutoColor), "clear highlighting retains automatic background color");
                 PaletteComboBox.SelectedIndex = 0;
-                ShowSettings(); SettingsRoot.SelectedItem = SettingsRoot.FooterMenuItems[0]; await NextLayoutAsync();
+                ShowSettings(); AppearanceNavigationGroup.IsExpanded = false; AboutNavigationGroup.IsExpanded = true;
+                SettingsRoot.SelectedItem = AboutVersionNavItem; await NextLayoutAsync();
                 var settingsSplitView = FindVisuals<SplitView>(SettingsRoot).First(view => view.Name == "RootSplitView");
                 Check(settingsSplitView.CornerRadius == new CornerRadius(0), "settings navigation pane joins the content with square corners");
                 await SaveVisualAsync(RootShell, Path.Combine(output, "about.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
@@ -229,6 +230,18 @@ public sealed partial class MainWindow
             check(ClockPanel.Visibility == (mode is "Board" or "Free" ? Visibility.Collapsed : Visibility.Visible), mode + " clock visibility");
             check(BoardWorkspace.Visibility == (mode == "Clock" ? Visibility.Collapsed : Visibility.Visible), mode + " board visibility");
             check(_freeWidgets.Count == (mode == "Free" ? 3 : 0), mode + " independent component hosts");
+            if (mode is "Split" or "Clock")
+            {
+                string prefix = mode == "Split" ? "Split" : "ClockMode";
+                RegionPlacement clock = _settings.Widgets[prefix + "Clock"];
+                RegionPlacement components = _settings.Widgets[prefix + "Components"];
+                check(Math.Abs(clock.X + clock.Width / 2 - ClockPanel.ActualWidth / 2) < .01, mode + " clock stays on the center axis");
+                check(Math.Abs(components.X + components.Width / 2 - ClockPanel.ActualWidth / 2) < .01, mode + " component row stays on the center axis");
+                check(Math.Abs(clock.Width / clock.Height - DockedClockAspectRatio) < .01, mode + " clock keeps its scale ratio");
+                check(Math.Abs(components.Width / components.Height - DockedComponentsAspectRatio) < .01 && ClockComponents.Orientation == Orientation.Horizontal,
+                    mode + " weather and noise scale together in one row");
+                check(FreeLayoutHandles.Children.Count == (mode == "Split" ? 5 : 4), mode + " exposes constrained clock and component handles while editing");
+            }
             if (mode == "Free")
             {
                 check(FreeLayoutHandles.Children.Count == 6, "each free widget has move and resize handles");
@@ -278,20 +291,27 @@ public sealed partial class MainWindow
         }
         GlobalPenButton.IsChecked = false; _settings.ToolbarPosition = "BottomCenter"; _settings.ToolbarIconOnly = true; ApplyExtendedSettings();
         FinishEditing(); ShowSettings();
-        foreach (var nav in SettingsRoot.MenuItems.Concat(SettingsRoot.FooterMenuItems).OfType<NavigationViewItem>())
+        var settingsPages = SettingsRoot.MenuItems.Concat(SettingsRoot.FooterMenuItems)
+            .OfType<NavigationViewItem>()
+            .SelectMany(item => item.MenuItems.OfType<NavigationViewItem>().DefaultIfEmpty(item))
+            .Where(item => item.Tag is not null)
+            .ToList();
+        check(settingsPages.Count == _settingsPages.Count, "each settings content page has a navigation item");
+        check(SettingsRoot.MenuItems.OfType<NavigationViewItem>().Count(item => item.MenuItems.Count > 0) == 3,
+            "settings subpages live in expandable navigation groups");
+        foreach (NavigationViewItem nav in settingsPages)
         {
+            foreach (NavigationViewItem group in SettingsRoot.MenuItems.OfType<NavigationViewItem>().Where(item => item.MenuItems.Count > 0))
+                group.IsExpanded = group.MenuItems.Contains(nav);
             SettingsRoot.SelectedItem = nav; await NextLayoutAsync();
-            StackPanel panel = nav.Tag.ToString() switch { "Layout" => LayoutSettingsPanel, "Appearance" => AppearanceSettingsPanel, "Components" => ComponentSettingsPanel, _ => AboutSettingsPanel };
-            var buttons = ((StackPanel)((ScrollViewer)panel.Children[0]).Content).Children.OfType<Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>().ToList();
-            foreach (var button in buttons)
-            {
-                var peer = new Microsoft.UI.Xaml.Automation.Peers.ToggleButtonAutomationPeer(button);
-                ((Microsoft.UI.Xaml.Automation.Provider.IToggleProvider)peer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Toggle)).Toggle();
-                await NextLayoutAsync();
-                check(((Grid)panel.Children[1]).Children.Count == 1, nav.Tag + "/" + button.Content + " tab has content");
-            }
+            SettingsPage page = _settingsPages[nav.Tag!.ToString()!];
+            check(page.Container.Visibility == Visibility.Visible && page.Content.Visibility == Visibility.Visible, nav.Tag + " navigation page has content");
+            check(SettingsPageTitle.Text == page.Title, nav.Tag + " navigation page updates the title");
+            check(nav.IsSelected, nav.Tag + " navigation item shows the selected state");
         }
         SettingsRoot.SelectedItem = AppearanceNavItem;
+        AppearanceNavigationGroup.IsExpanded = true;
+        ComponentsNavigationGroup.IsExpanded = AboutNavigationGroup.IsExpanded = false;
         await NextLayoutAsync();
         await SaveVisualAsync(RootShell, Path.Combine(output, "settings-v203.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
         // 小窗口和最大尺寸组合仍能通过滚动访问全部按钮。

@@ -67,22 +67,31 @@
             <Grid x:Name="DisplayGrid">
                 <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="0" /></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="2*" MinWidth="400" /><ColumnDefinition Width="3*" /></Grid.ColumnDefinitions>
-                <Border x:Name="ClockPanel" Grid.Row="0" Grid.Column="0" Background="{ThemeResource BoardSurfaceBrush}" BorderBrush="{ThemeResource BoardLineBrush}" BorderThickness="0,0,1,0">
-                    <Grid><icons:BackgroundVisual x:Name="ClockBackgroundVisual" /><Viewbox x:Name="ClockContentView" Stretch="Uniform" Margin="12"><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="18">
-                        <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="7">
-                            <TextBlock x:Name="MainTimeText" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="112" FontWeight="Light" Foreground="{ThemeResource BoardTextBrush}" Text="11:20" />
-                            <TextBlock x:Name="SecondsText" Margin="0,17,0,0" VerticalAlignment="Top" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="28" Foreground="{ThemeResource BoardTextBrush}" Text="10" />
-                        </StackPanel>
-                        <TextBlock x:Name="ClockDateText" HorizontalAlignment="Center" FontSize="20" Foreground="{ThemeResource BoardTextBrush}" />
-                        <StackPanel x:Name="ClockComponents" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
-                            <Border x:Name="WeatherWidget" Padding="16,10" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
-                                <StackPanel Orientation="Horizontal" Spacing="9"><icons:FluentIcon Foreground="{ThemeResource BoardWarningBrush}" Symbol="Weather" /><TextBlock x:Name="WeatherText" FontSize="14" Foreground="{ThemeResource BoardTextBrush}" Text="天气未配置" /></StackPanel>
-                            </Border>
-                            <Border x:Name="NoiseWidget" Padding="16,10" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
-                                <StackPanel Orientation="Horizontal" Spacing="9"><icons:FluentIcon Foreground="{ThemeResource BoardSuccessBrush}" Symbol="Microphone" /><TextBlock x:Name="NoiseText" FontSize="14" Foreground="{ThemeResource BoardTextBrush}" Text="42 dB · 安静" /></StackPanel>
-                            </Border>
-                        </StackPanel>
-                    </StackPanel></Viewbox></Grid>
+                <Border x:Name="ClockPanel" Grid.Row="0" Grid.Column="0" Background="{ThemeResource BoardSurfaceBrush}" BorderBrush="{ThemeResource BoardLineBrush}" BorderThickness="0,0,1,0" SizeChanged="ClockPanel_SizeChanged">
+                    <Grid>
+                        <icons:BackgroundVisual x:Name="ClockBackgroundVisual" />
+                        <Canvas x:Name="ClockLayoutCanvas">
+                            <Viewbox x:Name="ClockContentView" Stretch="Uniform">
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="18">
+                                    <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="7">
+                                        <TextBlock x:Name="MainTimeText" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="112" FontWeight="Light" Foreground="{ThemeResource BoardTextBrush}" Text="11:20" />
+                                        <TextBlock x:Name="SecondsText" Margin="0,17,0,0" VerticalAlignment="Top" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="28" Foreground="{ThemeResource BoardTextBrush}" Text="10" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="ClockDateText" HorizontalAlignment="Center" FontSize="20" Foreground="{ThemeResource BoardTextBrush}" />
+                                </StackPanel>
+                            </Viewbox>
+                            <Viewbox x:Name="ClockComponentsView" Stretch="Uniform">
+                                <StackPanel x:Name="ClockComponents" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                                    <Border x:Name="WeatherWidget" Padding="16,10" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="9"><icons:FluentIcon Foreground="{ThemeResource BoardWarningBrush}" Symbol="Weather" /><TextBlock x:Name="WeatherText" FontSize="14" Foreground="{ThemeResource BoardTextBrush}" Text="天气未配置" /></StackPanel>
+                                    </Border>
+                                    <Border x:Name="NoiseWidget" Padding="16,10" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="9"><icons:FluentIcon Foreground="{ThemeResource BoardSuccessBrush}" Symbol="Microphone" /><TextBlock x:Name="NoiseText" FontSize="14" Foreground="{ThemeResource BoardTextBrush}" Text="42 dB · 安静" /></StackPanel>
+                                    </Border>
+                                </StackPanel>
+                            </Viewbox>
+                        </Canvas>
+                    </Grid>
                 </Border>
 
                 <Grid x:Name="BoardWorkspace" Grid.Row="0" Grid.Column="1" Background="{ThemeResource BoardSurfaceBrush}">
@@ -104,17 +113,36 @@
                         SelectionChanged="SettingsNavigation_SelectionChanged">
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="布局" Tag="Layout"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Layout" /></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem x:Name="AppearanceNavItem" Content="外观" Tag="Appearance" IsSelected="True"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Color" /></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="组件" Tag="Components"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Components" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem x:Name="AppearanceNavigationGroup" Content="外观" IsExpanded="True" SelectsOnInvoked="False">
+                    <NavigationViewItem.Icon><icons:FluentIcon Symbol="Color" /></NavigationViewItem.Icon>
+                    <NavigationViewItem.MenuItems>
+                        <NavigationViewItem x:Name="AppearanceNavItem" Content="磁贴" Tag="AppearanceTile" IsSelected="True"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Grid" /></NavigationViewItem.Icon></NavigationViewItem>
+                        <NavigationViewItem Content="背景板" Tag="AppearanceBackground"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Image" /></NavigationViewItem.Icon></NavigationViewItem>
+                        <NavigationViewItem Content="主题" Tag="AppearanceTheme"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Color" /></NavigationViewItem.Icon></NavigationViewItem>
+                        <NavigationViewItem Content="控制窗" Tag="AppearanceToolbar"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Settings" /></NavigationViewItem.Icon></NavigationViewItem>
+                    </NavigationViewItem.MenuItems>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="ComponentsNavigationGroup" Content="组件" SelectsOnInvoked="False">
+                    <NavigationViewItem.Icon><icons:FluentIcon Symbol="Components" /></NavigationViewItem.Icon>
+                    <NavigationViewItem.MenuItems>
+                        <NavigationViewItem Content="天气" Tag="ComponentsWeather"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Weather" /></NavigationViewItem.Icon></NavigationViewItem>
+                        <NavigationViewItem Content="噪音检测" Tag="ComponentsNoise"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Microphone" /></NavigationViewItem.Icon></NavigationViewItem>
+                    </NavigationViewItem.MenuItems>
+                </NavigationViewItem>
+                <NavigationViewItem x:Name="AboutNavigationGroup" Content="关于" SelectsOnInvoked="False">
+                    <NavigationViewItem.Icon><icons:FluentIcon Symbol="Info" /></NavigationViewItem.Icon>
+                    <NavigationViewItem.MenuItems>
+                        <NavigationViewItem Content="仓库" Tag="AboutRepositories"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Folder" /></NavigationViewItem.Icon></NavigationViewItem>
+                        <NavigationViewItem x:Name="AboutVersionNavItem" Content="版本" Tag="AboutVersion"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Info" /></NavigationViewItem.Icon></NavigationViewItem>
+                        <NavigationViewItem Content="更新" Tag="AboutUpdate"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Reset" /></NavigationViewItem.Icon></NavigationViewItem>
+                    </NavigationViewItem.MenuItems>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
-            <NavigationView.FooterMenuItems>
-                <NavigationViewItem Content="关于" Tag="About"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Info" /></NavigationViewItem.Icon></NavigationViewItem>
-            </NavigationView.FooterMenuItems>
             <ScrollViewer x:Name="SettingsContentScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
             <StackPanel Padding="32,28,32,100" Spacing="28">
                 <StackPanel Spacing="8">
-                    <TextBlock x:Name="SettingsPageTitle" FontSize="36" Foreground="{ThemeResource BoardTextBrush}" Text="外观" />
-                    <TextBlock x:Name="SettingsPageDescription" FontSize="15" Foreground="{ThemeResource BoardTextSecondaryBrush}" Text="调整界面主题和看板色系。" />
+                    <TextBlock x:Name="SettingsPageTitle" FontSize="36" Foreground="{ThemeResource BoardTextBrush}" Text="磁贴" />
+                    <TextBlock x:Name="SettingsPageDescription" FontSize="15" Foreground="{ThemeResource BoardTextSecondaryBrush}" Text="调整磁贴标题和背景样式。" />
                 </StackPanel>
                 <StackPanel x:Name="LayoutSettingsPanel" Visibility="Collapsed" />
                 <StackPanel x:Name="AppearanceSettingsPanel" Spacing="22">

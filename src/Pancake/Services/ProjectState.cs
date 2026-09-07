@@ -11,7 +11,7 @@ public sealed class BoardSettingsState
 {
     public string LayoutMode { get; set; } = "Split";
     public double SplitRatio { get; set; } = 0.4;
-    // 按稳定组件标识保存位置，新增组件无需改变自由布局的拖动/缩放机制。
+    // 按布局模式和稳定组件标识保存位置，避免受约束布局覆盖自由布局坐标。
     public Dictionary<string, RegionPlacement> Widgets { get; set; } = new();
     public bool InfiniteBoard { get; set; }
     public double GridSize { get; set; } = 48;

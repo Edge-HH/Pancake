@@ -3,6 +3,9 @@
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $xaml = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.xaml'))
 $window = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.xaml.cs'))
+$settings = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.Settings.cs'))
+$layout = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.Layout.cs'))
+$widgetLayout = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\WidgetLayout.cs'))
 $projects = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.Projects.cs'))
 $tiles = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\SubjectTileControl.cs'))
 $state = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\ProjectState.cs'))
@@ -58,6 +61,22 @@ if ($theme -notmatch 'NavigationViewContentGridCornerRadius">0</CornerRadius>' -
     ([regex]::Matches($backdrop, 'GetDefaultSystemBackdropConfiguration')).Count -ne 1 -or
     $backdrop -match 'ApplySystemConfiguration\(target,\s*xamlRoot\)') {
     $failures.Add('设置页没有透出系统 Mica，或导航栏与内容区仍有圆角。')
+}
+if ($xaml -notmatch 'Content="外观"[^>]+SelectsOnInvoked="False"[\s\S]*?NavigationViewItem\.MenuItems' -or
+    $xaml -notmatch 'Content="磁贴" Tag="AppearanceTile"' -or
+    $xaml -notmatch 'Content="背景板" Tag="AppearanceBackground"' -or
+    $xaml -notmatch 'Content="天气" Tag="ComponentsWeather"' -or
+    $settings -match 'SetTabs\(' -or
+    $settings -match 'Orientation\s*=\s*Orientation\.Horizontal[\s\S]*?ToggleButton tab') {
+    $failures.Add('设置子页面仍未移入左侧层级导航，或内容区仍保留横向分页按钮。')
+}
+if ($xaml -notmatch 'x:Name="ClockComponentsView"' -or
+    $xaml -notmatch 'x:Name="ClockComponents" Orientation="Horizontal"' -or
+    $layout -notmatch '_settings\.LayoutMode is "Split" or "Clock"' -or
+    $layout -notmatch 'AddCenteredWidgetHandles\(' -or
+    $widgetLayout -notmatch 'MoveVerticallyCentered' -or
+    $widgetLayout -notmatch 'ResizeCentered') {
+    $failures.Add('分屏和仅时钟模式缺少锁定中轴线的时钟与整排组件编辑。')
 }
 
 if ($failures.Count -gt 0) {

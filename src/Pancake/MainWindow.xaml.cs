@@ -590,21 +590,8 @@ public sealed partial class MainWindow : Window
 
     private void SettingsNavigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (AppearanceSettingsPanel is null || ComponentSettingsPanel is null || AboutSettingsPanel is null) return;
-        string page = (args.SelectedItem as NavigationViewItem)?.Tag?.ToString() ?? "Appearance";
-        LayoutSettingsPanel.Visibility = page == "Layout" ? Visibility.Visible : Visibility.Collapsed;
-        AppearanceSettingsPanel.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
-        ComponentSettingsPanel.Visibility = page == "Components" ? Visibility.Visible : Visibility.Collapsed;
-        AboutSettingsPanel.Visibility = page == "About" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsPageTitle.Text = page switch { "Layout" => "布局", "Components" => "组件", "About" => "关于", _ => "外观" };
-        SettingsPageDescription.Text = page switch
-        {
-            "Layout" => "调整布局模式、无限作业板与网格。",
-            "Components" => "设置天气和麦克风噪音检测。",
-            "About" => "查看版本信息并访问 Pancake 项目仓库。",
-            _ => "调整界面主题和看板色系。"
-        };
-        SettingsContentScrollViewer.ChangeView(null, 0, null, true);
+        if (args.SelectedItem is NavigationViewItem item && item.Tag?.ToString() is { } page)
+            ShowSettingsPage(page);
     }
 
     private void SettingsRoot_Loaded(object sender, RoutedEventArgs e)

@@ -9,6 +9,8 @@ namespace Pancake;
 
 public sealed partial class MainWindow
 {
+    private const double DockedClockAspectRatio = 2.4;
+    private const double DockedComponentsAspectRatio = 6.5;
     private readonly Dictionary<string, Viewbox> _freeWidgets = [];
     private Thumb? _splitter;
     private bool _layingOut;
@@ -52,6 +54,7 @@ public sealed partial class MainWindow
                 }
             }
             ApplyFreeWidgets(free);
+            if (!free && _settings.LayoutMode != "Board") ApplyDockedClockLayout();
             UpdateLayoutHandles();
         }
         finally { _layingOut = false; }
@@ -63,8 +66,7 @@ public sealed partial class MainWindow
         if (free && _freeWidgets.Count == 0)
         {
             ClockComponents.Children.Remove(WeatherWidget); ClockComponents.Children.Remove(NoiseWidget);
-            var clockGrid = (Grid)ClockPanel.Child;
-            clockGrid.Children.Remove(ClockContentView);
+            ClockLayoutCanvas.Children.Remove(ClockContentView);
             foreach (var (key, element) in new (string, UIElement)[] { ("Clock", ClockContentView), ("Weather", WeatherWidget), ("Noise", NoiseWidget) })
             {
                 Viewbox view = new() { Child = element, Stretch = Stretch.Uniform };
@@ -75,7 +77,7 @@ public sealed partial class MainWindow
         {
             foreach (var view in _freeWidgets.Values) view.Child = null;
             FreeWidgetsCanvas.Children.Clear(); _freeWidgets.Clear();
-            ((Grid)ClockPanel.Child).Children.Add(ClockContentView);
+            ClockLayoutCanvas.Children.Add(ClockContentView);
             ClockComponents.Children.Add(WeatherWidget); ClockComponents.Children.Add(NoiseWidget);
         }
         foreach (var (key, view) in _freeWidgets)
@@ -96,12 +98,56 @@ public sealed partial class MainWindow
         }
     }
 
+    private void ClockPanel_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_settings.LayoutMode is not ("Split" or "Clock")) return;
+        ApplyDockedClockLayout();
+        UpdateLayoutHandles();
+    }
+
+    private void ApplyDockedClockLayout()
+    {
+        double width = ClockPanel.ActualWidth, height = ClockPanel.ActualHeight;
+        if (width < 1 || height < 1) return;
+
+        string prefix = _settings.LayoutMode == "Split" ? "Split" : "ClockMode";
+        string clockKey = prefix + "Clock", componentsKey = prefix + "Components";
+        if (!_settings.Widgets.TryGetValue(clockKey, out RegionPlacement? clock))
+        {
+            double clockWidth = Math.Min(520, width * .76);
+            double clockHeight = clockWidth / DockedClockAspectRatio;
+            double componentsHeight = Math.Min(420, width * .72) / DockedComponentsAspectRatio;
+            double groupTop = Math.Max(0, (height - clockHeight - componentsHeight - 18) / 2);
+            _settings.Widgets[clockKey] = clock = new RegionPlacement { Y = groupTop, Width = clockWidth, Height = clockHeight };
+        }
+        if (!_settings.Widgets.TryGetValue(componentsKey, out RegionPlacement? components))
+        {
+            double componentsWidth = Math.Min(420, width * .72);
+            double componentsHeight = componentsWidth / DockedComponentsAspectRatio;
+            double componentsY = Math.Min(Math.Max(0, height - componentsHeight), clock.Y + clock.Height + 18);
+            _settings.Widgets[componentsKey] = components = new RegionPlacement { Y = componentsY, Width = componentsWidth, Height = componentsHeight };
+        }
+        WidgetLayout.ResizeCentered(clock, 0, 0, DockedClockAspectRatio, 220, width, height);
+        WidgetLayout.ResizeCentered(components, 0, 0, DockedComponentsAspectRatio, 240, width, height);
+        ApplyCenteredPlacement(ClockContentView, clock);
+        ApplyCenteredPlacement(ClockComponentsView, components);
+    }
+
+    private static void ApplyCenteredPlacement(FrameworkElement element, RegionPlacement placement)
+    {
+        element.Width = placement.Width;
+        element.Height = placement.Height;
+        Canvas.SetLeft(element, placement.X);
+        Canvas.SetTop(element, placement.Y);
+    }
+
     private void UpdateLayoutHandles()
     {
         if (FreeLayoutHandles is null || _splitDragging) return;
         FreeLayoutHandles.Children.Clear();
         bool split = _settings.LayoutMode == "Split";
-        FreeLayoutHandles.IsHitTestVisible = split || (_settings.LayoutMode == "Free" && _isEditing && GlobalPenButton.IsChecked != true);
+        bool canEditWidgets = _isEditing && GlobalPenButton.IsChecked != true;
+        FreeLayoutHandles.IsHitTestVisible = split || (_settings.LayoutMode is "Free" or "Clock" && canEditWidgets);
         if (split)
         {
             bool compact = RootShell.ActualWidth < 900;
@@ -133,7 +179,13 @@ public sealed partial class MainWindow
             };
             FreeLayoutHandles.Children.Add(_splitter);
         }
-        if (_settings.LayoutMode != "Free" || !_isEditing || GlobalPenButton.IsChecked == true) return;
+        if (_settings.LayoutMode is "Split" or "Clock" && canEditWidgets)
+        {
+            string prefix = _settings.LayoutMode == "Split" ? "Split" : "ClockMode";
+            AddCenteredWidgetHandles(prefix + "Clock", ClockContentView, "时钟", DockedClockAspectRatio, 220);
+            AddCenteredWidgetHandles(prefix + "Components", ClockComponentsView, "组件栏", DockedComponentsAspectRatio, 240);
+        }
+        if (_settings.LayoutMode != "Free" || !canEditWidgets) return;
         foreach (var (key, view) in _freeWidgets)
         {
             RegionPlacement placement = _settings.Widgets[key];
@@ -160,5 +212,34 @@ public sealed partial class MainWindow
             move.DragCompleted += (_, _) => ScheduleSave(); resize.DragCompleted += (_, _) => ScheduleSave();
             MoveHandles(move, resize); FreeLayoutHandles.Children.Add(move); FreeLayoutHandles.Children.Add(resize);
         }
+    }
+
+    private void AddCenteredWidgetHandles(string key, Viewbox view, string label, double aspectRatio, double minimumWidth)
+    {
+        if (!_settings.Widgets.TryGetValue(key, out RegionPlacement? placement)) return;
+        double width = ClockPanel.ActualWidth, height = ClockPanel.ActualHeight;
+        void PositionHandles(Thumb move, Thumb resize)
+        {
+            Canvas.SetLeft(move, placement.X); Canvas.SetTop(move, placement.Y);
+            move.Width = placement.Width;
+            Canvas.SetLeft(resize, placement.X + placement.Width - 20); Canvas.SetTop(resize, placement.Y + placement.Height - 20);
+            ApplyCenteredPlacement(view, placement);
+        }
+        Thumb move = new() { Height = 18, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(120, 96, 165, 250)) };
+        Thumb resize = new() { Width = 20, Height = 20, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(200, 96, 165, 250)) };
+        ToolTipService.SetToolTip(move, $"上下移动{label}（锁定中轴线）");
+        ToolTipService.SetToolTip(resize, $"缩放{label}");
+        move.DragDelta += (_, args) =>
+        {
+            WidgetLayout.MoveVerticallyCentered(placement, args.VerticalChange, width, height);
+            PositionHandles(move, resize);
+        };
+        resize.DragDelta += (_, args) =>
+        {
+            WidgetLayout.ResizeCentered(placement, args.HorizontalChange, args.VerticalChange, aspectRatio, minimumWidth, width, height);
+            PositionHandles(move, resize);
+        };
+        move.DragCompleted += (_, _) => ScheduleSave(); resize.DragCompleted += (_, _) => ScheduleSave();
+        PositionHandles(move, resize); FreeLayoutHandles.Children.Add(move); FreeLayoutHandles.Children.Add(resize);
     }
 }

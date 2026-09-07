@@ -13,7 +13,10 @@ public sealed partial class MainWindow
 {
     private readonly List<Action> _refreshSettingAvailability = [];
     private readonly Dictionary<ButtonBase, (UIElement Icon, TextBlock Label)> _toolbarLabels = [];
+    private readonly Dictionary<string, SettingsPage> _settingsPages = [];
     private ComboBox? _layoutChoice;
+
+    private sealed record SettingsPage(StackPanel Container, UIElement Content, string Title, string Description);
 
     private void InitializeExtendedSettings()
     {
@@ -26,7 +29,8 @@ public sealed partial class MainWindow
         layout.Children.Add(Range("网格大小", 16, 160, _settings.GridSize, value =>
         { _settings.GridSize = value; _renderedGridWidth = 0; }));
         layout.Children.Add(Note("分屏模式可拖动分隔条调整比例，拖至两端切换为单区；自由布局中在编辑模式拖动组件上边缘、右下角调整位置与大小。"));
-        SetTabs(LayoutSettingsPanel, ("布局模式", layout));
+        LayoutSettingsPanel.Children.Clear();
+        RegisterSettingsPage("Layout", LayoutSettingsPanel, layout, "布局", "调整布局模式、无限作业板与网格。");
 
         StackPanel tile = SettingsStack();
         tile.Children.Add(Range("标题大小", 16, 72, _settings.TileTitleSize, value => _settings.TileTitleSize = value));
@@ -45,10 +49,14 @@ public sealed partial class MainWindow
             () => _settings.LayoutMode is "Split" or "Board" && !UseSharedBackground,
             () => _settings.LayoutMode is "Split" or "Board"));
         backgrounds.Children.Add(Note("跨区背景仅在分屏生效，开启后区域底图由跨区背景统一管理，毛玻璃仍可分别调整。自由布局使用磁贴样式和主题底色。"));
-        AppearanceSettingsPanel.Children.Remove(ThemeSettingsCard);
-        SetTabs(AppearanceSettingsPanel, ("磁贴", tile), ("背景板", backgrounds), ("主题", ThemeSettingsCard), ("控制窗", ToolbarSettings()));
+        AppearanceSettingsPanel.Children.Clear();
+        RegisterSettingsPage("AppearanceTile", AppearanceSettingsPanel, tile, "磁贴", "调整磁贴标题和背景样式。");
+        RegisterSettingsPage("AppearanceBackground", AppearanceSettingsPanel, backgrounds, "背景板", "设置跨区、时钟与作业板背景。");
+        RegisterSettingsPage("AppearanceTheme", AppearanceSettingsPanel, ThemeSettingsCard, "主题", "调整界面主题和看板色系。");
+        RegisterSettingsPage("AppearanceToolbar", AppearanceSettingsPanel, ToolbarSettings(), "控制窗", "调整控制窗的显示、位置和外观。");
         ComponentSettingsPanel.Children.Clear();
-        SetTabs(ComponentSettingsPanel, ("天气", WeatherSettingsCard), ("噪音", NoiseSettingsCard));
+        RegisterSettingsPage("ComponentsWeather", ComponentSettingsPanel, WeatherSettingsCard, "天气", "选择天气地区并查看预警。");
+        RegisterSettingsPage("ComponentsNoise", ComponentSettingsPanel, NoiseSettingsCard, "噪音检测", "设置麦克风检测、报警与校准。");
         var versionContent = (StackPanel)VersionSettingsCard.Child;
         versionContent.Children.Remove(RepositorySettingsCard);
         RepositorySettingsCard.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -77,7 +85,9 @@ public sealed partial class MainWindow
         repositories.Children.Add(gitee);
         var updateCard = AboutSettingsPanel.Children.Last();
         AboutSettingsPanel.Children.Clear();
-        SetTabs(AboutSettingsPanel, ("仓库", repositories), ("版本", VersionSettingsCard), ("更新", updateCard));
+        RegisterSettingsPage("AboutRepositories", AboutSettingsPanel, repositories, "仓库", "访问 Pancake 的代码仓库。");
+        RegisterSettingsPage("AboutVersion", AboutSettingsPanel, VersionSettingsCard, "版本", "查看当前 Pancake 版本信息。");
+        RegisterSettingsPage("AboutUpdate", AboutSettingsPanel, updateCard, "更新", "检查更新并选择更新来源。");
         UpdateSourceComboBox.SelectedIndex = _settings.UpdateSource == "Gitee" ? 1 : 0;
         UpdateSourceComboBox.SelectionChanged += async (_, _) =>
         {
@@ -95,6 +105,7 @@ public sealed partial class MainWindow
             content.Children.Add(icon); content.Children.Add(label); button.Content = content;
             _toolbarLabels[button] = (icon, label);
         }
+        ShowSettingsPage((SettingsRoot.SelectedItem as NavigationViewItem)?.Tag?.ToString() ?? "AppearanceTile");
         ApplyExtendedSettings();
     }
 
@@ -102,26 +113,26 @@ public sealed partial class MainWindow
     private static TextBlock Heading(string text) => new() { Text = text, FontSize = 22 };
     private static TextBlock Note(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Opacity = .75 };
 
-    private static void SetTabs(StackPanel parent, params (string Name, UIElement Content)[] pages)
+    private void RegisterSettingsPage(string tag, StackPanel container, UIElement content, string title, string description)
     {
-        // 单独滚动外层页面，不让子选项卡使用固定高度裁切长设置。
-        parent.Children.Clear();
-        StackPanel tabs = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
-        Grid host = new();
-        parent.Children.Add(new ScrollViewer { Content = tabs, HorizontalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled });
-        parent.Children.Add(host);
-        foreach (var page in pages)
-        {
-            ToggleButton tab = new() { Content = page.Name, IsChecked = tabs.Children.Count == 0 };
-            tabs.Children.Add(tab);
-            tab.Checked += (_, _) =>
-            {
-                foreach (ToggleButton other in tabs.Children) other.IsChecked = ReferenceEquals(other, tab);
-                host.Children.Clear(); host.Children.Add(page.Content);
-            };
-            tab.Click += (_, _) => tab.IsChecked = true;
-        }
-        host.Children.Add(pages[0].Content);
+        content.Visibility = Visibility.Collapsed;
+        container.Children.Add(content);
+        _settingsPages[tag] = new SettingsPage(container, content, title, description);
+    }
+
+    private void ShowSettingsPage(string tag)
+    {
+        if (!_settingsPages.TryGetValue(tag, out SettingsPage? selected)) return;
+        foreach (StackPanel container in _settingsPages.Values.Select(page => page.Container).Distinct())
+            container.Visibility = Visibility.Collapsed;
+        foreach (SettingsPage page in _settingsPages.Values)
+            page.Content.Visibility = Visibility.Collapsed;
+
+        selected.Container.Visibility = Visibility.Visible;
+        selected.Content.Visibility = Visibility.Visible;
+        SettingsPageTitle.Text = selected.Title;
+        SettingsPageDescription.Text = selected.Description;
+        SettingsContentScrollViewer.ChangeView(null, 0, null, true);
     }
 
     private void SettingChanged()

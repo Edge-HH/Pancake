@@ -13,6 +13,21 @@ public static class WidgetLayout
         placement.Width = Math.Clamp(placement.Width + dx, 80, Math.Max(80, width - placement.X));
         placement.Height = Math.Clamp(placement.Height + dy, 48, Math.Max(48, height - placement.Y));
     }
+    public static void MoveVerticallyCentered(RegionPlacement placement, double dy, double width, double height)
+    {
+        placement.X = Math.Max(0, (width - placement.Width) / 2);
+        placement.Y = Math.Clamp(placement.Y + dy, 0, Math.Max(0, height - placement.Height));
+    }
+    public static void ResizeCentered(RegionPlacement placement, double dx, double dy, double aspectRatio, double minimumWidth, double width, double height)
+    {
+        double safeAspect = Math.Max(.1, aspectRatio);
+        double maximumWidth = Math.Max(40, Math.Min(width, Math.Max(0, height - placement.Y) * safeAspect));
+        double lowerWidth = Math.Min(minimumWidth, maximumWidth);
+        double widthDelta = Math.Abs(dx) >= Math.Abs(dy) ? dx : dy * safeAspect;
+        placement.Width = Math.Clamp(placement.Width + widthDelta, lowerWidth, maximumWidth);
+        placement.Height = placement.Width / safeAspect;
+        MoveVerticallyCentered(placement, 0, width, height);
+    }
     public static string CompleteSplit(double ratio) => ratio <= .04 ? "Board" : ratio >= .96 ? "Clock" : "Split";
     public static Dictionary<string, RegionPlacement> Copy(IReadOnlyDictionary<string, RegionPlacement> placements) => placements.ToDictionary(p => p.Key,
         p => new RegionPlacement { X = p.Value.X, Y = p.Value.Y, Width = p.Value.Width, Height = p.Value.Height });
