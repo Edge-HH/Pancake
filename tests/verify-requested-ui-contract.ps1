@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $xaml = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.xaml'))
@@ -8,6 +8,8 @@ $tiles = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Cont
 $state = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\ProjectState.cs'))
 $alert = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\NoiseAlertPlayer.cs'))
 $update = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\GitHubUpdateService.cs'))
+$theme = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Themes\ThemeResources.xaml'))
+$backdrop = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\PersistentMicaBackdrop.cs'))
 $failures = [System.Collections.Generic.List[string]]::new()
 
 if ($xaml -match 'Text="今日作业"' -or $xaml -match 'x:Name="BoardModeHint"') {
@@ -45,10 +47,22 @@ if ($state -notmatch 'NoiseAlertVolume' -or $xaml -notmatch 'NoiseAlertVolumeSli
 if ($update -notmatch 'EndsWith\("\.zip"' -or $window -notmatch '便携版') {
     $failures.Add('更新器仍无法识别 Release 中的便携版 ZIP。')
 }
+if ($theme -notmatch 'NavigationViewContentGridCornerRadius">0</CornerRadius>' -or
+    ([regex]::Matches($theme, 'NavigationView(Default|Expanded)PaneBackground" ResourceKey="LayerOnMicaBaseAltFillColorTransparentBrush"')).Count -ne 2 -or
+    $xaml -notmatch 'x:Name="RootShell" Background="Transparent"' -or
+    $xaml -notmatch 'x:Name="DisplayRoot"[^>]+Background="\{ThemeResource BoardBackgroundBrush\}"' -or
+    $window -notmatch 'FindNamedDescendant<SplitView>\(SettingsRoot, "RootSplitView"\)' -or
+    $window -notmatch 'splitView\.CornerRadius\s*=\s*new CornerRadius\(0\)' -or
+    $window -notmatch 'SystemBackdrop\s*=\s*new PersistentMicaBackdrop\(\)' -or
+    $backdrop -notmatch 'IsInputActive\s*=\s*true' -or
+    ([regex]::Matches($backdrop, 'GetDefaultSystemBackdropConfiguration')).Count -ne 1 -or
+    $backdrop -match 'ApplySystemConfiguration\(target,\s*xamlRoot\)') {
+    $failures.Add('设置页没有透出系统 Mica，或导航栏与内容区仍有圆角。')
+}
 
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }
     exit 1
 }
 
-Write-Output 'PASS: requested toolbar, palette, project header, noise volume, discard, arrange, and update contracts are present.'
+Write-Output 'PASS: requested toolbar, palette, settings navigation, project header, noise volume, discard, arrange, and update contracts are present.'

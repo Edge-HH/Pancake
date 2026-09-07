@@ -21,9 +21,6 @@
             <SolidColorBrush x:Key="BoardPaperBrush" Color="#FFFDF7" />
         </ResourceDictionary>
         <ResourceDictionary x:Key="Light">
-            <SolidColorBrush x:Key="NavigationViewDefaultPaneBackground" Color="White" />
-            <SolidColorBrush x:Key="NavigationViewExpandedPaneBackground" Color="White" />
-            <SolidColorBrush x:Key="NavigationViewContentBackground" Color="White" />
             <SolidColorBrush x:Key="BoardBackgroundBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="BoardSurfaceBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="BoardSurfaceSecondaryBrush" Color="#FFFFFF" />
@@ -41,6 +38,12 @@
             <SolidColorBrush x:Key="BoardPaperBrush" Color="#FFFFFF" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
+
+    <!-- 导航栏与内容区是相邻面板，内容层连接处不保留浮层式圆角。 -->
+    <CornerRadius x:Key="NavigationViewContentGridCornerRadius">0</CornerRadius>
+    <!-- 导航栏直接透出系统 Mica，避免默认 Acrylic 覆层把蓝色调冲淡。 -->
+    <StaticResource x:Key="NavigationViewDefaultPaneBackground" ResourceKey="LayerOnMicaBaseAltFillColorTransparentBrush" />
+    <StaticResource x:Key="NavigationViewExpandedPaneBackground" ResourceKey="LayerOnMicaBaseAltFillColorTransparentBrush" />
 
     <!-- 字体随程序分发，避免依赖系统版本。 -->
     <FontFamily x:Key="BoardIconFontFamily">ms-appx:///Assets/Fonts/FluentSystemIcons-Resizable.ttf#FluentSystemIcons-Resizable</FontFamily>

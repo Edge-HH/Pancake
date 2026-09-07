@@ -34,6 +34,11 @@ if ($tileCode -notmatch 'GetRange\(' -or $tileCode -notmatch 'StartPosition' -or
     $failures.Add('打开色卡前没有保存并恢复富文本选区，点击色卡后颜色会作用到错误位置。')
 }
 
+if ($tileCode -notmatch 'new\[\]\s*\{\s*"#000000",\s*"#FFFFFF"\s*\}\.Concat' -or
+    $swatchBlock -notmatch 'Application\.Current\.Resources\["AccentFillColorDefaultBrush"\]') {
+    $failures.Add('文字色卡没有固定保留黑白色，或选中框没有使用 Windows 强调色。')
+}
+
 if ($failures.Count -gt 0) {
     $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }
     exit 1

@@ -6,7 +6,7 @@ using Windows.UI;
 
 namespace Pancake.Controls;
 
-/// <summary>共用色卡：保持悬停颜色，并以白框和右上角勾选呈现当前颜色。</summary>
+/// <summary>共用色卡：保持悬停颜色，并以系统强调色边框和右上角勾选呈现当前颜色。</summary>
 public sealed class ColorSwatchButton : Button
 {
     private readonly Border _check;
@@ -40,7 +40,9 @@ public sealed class ColorSwatchButton : Button
         IsSelected = selected;
         _check.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
         BorderThickness = new Thickness(selected ? 2 : 1);
-        BorderBrush = new SolidColorBrush(selected ? Microsoft.UI.Colors.White : Color.FromArgb(90, 128, 128, 128));
+        BorderBrush = selected
+            ? (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"]
+            : new SolidColorBrush(Color.FromArgb(90, 128, 128, 128));
         Resources["ButtonBorderBrushPointerOver"] = BorderBrush;
         Resources["ButtonBorderBrushPressed"] = BorderBrush;
         AutomationProperties.SetItemStatus(this, selected ? "已选中" : "未选中");

@@ -5,7 +5,7 @@
     xmlns:icons="using:Pancake.Controls"
     Title="Pancake 班级作业看板">
 
-    <Grid x:Name="RootShell" Background="{ThemeResource BoardBackgroundBrush}" KeyDown="RootShell_KeyDown" SizeChanged="RootShell_SizeChanged">
+    <Grid x:Name="RootShell" Background="Transparent" KeyDown="RootShell_KeyDown" SizeChanged="RootShell_SizeChanged">
         <Grid.RowDefinitions>
             <RowDefinition Height="68" />
             <RowDefinition Height="*" />
@@ -62,7 +62,7 @@
             </Grid>
         </Grid>
 
-        <Grid x:Name="DisplayRoot" Grid.Row="1">
+        <Grid x:Name="DisplayRoot" Grid.Row="1" Background="{ThemeResource BoardBackgroundBrush}">
             <Grid x:Name="DisplayGrid">
                 <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="0" /></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="2*" MinWidth="400" /><ColumnDefinition Width="3*" /></Grid.ColumnDefinitions>
@@ -98,7 +98,8 @@
 
         <NavigationView x:Name="SettingsRoot" Grid.Row="1" Visibility="Collapsed"
                         PaneDisplayMode="Left" OpenPaneLength="260" IsBackButtonVisible="Collapsed"
-                        IsSettingsVisible="False" IsPaneOpen="True" SelectionChanged="SettingsNavigation_SelectionChanged">
+                        IsSettingsVisible="False" IsPaneOpen="True" Loaded="SettingsRoot_Loaded"
+                        SelectionChanged="SettingsNavigation_SelectionChanged">
             <NavigationView.MenuItems>
                 <NavigationViewItem x:Name="AppearanceNavItem" Content="外观" Tag="Appearance" IsSelected="True"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Color" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="组件" Tag="Components"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Components" /></NavigationViewItem.Icon></NavigationViewItem>

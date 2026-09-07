@@ -520,7 +520,11 @@ public sealed class SubjectTileControl : Grid
             colors.Children.Add(clearHighlight);
         }
 
-        foreach (string hex in new[] { "#F7F7F9", "#FBBF24", "#F87171", "#60A5FA", "#4ADE80", "#F472B6" }.Select(ColorPalette.Resolve))
+        IEnumerable<string> colorHexes = isHighlight
+            ? new[] { "#F7F7F9", "#FBBF24", "#F87171", "#60A5FA", "#4ADE80", "#F472B6" }.Select(ColorPalette.Resolve)
+            : new[] { "#000000", "#FFFFFF" }.Concat(
+                new[] { "#FBBF24", "#F87171", "#60A5FA", "#4ADE80", "#F472B6" }.Select(ColorPalette.Resolve));
+        foreach (string hex in colorHexes)
         {
             Button swatch = CreateColorSwatch(hex, 30);
             swatch.Click += (_, _) =>

@@ -1,5 +1,7 @@
 // 仅在 EnableUiVerification=true 时编译；在隔离的构建目录运行，不访问用户正常运行目录的数据。
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices.WindowsRuntime;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -26,6 +28,31 @@ public sealed partial class MainWindow
             {
                 void Check(bool condition, string message) { if (!condition) throw new Exception(message); evidence.Add("PASS: " + message); }
                 evidence.Add("Started " + DateTime.Now.ToString("O"));
+                List<Exception> backdropExceptions = [];
+                EventHandler<FirstChanceExceptionEventArgs> backdropExceptionHandler = (_, args) =>
+                {
+                    if (args.Exception is ArgumentException &&
+                        args.Exception.StackTrace?.Contains(nameof(PersistentMicaBackdrop), StringComparison.Ordinal) == true)
+                    {
+                        backdropExceptions.Add(args.Exception);
+                    }
+                };
+                AppDomain.CurrentDomain.FirstChanceException += backdropExceptionHandler;
+                try
+                {
+                    var presenter = _appWindow?.Presenter as OverlappedPresenter
+                        ?? throw new Exception("window does not use an overlapped presenter");
+                    presenter.Minimize();
+                    await Task.Delay(250);
+                    presenter.Restore();
+                    await Task.Delay(250);
+                    await NextLayoutAsync();
+                }
+                finally
+                {
+                    AppDomain.CurrentDomain.FirstChanceException -= backdropExceptionHandler;
+                }
+                Check(backdropExceptions.Count == 0, "Mica configuration does not throw while window focus changes");
                 _settings.AutoUpdateEnabled = false;
                 _library = new ProjectLibrary { Settings = _settings };
                 ProjectDocument project = ProjectStore.Create(_library, false);
@@ -155,11 +182,13 @@ public sealed partial class MainWindow
                     .GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
                 InvokeButton(textColorButton); await NextLayoutAsync();
                 var textSwatches = ((StackPanel)((Flyout)textColorButton.Flyout).Content).Children.Cast<ColorSwatchButton>().ToList();
-                Check(textSwatches[1].Color.Equals(Pancake.ViewModels.MainViewModel.BrushFromHex("#E8D5A5").Color), "text color swatches follow Macaron palette");
+                Check(textSwatches[0].Color.Equals(Microsoft.UI.Colors.Black) && textSwatches[1].Color.Equals(Microsoft.UI.Colors.White), "text palette always starts with black and white");
+                Check(textSwatches[2].Color.Equals(Pancake.ViewModels.MainViewModel.BrushFromHex("#E8D5A5").Color), "other text color swatches follow Macaron palette");
                 InvokeButton(textSwatches[1]); await NextLayoutAsync();
                 Check(paletteEditor.Document.GetRange(0, 2).CharacterFormat.ForegroundColor.Equals(textSwatches[1].Color), "text swatch applies to preserved text selection");
                 InvokeButton(textColorButton); await NextLayoutAsync();
                 Check(textSwatches[1].IsSelected && textSwatches.Count(s => s.IsSelected) == 1, "reopened text palette marks current selection color");
+                Check(ReferenceEquals(textSwatches[1].BorderBrush, Application.Current.Resources["AccentFillColorDefaultBrush"]), "selected white swatch uses the Windows accent border");
                 textColorButton.Flyout.Hide();
                 var highlightButton = FindVisuals<Button>(RichTextToolbarHost).First(b => ToolTipService.GetToolTip(b)?.ToString() == "高光颜色");
                 InvokeButton(highlightButton); await NextLayoutAsync();
@@ -172,6 +201,8 @@ public sealed partial class MainWindow
                 Check(paletteEditor.Document.GetRange(0, 2).CharacterFormat.BackgroundColor.Equals(TextConstants.AutoColor), "clear highlighting retains automatic background color");
                 PaletteComboBox.SelectedIndex = 0;
                 ShowSettings(); SettingsRoot.SelectedItem = SettingsRoot.FooterMenuItems[0]; await NextLayoutAsync();
+                var settingsSplitView = FindVisuals<SplitView>(SettingsRoot).First(view => view.Name == "RootSplitView");
+                Check(settingsSplitView.CornerRadius == new CornerRadius(0), "settings navigation pane joins the content with square corners");
                 await SaveVisualAsync(RootShell, Path.Combine(output, "about.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
                 evidence.Add("UI_VERIFICATION_OK");
             }

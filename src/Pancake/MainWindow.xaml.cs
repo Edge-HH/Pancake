@@ -78,7 +78,7 @@ public sealed partial class MainWindow : Window
         RefreshMicrophoneDevices();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragRegion);
-        SystemBackdrop = new MicaBackdrop();
+        SystemBackdrop = new PersistentMicaBackdrop();
         InitializeAppWindow();
         InitializeTimersAndServices();
 
@@ -563,6 +563,35 @@ public sealed partial class MainWindow : Window
             _ => "调整界面主题和看板色系。"
         };
         SettingsContentScrollViewer.ChangeView(null, 0, null, true);
+    }
+
+    private void SettingsRoot_Loaded(object sender, RoutedEventArgs e)
+    {
+        // NavigationView 会给内部 SplitView 单独套右侧圆角，需在模板生成后精准移除。
+        SettingsRoot.ApplyTemplate();
+        if (FindNamedDescendant<SplitView>(SettingsRoot, "RootSplitView") is { } splitView)
+        {
+            splitView.CornerRadius = new CornerRadius(0);
+        }
+    }
+
+    private static T? FindNamedDescendant<T>(DependencyObject parent, string name) where T : FrameworkElement
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T element && element.Name == name)
+            {
+                return element;
+            }
+
+            if (FindNamedDescendant<T>(child, name) is { } descendant)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
     }
 
     private void ApplyActualTheme()
