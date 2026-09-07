@@ -1,4 +1,4 @@
-name: Release
+name: 📦 构建与发布
 
 on:
   push:
@@ -19,15 +19,15 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - name: Checkout
+      - name: 📥 获取项目代码
         uses: actions/checkout@v4
 
-      - name: Setup .NET 8
+      - name: 🛠️ 配置 .NET 8
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
 
-      - name: Resolve and validate version
+      - name: 🏷️ 解析并校验版本号
         id: version
         shell: pwsh
         env:
@@ -41,27 +41,31 @@ jobs:
           }
           "version=$version" >> $env:GITHUB_OUTPUT
 
-      - name: Restore
-        run: dotnet restore .\Pancake.slnx
+      - name: 📚 还原项目依赖
+        run: dotnet restore .\src\Pancake\Pancake.csproj
 
-      - name: Build Release x64
-        run: dotnet build .\Pancake.slnx -c Release -p:Platform=x64 --no-restore --nologo
+      - name: 🔨 编译 x64 正式版本
+        run: dotnet build .\src\Pancake\Pancake.csproj -c Release -p:Platform=x64 --no-restore --nologo
 
-      - name: Run settings logic tests
+      - name: 🧪 验证设置逻辑
         run: dotnet run --project .\tests\SettingsLogic\SettingsLogic.csproj -c Release
 
-      - name: Run project and package tests
+      - name: 🧩 验证项目文件与排版
         run: dotnet run --project .\tests\ProjectLogic\ProjectLogic.csproj -c Release
 
-      - name: Run static contract tests
+      - name: 🔄 验证更新覆盖与回滚
+        run: dotnet run --project .\tests\UpdateLogic\UpdateLogic.csproj -c Release
+
+      - name: 🔎 检查界面与交互约定
         shell: pwsh
         run: |
           .\tests\verify-color-formatting-contract.ps1
           .\tests\verify-icon-font-contract.ps1
           .\tests\verify-interaction-contract.ps1
+          .\tests\verify-requested-ui-contract.ps1
           .\tests\verify-rich-text-roundtrip.ps1
 
-      - name: Publish self-contained app
+      - name: 📦 生成自带运行环境的程序
         shell: pwsh
         run: |
           dotnet publish .\src\Pancake\Pancake.csproj `
@@ -74,7 +78,11 @@ jobs:
             -o .\artifacts\publish `
             --nologo
 
-      - name: Create portable archive
+      - name: 🪶 精简多余语言资源
+        shell: pwsh
+        run: .\installer\Optimize-Publish.ps1 -PublishDirectory .\artifacts\publish
+
+      - name: 🗜️ 压缩便携版程序
         shell: pwsh
         run: |
           Compress-Archive `
@@ -82,14 +90,20 @@ jobs:
             -DestinationPath .\artifacts\Pancake-win-x64-${{ steps.version.outputs.version }}.zip `
             -CompressionLevel Optimal
 
-      - name: Upload portable artifact
+      - name: 🚀 解压并验证成品启动
+        shell: pwsh
+        run: |
+          Expand-Archive -LiteralPath .\artifacts\Pancake-win-x64-${{ steps.version.outputs.version }}.zip -DestinationPath .\artifacts\package-check
+          .\tests\verify-release-startup.ps1 -PublishDirectory .\artifacts\package-check
+
+      - name: 📤 上传便携版产物
         uses: actions/upload-artifact@v4
         with:
           name: Pancake-win-x64-${{ steps.version.outputs.version }}
           path: .\artifacts\Pancake-win-x64-${{ steps.version.outputs.version }}.zip
           if-no-files-found: error
 
-      - name: Create GitHub Release
+      - name: 🎉 创建 GitHub 正式发布
         if: github.event_name == 'push'
         shell: pwsh
         env:

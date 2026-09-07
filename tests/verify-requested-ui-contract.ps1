@@ -1,0 +1,54 @@
+$ErrorActionPreference = 'Stop'
+
+$projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$xaml = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.xaml'))
+$window = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.xaml.cs'))
+$projects = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.Projects.cs'))
+$tiles = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\SubjectTileControl.cs'))
+$state = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\ProjectState.cs'))
+$alert = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\NoiseAlertPlayer.cs'))
+$update = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\GitHubUpdateService.cs'))
+$failures = [System.Collections.Generic.List[string]]::new()
+
+if ($xaml -match 'Text="今日作业"' -or $xaml -match 'x:Name="BoardModeHint"') {
+    $failures.Add('作业板上方的重复标题区域仍未删除。')
+}
+if ($xaml -notmatch 'x:Name="ProjectNameText"' -or $xaml -notmatch 'x:Name="SubjectCountText"[\s\S]*?BoardTextMutedBrush') {
+    $failures.Add('项目名后没有显示浅灰色科目数量。')
+}
+if ($projects -match 'ProjectCommands\.Visibility\s*=\s*_isEditing') {
+    $failures.Add('项目与文件选项仍只在编辑模式显示。')
+}
+$toolbar = [regex]::Match($xaml, 'x:Name="FloatingToolbar"[\s\S]*?</Border>').Value
+$pen = $toolbar.IndexOf('x:Name="GlobalPenButton"')
+$discard = $toolbar.IndexOf('x:Name="DiscardEditButton"')
+$save = $toolbar.IndexOf('x:Name="EditBoardButton"')
+if ($pen -lt 0 -or $discard -lt 0 -or $save -lt 0 -or $pen -gt $discard -or $discard -gt $save) {
+    $failures.Add('底栏没有按画笔第一、放弃倒数第二、保存最后排列。')
+}
+if ($toolbar -notmatch 'GlobalPenButton[\s\S]*?FluentIcon[^>]+Symbol="Pen"') {
+    $failures.Add('底栏画笔没有使用图标。')
+}
+if ($xaml -notmatch 'x:Name="AutoArrangeButton"' -or $window -notmatch 'AutoArrangeButton_Click') {
+    $failures.Add('编辑模式缺少自动排列按钮。')
+}
+if ($window -notmatch '是否放弃本次更改') {
+    $failures.Add('放弃修改前没有确认提示。')
+}
+$swatches = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\ColorSwatchButton.cs'))
+if ($tiles -notmatch 'ColorSwatchButton' -or $projects -notmatch 'ColorSwatchButton' -or $swatches -notmatch 'ButtonBackgroundPointerOver') {
+    $failures.Add('富文本、磁贴和画笔色卡没有固定悬停颜色。')
+}
+if ($state -notmatch 'NoiseAlertVolume' -or $xaml -notmatch 'NoiseAlertVolumeSlider' -or $alert -notmatch 'public\s+float\s+Volume') {
+    $failures.Add('吵闹提示音缺少持久化音量设置。')
+}
+if ($update -notmatch 'EndsWith\("\.zip"' -or $window -notmatch '便携版') {
+    $failures.Add('更新器仍无法识别 Release 中的便携版 ZIP。')
+}
+
+if ($failures.Count -gt 0) {
+    $failures | ForEach-Object { Write-Error $_ -ErrorAction Continue }
+    exit 1
+}
+
+Write-Output 'PASS: requested toolbar, palette, project header, noise volume, discard, arrange, and update contracts are present.'

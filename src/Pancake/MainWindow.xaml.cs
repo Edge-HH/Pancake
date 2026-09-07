@@ -40,6 +40,7 @@ public sealed partial class MainWindow : Window
     private bool _isFullScreen;
     private bool _isLoaded;
     private bool _refreshingDevices;
+    private bool _checkingForUpdates;
     private readonly NoiseAlertGate _noiseAlertGate = new();
     private readonly NoiseAlertPlayer _noiseAlertPlayer = new();
     private readonly System.Diagnostics.Stopwatch _noiseAlertClock = System.Diagnostics.Stopwatch.StartNew();
@@ -171,6 +172,7 @@ public sealed partial class MainWindow : Window
 
     private void ShowBoard()
     {
+        UpdateEditButtonPosition();
         DisplayRoot.Visibility = Visibility.Visible;
         SettingsRoot.Visibility = Visibility.Collapsed;
         UpdateProjectCommands();
@@ -189,6 +191,8 @@ public sealed partial class MainWindow : Window
         EditBoardButton.Visibility = Visibility.Collapsed;
         SettingsButton.Visibility = Visibility.Collapsed;
         AddSubjectButton.Visibility = Visibility.Collapsed;
+        AutoArrangeButton.Visibility = Visibility.Collapsed;
+        GlobalPenButton.Visibility = Visibility.Collapsed;
         GridSnapToggleButton.Visibility = Visibility.Collapsed;
         DiscardEditButton.Visibility = Visibility.Collapsed;
     }
@@ -203,10 +207,13 @@ public sealed partial class MainWindow : Window
         if (_isEditing || CurrentProject is null) return;
         ViewModel.BeginEditing();
         _isEditing = true;
+        UpdateEditButtonPosition();
         UpdateRichTextToolbar();
         EditBoardIcon.Glyph = FluentGlyphs.Checkmark;
-        AutomationProperties.SetName(EditBoardButton, "完成编辑");
+        AutomationProperties.SetName(EditBoardButton, "保存修改");
+        GlobalPenButton.Visibility = Visibility.Visible;
         AddSubjectButton.Visibility = Visibility.Visible;
+        AutoArrangeButton.Visibility = Visibility.Visible;
         GridSnapToggleButton.Visibility = Visibility.Visible;
         DiscardEditButton.Visibility = Visibility.Visible;
         UpdateGridSnapHint();
@@ -217,32 +224,37 @@ public sealed partial class MainWindow : Window
     {
         ViewModel.PublishEditing();
         _isEditing = false;
+        UpdateEditButtonPosition();
         GlobalPenButton.IsChecked = false;
         UpdateRichTextToolbar();
         _activeTileInteractions = 0;
         EditBoardIcon.Glyph = FluentGlyphs.Edit;
         AutomationProperties.SetName(EditBoardButton, "编辑看板");
+        GlobalPenButton.Visibility = Visibility.Collapsed;
         AddSubjectButton.Visibility = Visibility.Collapsed;
+        AutoArrangeButton.Visibility = Visibility.Collapsed;
         GridSnapToggleButton.Visibility = Visibility.Collapsed;
         DiscardEditButton.Visibility = Visibility.Collapsed;
-        BoardModeHint.Text = "所有文字和笔迹都完整显示在磁贴上";
         SetTilesEditing(false);
         ScheduleSave();
     }
 
-    private void DiscardEditButton_Click(object sender, RoutedEventArgs e)
+    private async void DiscardEditButton_Click(object sender, RoutedEventArgs e)
     {
+        if (await ShowConfirmAsync("放弃更改", "是否放弃本次更改？") != ContentDialogResult.Primary) return;
         ViewModel.DiscardEditing();
         _isEditing = false;
+        UpdateEditButtonPosition();
         GlobalPenButton.IsChecked = false;
         UpdateRichTextToolbar();
         _activeTileInteractions = 0;
         BuildTiles();
         EditBoardIcon.Glyph = FluentGlyphs.Edit;
+        GlobalPenButton.Visibility = Visibility.Collapsed;
         AddSubjectButton.Visibility = Visibility.Collapsed;
+        AutoArrangeButton.Visibility = Visibility.Collapsed;
         GridSnapToggleButton.Visibility = Visibility.Collapsed;
         DiscardEditButton.Visibility = Visibility.Collapsed;
-        BoardModeHint.Text = "所有文字和笔迹都完整显示在磁贴上";
         ScheduleSave();
     }
 
@@ -262,6 +274,7 @@ public sealed partial class MainWindow : Window
 
     private void BuildTiles()
     {
+        AlignmentCanvas.Children.Clear();
         UpdateRichTextToolbar();
         BoardCanvas.Children.Clear();
         foreach (SubjectBoard subject in ViewModel.Subjects) AddTile(subject);
@@ -331,6 +344,55 @@ public sealed partial class MainWindow : Window
         UpdateSubjectCount();
     }
 
+    private void UpdateEditButtonPosition()
+    {
+        ToolbarItems.Children.Remove(EditBoardButton);
+        ToolbarItems.Children.Insert(_isEditing ? ToolbarItems.Children.Count : 0, EditBoardButton);
+    }
+
+    private async void AutoArrangeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_isEditing || ViewModel.Subjects.Count == 0) return;
+        double width = BoardViewport.ActualWidth > 1 ? BoardViewport.ActualWidth : 1100;
+        double height = BoardViewport.ActualHeight > 1 ? BoardViewport.ActualHeight : 780;
+        try
+        {
+            if (IsGridSnappingEnabled)
+            {
+                var gridPlacements = BoardLayout.ArrangeGrid(ViewModel.Subjects.Select(s => (s.TileWidth, s.TileHeight)).ToList(), width, height);
+                for (int index = 0; index < gridPlacements.Count; index++)
+                {
+                    var subject = ViewModel.Subjects[index];
+                    var placement = gridPlacements[index];
+                    subject.X = placement.X; subject.Y = placement.Y;
+                    subject.TileWidth = placement.Width; subject.TileHeight = placement.Height;
+                }
+                BuildTiles();
+                ScheduleSave();
+                return;
+            }
+            var placements = ExportLayout.Arrange(ViewModel.Subjects.Select(subject => (subject.TileWidth, subject.TileHeight)).ToList(), width, height, 0);
+            double scale = Math.Min(1, placements.Min(placement => placement.Scale));
+            if (ViewModel.Subjects.Any(subject => subject.TileWidth * scale < 280 || subject.TileHeight * scale < SubjectTileControl.MinimumTileHeight))
+                throw new InvalidOperationException("当前作业板空间不足，无法在不低于最小磁贴尺寸的情况下自动排列。");
+            for (int index = 0; index < placements.Count; index++)
+            {
+                SubjectBoard subject = ViewModel.Subjects[index];
+                ExportTilePlacement placement = placements[index];
+                subject.X = placement.X;
+                subject.Y = placement.Y;
+                subject.TileWidth *= scale;
+                subject.TileHeight *= scale;
+            }
+            BuildTiles();
+            ScheduleSave();
+        }
+        catch (Exception exception)
+        {
+            await ShowMessageAsync("无法自动排列", exception.Message, "知道了");
+        }
+    }
+
     private async void DeleteSubject(SubjectBoard subject)
     {
         if (await ShowConfirmAsync("删除这个科目", $"确定删除“{subject.Name}”以及其中的文字、图片和笔迹吗？") != ContentDialogResult.Primary) return;
@@ -344,6 +406,14 @@ public sealed partial class MainWindow : Window
         ClampSubjectToViewport(subject);
         SubjectTileControl? tile = FindTile(subject);
         if (tile is null) return;
+        if (!IsGridSnappingEnabled && tile.IsMoving)
+        {
+            var snap = BoardLayout.Snap(new(subject.X, subject.Y, subject.TileWidth, subject.TileHeight),
+                ViewModel.Subjects.Where(s => !ReferenceEquals(s, subject)).Select(s => new LayoutRect(s.X, s.Y, s.TileWidth, s.TileHeight)),
+                BoardCanvas.Width, BoardCanvas.Height);
+            subject.X = snap.X; subject.Y = snap.Y;
+            AlignmentGuides.Draw(AlignmentCanvas, snap, BoardCanvas.Width, BoardCanvas.Height);
+        }
         Canvas.SetLeft(tile, subject.X);
         Canvas.SetTop(tile, subject.Y);
         tile.ApplyModelLayout();
@@ -353,12 +423,19 @@ public sealed partial class MainWindow : Window
     {
         if (IsGridSnappingEnabled)
         {
-            subject.X = Math.Max(0, SnapToGrid(subject.X));
-            subject.Y = Math.Max(0, SnapToGrid(subject.Y));
-            subject.TileWidth = Math.Max(280, SnapToGrid(subject.TileWidth));
-            subject.TileHeight = Math.Max(SubjectTileControl.MinimumTileHeight, SnapToGrid(subject.TileHeight));
+            double width = Math.Floor(BoardCanvas.Width / GridSize) * GridSize;
+            double height = Math.Floor(BoardCanvas.Height / GridSize) * GridSize;
+            double minWidth = Math.Ceiling(280 / GridSize) * GridSize;
+            if (width >= minWidth && height >= SubjectTileControl.MinimumTileHeight)
+            {
+                subject.TileWidth = Math.Clamp(SnapToGrid(subject.TileWidth), minWidth, width);
+                subject.TileHeight = Math.Clamp(SnapToGrid(subject.TileHeight), SubjectTileControl.MinimumTileHeight, height);
+                subject.X = Math.Clamp(SnapToGrid(subject.X), 0, width - subject.TileWidth);
+                subject.Y = Math.Clamp(SnapToGrid(subject.Y), 0, height - subject.TileHeight);
+            }
         }
         LayoutChanged(subject);
+        AlignmentCanvas.Children.Clear();
         ScheduleSave();
     }
 
@@ -464,10 +541,9 @@ public sealed partial class MainWindow : Window
 
     private void UpdateGridSnapHint()
     {
-        if (BoardModeHint is null) return;
-        BoardModeHint.Text = IsGridSnappingEnabled
-            ? "拖动磁贴顶部或任意边框，位置和大小会吸附到 48px 网格"
-            : "网格吸附已关闭，磁贴仍限制在可视区域内";
+        ToolTipService.SetToolTip(GridSnapToggleButton, IsGridSnappingEnabled
+            ? "网格吸附已开启：位置和大小吸附到 48px 网格"
+            : "网格吸附已关闭：磁贴仍限制在可视区域内");
     }
 
     private void UpdateSubjectCount() => SubjectCountText.Text = $"{ViewModel.Subjects.Count} 个科目";
@@ -493,6 +569,7 @@ public sealed partial class MainWindow : Window
     {
         BoardTheme.IsLight = RootShell.ActualTheme == ElementTheme.Light;
         if (!_isLoaded) return;
+        RefreshInkPalette();
         // 已有笔迹保留原始颜色；富文本在加载和保存时进行默认内容色转换。
         BuildTiles();
         HideFullScreenExitHint();
@@ -518,9 +595,10 @@ public sealed partial class MainWindow : Window
     private void ApplyPalette()
     {
         ColorPalette.IsMacaron = _settings.Palette == "Macaron";
+        RefreshInkPalette();
         foreach (var subject in ViewModel.Subjects)
         {
-            subject.AccentBrush = MainViewModel.BrushFromHex(subject.AccentHex, !subject.IsAccentExplicit);
+            subject.AccentBrush = MainViewModel.BrushFromHex(ColorPalette.ResolveAccent(subject.AccentHex, subject.IsAccentExplicit, ColorPalette.IsMacaron));
         }
     }
 
@@ -531,6 +609,7 @@ public sealed partial class MainWindow : Window
         MicrophoneStatusInfoBar.Severity = InfoBarSeverity.Informational;
         MicrophoneStatusInfoBar.Message = "正在启动输入设备…";
         _noiseAlertGate.Reset();
+        _noiseAlertPlayer.Volume = (float)Math.Clamp(_settings.NoiseAlertVolume, 0, 1);
         _noiseMonitor.Start(_settings.MicrophoneDeviceId);
         if (_settings.NoiseAlertEnabled) PrepareNoiseAlert();
     }
@@ -589,6 +668,15 @@ public sealed partial class MainWindow : Window
         _noiseAlertGate.Reset();
         if (_settings.NoiseAlertEnabled) PrepareNoiseAlert();
         else _noiseAlertPlayer.Dispose();
+        ScheduleSave();
+    }
+
+    private void NoiseAlertVolumeSlider_ValueChanged(object sender, RangeBaseValueChangedEventArgs e)
+    {
+        if (NoiseAlertVolumeLabel is not null) NoiseAlertVolumeLabel.Text = $"提示音音量 · {e.NewValue:0}%";
+        if (!_isLoaded) return;
+        _settings.NoiseAlertVolume = Math.Clamp(e.NewValue / 100, 0, 1);
+        _noiseAlertPlayer.Volume = (float)_settings.NoiseAlertVolume;
         ScheduleSave();
     }
 
@@ -729,6 +817,8 @@ public sealed partial class MainWindow : Window
 
     private async Task CheckForUpdatesAsync(bool interactive)
     {
+        if (_checkingForUpdates) return;
+        _checkingForUpdates = true;
         try
         {
             UpdateStatusText.Text = "正在检查 GitHub Release…";
@@ -739,16 +829,32 @@ public sealed partial class MainWindow : Window
                 return;
             }
             UpdateStatusText.Text = $"发现 {update.Tag}，正在下载 {update.AssetName}…";
-            string installer = await _updateService.DownloadAsync(update, _dataStore.DataDirectory);
-            UpdateStatusText.Text = $"{update.Tag} 已下载，等待安装。";
-            if (await ShowConfirmAsync("发现新版本", $"已将 {update.Tag} 下载到软件目录。现在启动安装程序吗？") == ContentDialogResult.Primary)
-                GitHubUpdateService.LaunchInstaller(installer);
+            string package = await _updateService.DownloadAsync(update, _dataStore.DataDirectory);
+            bool portable = System.IO.Path.GetExtension(package).Equals(".zip", StringComparison.OrdinalIgnoreCase);
+            UpdateStatusText.Text = portable ? $"{update.Tag} 便携版已下载，可以自动更新。" : $"{update.Tag} 已下载，等待安装。";
+            string prompt = portable
+                ? $"已下载 {update.Tag} 便携版。现在保存项目并重启更新吗？程序将自动解压、覆盖旧版本并重新启动，项目和设置会保留。"
+                : $"已将 {update.Tag} 下载到软件目录。现在启动安装程序吗？";
+            if (await ShowConfirmAsync("发现新版本", prompt) == ContentDialogResult.Primary)
+            {
+                if (portable)
+                {
+                    UpdateStatusText.Text = "正在校验并解压更新…";
+                    string configuration = await Task.Run(() => PortableUpdateService.Prepare(package, AppContext.BaseDirectory,
+                        System.IO.Path.Combine(_dataStore.DataDirectory, "updates"), Environment.ProcessId));
+                    PersistProjects();
+                    PortableUpdateService.Launch(configuration);
+                    Close();
+                }
+                else GitHubUpdateService.LaunchInstaller(package);
+            }
         }
         catch (Exception exception)
         {
             UpdateStatusText.Text = $"更新检查失败：{exception.Message}";
             if (interactive) await ShowMessageAsync("无法检查更新", exception.Message, "知道了");
         }
+        finally { _checkingForUpdates = false; }
     }
 
     private void LoadPersistentState()
@@ -766,6 +872,8 @@ public sealed partial class MainWindow : Window
             NoiseThresholdSlider.Value = Math.Clamp(_settings.NoiseThresholdDb, 20, 120);
             _settings.NoiseThresholdDb = NoiseThresholdSlider.Value;
             NoiseAlertToggle.IsOn = _settings.NoiseAlertEnabled;
+            NoiseAlertVolumeSlider.Value = Math.Clamp(_settings.NoiseAlertVolume, 0, 1) * 100;
+            _settings.NoiseAlertVolume = NoiseAlertVolumeSlider.Value / 100;
             CalibrationTargetBox.Value = _settings.CalibrationTargetDb;
             MicrophoneCalibrationLabel.Text = $"校准偏移 · {_settings.MicrophoneCalibrationDb:+0.0;-0.0;0} dB";
             WeatherAlertsToggle.IsOn = _settings.ShowWeatherAlerts;

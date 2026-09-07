@@ -10,7 +10,7 @@ public sealed record GitHubReleaseUpdate(Version Version, string Tag, string Ass
 
 public sealed class GitHubUpdateService
 {
-    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromSeconds(20) };
+    private readonly HttpClient _httpClient = new() { Timeout = TimeSpan.FromMinutes(10) };
 
     public GitHubUpdateService() => _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("Pancake-Updater/1.0");
 
@@ -28,6 +28,9 @@ public sealed class GitHubUpdateService
         Version current = Assembly.GetExecutingAssembly().GetName().Version ?? new Version(1, 0, 0);
         if (releaseVersion <= current) return null;
         JsonElement? asset = document.RootElement.GetProperty("assets").EnumerateArray()
+            .OrderByDescending(item => (item.GetProperty("name").GetString() ?? "").Contains("win-x64", StringComparison.OrdinalIgnoreCase)
+                && (item.GetProperty("name").GetString() ?? "").EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            .Where(item => !(item.GetProperty("name").GetString() ?? "").Contains("arm64", StringComparison.OrdinalIgnoreCase))
             .FirstOrDefault(item => IsInstallable(item.GetProperty("name").GetString() ?? ""));
         if (asset is null || asset.Value.ValueKind == JsonValueKind.Undefined) return null;
         string? digest = asset.Value.TryGetProperty("digest", out JsonElement digestElement) ? digestElement.GetString() : null;
@@ -36,7 +39,7 @@ public sealed class GitHubUpdateService
 
     public async Task<string> DownloadAsync(GitHubReleaseUpdate update, string dataDirectory, CancellationToken cancellationToken = default)
     {
-        string directory = Path.Combine(dataDirectory, "updates", update.Tag);
+        string directory = Path.Combine(dataDirectory, "updates", update.Version.ToString());
         Directory.CreateDirectory(directory);
         string destination = Path.Combine(directory, Path.GetFileName(update.AssetName));
         await using Stream input = await _httpClient.GetStreamAsync(update.DownloadUrl, cancellationToken);
@@ -60,7 +63,8 @@ public sealed class GitHubUpdateService
 
     public static void LaunchInstaller(string path) => Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
 
-    private static bool IsInstallable(string name) => name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+    internal static bool IsInstallable(string name) => name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
         || name.EndsWith(".msix", StringComparison.OrdinalIgnoreCase)
-        || name.EndsWith(".msixbundle", StringComparison.OrdinalIgnoreCase);
+        || name.EndsWith(".msixbundle", StringComparison.OrdinalIgnoreCase)
+        || name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase);
 }

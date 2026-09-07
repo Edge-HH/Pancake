@@ -4,10 +4,10 @@ $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $tileCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\SubjectTileControl.cs'))
 $failures = [System.Collections.Generic.List[string]]::new()
 
-$swatchBlock = [regex]::Match($tileCode, 'private static Button CreateColorSwatch[\s\S]*?private static TextBox CreateInlineEditor').Value
-if ($swatchBlock -notmatch 'Background\s*=\s*new SolidColorBrush\(BoardTheme\.DisplayContentColor\(MainViewModel\.BrushFromHex\(hex\)\.Color\)\)' -or
-    $swatchBlock -notmatch 'Width\s*=\s*size' -or
-    $swatchBlock -notmatch 'Height\s*=\s*size') {
+$swatchBlock = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\ColorSwatchButton.cs'))
+if ($tileCode -notmatch 'new\(BoardTheme\.DisplayContentColor\(MainViewModel\.BrushFromHex\(hex\)\.Color\), size\)' -or
+    $swatchBlock -notmatch 'Background = new SolidColorBrush\(color\)' -or
+    $swatchBlock -notmatch 'Width = Height = size' -or $swatchBlock -notmatch 'ButtonBackgroundPointerOver') {
     $failures.Add('字体、高光或磁贴主题色卡没有使用铺满按钮的完整方形色块。')
 }
 

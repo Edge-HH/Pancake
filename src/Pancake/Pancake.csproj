@@ -10,20 +10,26 @@
     <SelfContained>false</SelfContained>
     <WindowsPackageType>None</WindowsPackageType>
     <UseWinUI>true</UseWinUI>
+    <!-- 生成并发布 XBF/PRI 资源；缺少工具链时 publish 会漏掉主窗口及控件主题。 -->
+    <EnableMsixTooling>true</EnableMsixTooling>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <Version>1.0.0</Version>
+    <SatelliteResourceLanguages>zh-Hans;zh-Hant;en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260804001" />
+    <!-- 仅引用界面组件，避免元包引入未使用的 AI、ML 和 Widgets 运行时。 -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260803003" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
-    <PackageReference Include="NAudio" Version="2.4.0" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.4.0" />
+    <PackageReference Include="NAudio.WinMM" Version="2.4.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Assets\Fonts\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Fonts\**\*" Exclude="Assets\Fonts\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="ApplyUpdate.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\xiaomi_weather_cities.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <PropertyGroup Condition="'$(EnableUiVerification)' == 'true'">

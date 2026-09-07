@@ -7,7 +7,7 @@ void Check(bool value, string message) { if (!value) throw new Exception(message
 void Reject(Action action, string message)
 {
     bool rejected = false;
-    try { action(); } catch (Exception ex) when (ex is InvalidDataException or IOException or JsonException or UnauthorizedAccessException) { rejected = true; }
+    try { action(); } catch (Exception ex) when (ex is InvalidDataException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException) { rejected = true; }
     Check(rejected, message);
 }
 string root = Path.Combine(Path.GetTempPath(), "Pancake-project-tests-" + Guid.NewGuid().ToString("N"));
@@ -82,6 +82,24 @@ try
         Check(!layout.SelectMany((p, i) => layout.Skip(i + 1).Select(q => ExportLayout.Overlap(p, q))).Any(v => v), "自动排版重叠");
     }
     Check(ExportLayout.Arrange([], 1000, 1000, 100).Count == 0, "空导出错误");
+    var packed = BoardLayout.ArrangeGrid([(430, 326), (430, 326), (430, 326)], 1100, 780);
+    Check(packed.All(p => p.X % 48 == 0 && p.Y % 48 == 0 && p.Width % 48 == 0 && p.Height % 48 == 0), "网格自动排列必须对齐位置及尺寸");
+    Check(packed[1].X == packed[0].X + packed[0].Width && packed[2].Y == packed[0].Height, "网格排列不应留下无意义间隔");
+    for (int count = 1; count <= 12; count++)
+    {
+        var compact = BoardLayout.ArrangeGrid(Enumerable.Range(0, count).Select(i => (400d + i * 8, 180d + i * 6)).ToList(), 1200, 780);
+        Check(compact.All(p => p.X >= 0 && p.Y >= 0 && p.X + p.Width <= 1200 && p.Y + p.Height <= 780 && p.Width >= 280 && p.Height >= 96), "紧密排列不得越界或低于最小尺寸");
+        Check(!compact.SelectMany((p, i) => compact.Skip(i + 1).Select(q => p.X < q.X + q.Width && p.X + p.Width > q.X && p.Y < q.Y + q.Height && p.Y + p.Height > q.Y)).Any(v => v), "紧密排列不得重叠");
+    }
+    Reject(() => BoardLayout.ArrangeGrid([(400, 300)], 250, 90), "空间不足应明确报错");
+    var centered = BoardLayout.Snap(new(347, 249, 300, 200), [], 1000, 700);
+    Check(centered.X == 350 && centered.Y == 250 && centered.GuideX == 500 && centered.GuideY == 350, "看板中心吸附错误");
+    var adjacent = BoardLayout.Snap(new(397, 104, 300, 200), [new(100, 100, 300, 200)], 1200, 800);
+    Check(adjacent.X == 400 && adjacent.Y == 100, "磁贴边缘吸附错误");
+    var free = BoardLayout.Snap(new(77, 73, 300, 200), [], 1000, 700);
+    Check(free.X == 77 && free.Y == 73 && free.GuideX is null && free.GuideY is null, "远离参考线时不应吸附");
+    var exportSnap = BoardLayout.Snap(new(347, 299, 300, 200), [], 1000, 700, 100);
+    Check(exportSnap.Y == 300 && exportSnap.GuideY == 400, "导出吸附应按标题以下的作业区域居中");
     ProjectStore emptyAttachmentStore = new(Path.Combine(root, "legacy-empty-attachment"));
     Directory.CreateDirectory(emptyAttachmentStore.DirectoryPath);
     AppState legacyWithEmptyAttachment = new()
@@ -98,6 +116,7 @@ try
     File.WriteAllText(Path.Combine(emptyAttachmentStore.DirectoryPath, "pancake.json"), JsonSerializer.Serialize(legacyWithEmptyAttachment));
     ProjectLibrary migratedWithEmptyAttachment = emptyAttachmentStore.Load();
     Check(migratedWithEmptyAttachment.Projects.Single().Subjects.Single().Entries.Single().Attachments.Single().Path == "", "空附件占位不应阻止旧看板迁移");
+    Check(emptyAttachmentStore.Load().Projects.Single().Subjects.Single().Entries.Single().Attachments.Single().Path == "", "空附件占位不应阻止新项目清单再次读取");
     ProjectStore legacyStore = new(Path.Combine(root, "legacy")); Directory.CreateDirectory(legacyStore.DirectoryPath);
     AppState legacy = new() { Subjects = [new SubjectState { Name = "旧科目", Width = 430, Height = 320 }] };
     File.WriteAllText(Path.Combine(legacyStore.DirectoryPath, "pancake.json"), JsonSerializer.Serialize(legacy));

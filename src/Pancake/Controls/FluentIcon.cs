@@ -8,6 +8,7 @@ namespace Pancake.Controls;
 public static class FluentGlyphs
 {
     public const string Board = "\uE20D"; // ic_fluent_board_20_regular
+    public const string Folder = "\uE875"; // ic_fluent_folder_20_regular
     public const string Weather = "\uF465"; // ic_fluent_weather_sunny_20_regular
     public const string Microphone = "\uEB80"; // ic_fluent_mic_20_regular
     public const string Color = "\uE51E"; // ic_fluent_color_20_regular
@@ -17,6 +18,7 @@ public static class FluentGlyphs
     public const string Dismiss = "\uE671"; // ic_fluent_dismiss_20_regular
     public const string Add = "\uE00D"; // ic_fluent_add_20_regular
     public const string Grid = "\uE929"; // ic_fluent_grid_20_regular
+    public const string Layout = "\uEA39"; // ic_fluent_layout_cell_four_20_regular
     public const string Edit = "\uE7C9"; // ic_fluent_edit_20_regular
     public const string Settings = "\uEF27"; // ic_fluent_settings_20_regular
     public const string FullScreen = "\uE8D1"; // ic_fluent_full_screen_maximize_20_regular
@@ -40,6 +42,7 @@ public static class FluentGlyphs
     public static string Resolve(string symbol) => symbol switch
     {
         nameof(Board) => Board,
+        nameof(Folder) => Folder,
         nameof(Weather) => Weather,
         nameof(Microphone) => Microphone,
         nameof(Color) => Color,
@@ -49,6 +52,7 @@ public static class FluentGlyphs
         nameof(Dismiss) => Dismiss,
         nameof(Add) => Add,
         nameof(Grid) => Grid,
+        nameof(Layout) => Layout,
         nameof(Edit) => Edit,
         nameof(Settings) => Settings,
         nameof(FullScreen) => FullScreen,
@@ -75,7 +79,12 @@ public static class FluentGlyphs
 
 public sealed class FluentIcon : FontIcon
 {
-    public FluentIcon() => FontFamily = new FontFamily("ms-appx:///Assets/Fonts/FluentSystemIcons-Resizable.ttf#FluentSystemIcons-Resizable");
+    public FluentIcon()
+    {
+        FontFamily = new FontFamily("ms-appx:///Assets/Fonts/FluentSystemIcons-Resizable.ttf#FluentSystemIcons-Resizable");
+        // 默认值不会触发依赖属性回调，必须初始化默认的“关于”图标。
+        Glyph = FluentGlyphs.Info;
+    }
     public static readonly DependencyProperty SymbolProperty = DependencyProperty.Register(nameof(Symbol), typeof(string), typeof(FluentIcon), new PropertyMetadata("Info", (sender, args) => ((FluentIcon)sender).Glyph = FluentGlyphs.Resolve((string)args.NewValue)));
     public string Symbol { get => (string)GetValue(SymbolProperty); set => SetValue(SymbolProperty, value); }
 }

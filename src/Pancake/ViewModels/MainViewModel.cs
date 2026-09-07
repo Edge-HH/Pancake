@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Microsoft.UI.Xaml.Media;
 using Pancake.Models;
+using Pancake.Services;
 
 namespace Pancake.ViewModels;
 
@@ -73,7 +74,7 @@ public sealed class MainViewModel : ObservableObject
         {
             Name = name,
             AccentHex = hex,
-            AccentBrush = BrushFromHex(hex, true),
+            AccentBrush = BrushFromHex(ColorPalette.ResolveAccent(hex, false, ColorPalette.IsMacaron)),
             X = 36 + (index % 2) * 470,
             Y = 36 + (index / 2) * 360
         };

@@ -21,6 +21,7 @@ public sealed class ExportImageView : Grid
     private readonly Action _close;
     private readonly Canvas _canvas = new();
     private readonly Canvas _handles = new();
+    private readonly Canvas _guides = new() { IsHitTestVisible = false };
     private readonly Grid _stage = new();
     private readonly Canvas _renderHost = new();
     private readonly TextBlock _title = new();
@@ -73,7 +74,7 @@ public sealed class ExportImageView : Grid
         cancel.Click += (_, _) => { if (!_saving) _close(); }; options.Children.Add(cancel);
         _save.Click += async (_, _) => await SaveAsync();
 
-        _stage.Children.Add(_canvas); _stage.Children.Add(_handles);
+        _stage.Children.Add(_canvas); _stage.Children.Add(_handles); _stage.Children.Add(_guides);
         Viewbox preview = new() { Child = _stage, Stretch = Stretch.Uniform, Margin = new Thickness(24), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
         Grid.SetColumn(preview, 1); Children.Add(preview);
         Grid.SetColumn(_renderHost, 1); Children.Add(_renderHost);
@@ -192,6 +193,7 @@ public sealed class ExportImageView : Grid
 
     private void RebuildHandles()
     {
+        _guides.Children.Clear();
         _handles.Children.Clear();
         for (int i = 0; i < _tiles.Count; i++)
         {
@@ -213,12 +215,19 @@ public sealed class ExportImageView : Grid
                 ExportTilePlacement tile = _placements[index];
                 tile.X = Math.Clamp(_startX + point.X - _start.X, 0, Math.Max(0, _width.Value - tile.Width));
                 tile.Y = Math.Clamp(_startY + point.Y - _start.Y, _titleHeight, Math.Max(_titleHeight, _height.Value - tile.Height));
+                var transform = _stage.TransformToVisual(this);
+                double previewScale = Math.Max(.01, transform.TransformPoint(new Point(1, 0)).X - transform.TransformPoint(new Point(0, 0)).X);
+                var snap = BoardLayout.Snap(new(tile.X, tile.Y, tile.Width, tile.Height),
+                    _placements.Where((_, j) => j != index).Select(p => new LayoutRect(p.X, p.Y, p.Width, p.Height)),
+                    _width.Value, _height.Value, _titleHeight, 8 / previewScale);
+                tile.X = snap.X; tile.Y = snap.Y;
+                AlignmentGuides.Draw(_guides, snap, _width.Value, _height.Value, 1 / previewScale);
                 UpdatePlacements(); e.Handled = true;
             };
             void Release(object sender, PointerRoutedEventArgs e)
             {
                 if (_pointer != e.Pointer.PointerId) return;
-                _pointer = null; handle.ReleasePointerCapture(e.Pointer); e.Handled = true;
+                _pointer = null; _guides.Children.Clear(); handle.ReleasePointerCapture(e.Pointer); e.Handled = true;
             }
             handle.PointerReleased += Release; handle.PointerCanceled += Release; handle.PointerCaptureLost += Release;
             _handles.Children.Add(handle);

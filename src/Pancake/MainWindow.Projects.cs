@@ -19,21 +19,17 @@ public sealed partial class MainWindow
     private SubjectBoard? _activeInkSubject;
     private readonly TextBlock _inkSubjectLabel = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly InkToolSettings _inkSettings = new();
+    private readonly StackPanel _inkColors = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
+    private readonly ComboBox _inkTool = new() { ItemsSource = new[] { "画笔", "橡皮擦" }, SelectedIndex = 0, Width = 105 };
     private ProjectDocument? CurrentProject => _library.Projects.FirstOrDefault(p => p.Id == _library.ActiveProjectId);
 
     private void InitializeProjectCommands()
     {
         GlobalInkTools.Children.Add(_inkSubjectLabel);
-        ComboBox tool = new() { ItemsSource = new[] { "画笔", "橡皮擦" }, SelectedIndex = 0, Width = 105 };
-        tool.SelectionChanged += (_, _) => _inkSettings.Eraser = tool.SelectedIndex == 1;
-        GlobalInkTools.Children.Add(tool);
-        foreach (string color in new[] { "#F7F7F9", "#FBBF24", "#F87171", "#60A5FA" })
-        {
-            Button swatch = new() { Width = 32, Height = 32, Background = ViewModels.MainViewModel.BrushFromHex(color), Tag = color };
-            ToolTipService.SetToolTip(swatch, "笔迹颜色 " + color);
-            swatch.Click += (_, _) => { _inkSettings.Color = ViewModels.MainViewModel.BrushFromHex(color).Color; tool.SelectedIndex = 0; };
-            GlobalInkTools.Children.Add(swatch);
-        }
+        _inkTool.SelectionChanged += (_, _) => _inkSettings.Eraser = _inkTool.SelectedIndex == 1;
+        GlobalInkTools.Children.Add(_inkTool);
+        GlobalInkTools.Children.Add(_inkColors);
+        RefreshInkPalette();
         Slider thickness = new() { Minimum = 2, Maximum = 18, StepFrequency = 1, Value = 5, Width = 110, Header = "粗细" };
         thickness.ValueChanged += (_, args) => _inkSettings.Thickness = args.NewValue;
         GlobalInkTools.Children.Add(thickness);
@@ -41,6 +37,28 @@ public sealed partial class MainWindow
         clear.Click += ClearInk_Click;
         GlobalInkTools.Children.Add(clear);
         UpdateProjectCommands();
+    }
+
+    private void RefreshInkPalette()
+    {
+        var current = _inkSettings.Color;
+        _inkSettings.Color = ViewModels.MainViewModel.BrushFromHex(ColorPalette.Resolve($"#{current.R:X2}{current.G:X2}{current.B:X2}")).Color;
+        _inkColors.Children.Clear();
+        foreach (string hex in new[] { "#F7F7F9", "#FBBF24", "#F87171", "#60A5FA" }.Select(ColorPalette.Resolve))
+        {
+            var color = ViewModels.MainViewModel.BrushFromHex(hex).Color;
+            ColorSwatchButton swatch = new(BoardTheme.DisplayContentColor(color), 32);
+            swatch.SetSelected(color.Equals(_inkSettings.Color));
+            ToolTipService.SetToolTip(swatch, "笔迹颜色 " + hex);
+            swatch.Click += (_, _) =>
+            {
+                _inkSettings.Color = color;
+                _inkTool.SelectedIndex = 0;
+                foreach (ColorSwatchButton candidate in _inkColors.Children)
+                    candidate.SetSelected(ReferenceEquals(candidate, swatch));
+            };
+            _inkColors.Children.Add(swatch);
+        }
     }
 
     private void CaptureCurrentProject()
@@ -67,8 +85,9 @@ public sealed partial class MainWindow
     {
         if (ProjectCommands is null || EmptyProjectPanel is null) return;
         bool exists = CurrentProject is not null;
-        ProjectPicker.Content = CurrentProject?.Name ?? "选择项目";
-        ProjectCommands.Visibility = _isEditing ? Visibility.Visible : Visibility.Collapsed;
+        ProjectNameText.Text = CurrentProject?.Name ?? "选择项目";
+        SubjectCountText.Text = exists ? $"{ViewModel.Subjects.Count} 个科目" : "";
+        ProjectCommands.Visibility = SettingsRoot.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         RenameProjectMenu.IsEnabled = DeleteProjectMenu.IsEnabled = SaveProjectMenu.IsEnabled = ExportProjectMenu.IsEnabled = exists && _storageReady;
         GlobalPenButton.IsEnabled = exists;
         EmptyProjectPanel.Visibility = !exists && SettingsRoot.Visibility != Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;

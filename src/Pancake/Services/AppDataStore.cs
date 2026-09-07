@@ -33,13 +33,15 @@ public sealed class AppDataStore
         {
             SubjectBoard subject = new()
             {
-                Name = saved.Name, AccentHex = saved.AccentHex, IsAccentExplicit = saved.IsAccentExplicit, AccentBrush = MainViewModel.BrushFromHex(saved.AccentHex, !saved.IsAccentExplicit),
+                Name = saved.Name, AccentHex = saved.AccentHex, IsAccentExplicit = saved.IsAccentExplicit,
+                AccentBrush = MainViewModel.BrushFromHex(ColorPalette.ResolveAccent(saved.AccentHex, saved.IsAccentExplicit, ColorPalette.IsMacaron)),
                 X = saved.X, Y = saved.Y, TileWidth = saved.Width, TileHeight = saved.Height
             };
             foreach (HomeworkState item in saved.Entries)
             {
                 HomeworkEntry homework = new() { Content = item.Content, RtfContent = item.RtfContent, HasHandwriting = item.HasHandwriting, FontFallbacks = ProjectStore.Clone(item.FontFallbacks ?? []) };
-                foreach (AttachmentState attachment in item.Attachments)
+                foreach (AttachmentState attachment in item.Attachments.Where(attachment =>
+                    attachment.Kind != "图片" || !string.IsNullOrWhiteSpace(attachment.Path)))
                     homework.Attachments.Add(new AttachmentItem
                     {
                         Name = attachment.Name,

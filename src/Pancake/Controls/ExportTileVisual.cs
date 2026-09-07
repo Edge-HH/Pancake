@@ -104,7 +104,7 @@ public sealed class ExportTileVisual : Grid
         bool light = (.2126 * background.R + .7152 * background.G + .0722 * background.B) > 145;
         Color foreground = light ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White;
         Background = _frame.Background = new SolidColorBrush(background);
-        string accent = _subject.IsAccentExplicit ? _subject.AccentHex : ColorPalette.ConvertHex(_subject.AccentHex, palette == "Macaron");
+        string accent = ColorPalette.ResolveAccent(_subject.AccentHex, _subject.IsAccentExplicit, palette == "Macaron");
         Brush accentBrush = MainViewModel.BrushFromHex(accent);
         _name.Foreground = _watermark.Foreground = _frame.BorderBrush = accentBrush;
         foreach (var pair in _editors)

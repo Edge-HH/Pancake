@@ -15,6 +15,7 @@ public sealed class BoardSettingsState
     public string MicrophoneDeviceId { get; set; } = "";
     public double NoiseThresholdDb { get; set; } = 60;
     public bool NoiseAlertEnabled { get; set; }
+    public double NoiseAlertVolume { get; set; } = 1;
     public double CalibrationTargetDb { get; set; } = 40;
     public bool ShowWeatherAlerts { get; set; } = true;
     // 保留旧配置字段以兼容已有数据；共享采集格式现在由 Windows 输入设备决定。

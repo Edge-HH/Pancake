@@ -29,10 +29,20 @@
                 </StackPanel>
             </Grid>
             <StackPanel x:Name="ProjectCommands" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Visibility="Collapsed">
-                <DropDownButton x:Name="ProjectPicker" Content="选择项目" MaxWidth="190">
-                    <DropDownButton.Flyout><Flyout Opening="RecentProjects_Opening"><ScrollViewer MaxHeight="420" Width="240"><StackPanel x:Name="RecentProjectsPanel" /></ScrollViewer></Flyout></DropDownButton.Flyout>
+                <DropDownButton x:Name="ProjectPicker" MaxWidth="260">
+                    <DropDownButton.Content>
+                        <StackPanel Orientation="Horizontal" Spacing="7">
+                            <icons:FluentIcon Symbol="Folder" />
+                            <TextBlock x:Name="ProjectNameText" Text="选择项目" />
+                            <TextBlock x:Name="SubjectCountText" Foreground="{ThemeResource BoardTextMutedBrush}" />
+                        </StackPanel>
+                    </DropDownButton.Content>
+                    <DropDownButton.Flyout><Flyout Opening="RecentProjects_Opening"><ScrollViewer MaxHeight="420" Width="240"><StackPanel x:Name="RecentProjectsPanel" Spacing="8" /></ScrollViewer></Flyout></DropDownButton.Flyout>
                 </DropDownButton>
-                <DropDownButton Content="文件">
+                <DropDownButton>
+                    <DropDownButton.Content>
+                        <StackPanel Orientation="Horizontal" Spacing="7"><icons:FluentIcon Symbol="Document" /><TextBlock Text="文件" /></StackPanel>
+                    </DropDownButton.Content>
                     <DropDownButton.Flyout><MenuFlyout>
                         <MenuFlyoutItem Text="新建" Click="NewProject_Click" />
                         <MenuFlyoutItem x:Name="RenameProjectMenu" Text="重命名" Click="RenameProject_Click" />
@@ -43,7 +53,6 @@
                         <MenuFlyoutItem x:Name="ExportProjectMenu" Text="导出" Click="ExportImage_Click" />
                     </MenuFlyout></DropDownButton.Flyout>
                 </DropDownButton>
-                <ToggleButton x:Name="GlobalPenButton" Content="画笔" Checked="GlobalPen_Changed" Unchecked="GlobalPen_Changed" />
             </StackPanel>
             <Grid Grid.Column="2" Margin="0,0,140,0">
                 <Grid x:Name="DragRegion" Background="Transparent" />
@@ -76,21 +85,11 @@
                 </Border>
 
                 <Grid x:Name="BoardWorkspace" Grid.Row="0" Grid.Column="1" Background="{ThemeResource BoardSurfaceBrush}">
-                    <Grid.RowDefinitions><RowDefinition Height="64" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <Grid Padding="30,0,24,0">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                        <StackPanel VerticalAlignment="Center" Spacing="2">
-                            <TextBlock FontSize="22" FontWeight="SemiBold" Foreground="{ThemeResource BoardTextBrush}" Text="今日作业" />
-                            <TextBlock x:Name="BoardModeHint" FontSize="12" Foreground="{ThemeResource BoardTextBrush}" Text="所有文字和笔迹都完整显示在磁贴上" />
-                        </StackPanel>
-                        <Border Grid.Column="1" Padding="11,6" VerticalAlignment="Center" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
-                            <TextBlock x:Name="SubjectCountText" FontSize="12" Foreground="{ThemeResource BoardTextBrush}" />
-                        </Border>
-                    </Grid>
-                    <Grid x:Name="BoardViewport" Grid.Row="1" Background="{ThemeResource BoardSurfaceBrush}" SizeChanged="BoardViewport_SizeChanged">
+                    <Grid x:Name="BoardViewport" Background="{ThemeResource BoardSurfaceBrush}" SizeChanged="BoardViewport_SizeChanged">
                         <Grid x:Name="BoardSurface" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{ThemeResource BoardSurfaceBrush}">
                             <Canvas x:Name="GridCanvas" IsHitTestVisible="False" />
                             <Canvas x:Name="BoardCanvas" />
+                            <Canvas x:Name="AlignmentCanvas" IsHitTestVisible="False" />
                         </Grid>
                     </Grid>
                 </Grid>
@@ -163,6 +162,8 @@
                             <ToggleSwitch x:Name="NoiseAlertToggle" Header="吵闹时播放提示音" Toggled="NoiseAlertToggle_Toggled" />
                             <Button Content="试听" Click="PreviewNoiseAlert_Click" VerticalAlignment="Bottom" Style="{StaticResource BoardSecondaryButtonStyle}" />
                         </StackPanel>
+                        <TextBlock x:Name="NoiseAlertVolumeLabel" Text="提示音音量 · 100%" />
+                        <Slider x:Name="NoiseAlertVolumeSlider" Minimum="0" Maximum="100" StepFrequency="1" Value="100" ValueChanged="NoiseAlertVolumeSlider_ValueChanged" />
                         <TextBlock Text="先选择当前环境的实际音量，再点击校准；更换麦克风后请重新校准。" TextWrapping="Wrap" />
                         <NumberBox x:Name="CalibrationTargetBox" Header="当前环境音量（dB）" Minimum="20" Maximum="120" Value="40" SmallChange="1" SpinButtonPlacementMode="Inline" />
                         <Button Content="校准" Click="CalibrateMicrophone_Click" Style="{StaticResource BoardPrimaryButtonStyle}" />
@@ -242,15 +243,18 @@
             BorderThickness="1"
             CornerRadius="14"
             Canvas.ZIndex="100">
-            <StackPanel Orientation="Horizontal" Spacing="4">
+            <StackPanel x:Name="ToolbarItems" Orientation="Horizontal" Spacing="4">
+                <ToggleButton x:Name="GlobalPenButton" Width="44" Height="44" Padding="10" Background="Transparent" BorderThickness="0" Visibility="Collapsed" AutomationProperties.Name="画笔" Checked="GlobalPen_Changed" Unchecked="GlobalPen_Changed">
+                    <icons:FluentIcon Symbol="Pen" />
+                </ToggleButton>
                 <Button x:Name="BackToBoardButton" Click="BackToBoardButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="返回看板">
                     <icons:FluentIcon Symbol="Back" />
                 </Button>
-                <Button x:Name="DiscardEditButton" Click="DiscardEditButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="放弃修改">
-                    <icons:FluentIcon Symbol="Dismiss" />
-                </Button>
                 <Button x:Name="AddSubjectButton" Click="AddSubjectButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="添加科目">
                     <icons:FluentIcon Symbol="Add" />
+                </Button>
+                <Button x:Name="AutoArrangeButton" Click="AutoArrangeButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="自动排列磁贴">
+                    <icons:FluentIcon Symbol="Layout" />
                 </Button>
                 <ToggleButton
                     x:Name="GridSnapToggleButton"
@@ -266,9 +270,6 @@
                     Unchecked="GridSnapToggleButton_Unchecked">
                     <icons:FluentIcon FontSize="18" Symbol="Grid" />
                 </ToggleButton>
-                <Button x:Name="EditBoardButton" Click="EditBoardButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="编辑看板">
-                    <icons:FluentIcon x:Name="EditBoardIcon" Symbol="Edit" />
-                </Button>
                 <Button x:Name="SettingsButton" Click="SettingsButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="设置">
                     <icons:FluentIcon Symbol="Settings" />
                 </Button>
@@ -277,6 +278,12 @@
                         <icons:FluentIcon x:Name="FullScreenIcon" Symbol="FullScreen" />
                         <TextBlock x:Name="FullScreenLabel" Text="退出全屏" Visibility="Collapsed" />
                     </StackPanel>
+                </Button>
+                <Button x:Name="DiscardEditButton" Click="DiscardEditButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="放弃修改">
+                    <icons:FluentIcon Symbol="Dismiss" />
+                </Button>
+                <Button x:Name="EditBoardButton" Click="EditBoardButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="编辑看板">
+                    <icons:FluentIcon x:Name="EditBoardIcon" Symbol="Edit" />
                 </Button>
             </StackPanel>
         </Border>

@@ -123,16 +123,25 @@ public sealed class SubjectTileControl : Grid
             Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
             ManipulationMode = ManipulationModes.None
         };
-        _headerMoveThumb.DragStarted += (_, _) => _interactionChanged(true);
+        double dragX = 0, dragY = 0;
+        _headerMoveThumb.DragStarted += (_, _) =>
+        {
+            IsMoving = true;
+            dragX = _subject.X; dragY = _subject.Y;
+            _interactionChanged(true);
+        };
         _headerMoveThumb.DragDelta += (_, args) =>
         {
-            _subject.X = Math.Max(0, _subject.X + args.HorizontalChange);
-            _subject.Y = Math.Max(0, _subject.Y + args.VerticalChange);
+            // 从原始指针累计位移，避免小幅拖动始终粘在吸附线上。
+            dragX += args.HorizontalChange; dragY += args.VerticalChange;
+            _subject.X = Math.Max(0, dragX);
+            _subject.Y = Math.Max(0, dragY);
             _layoutChanged(_subject);
         };
         _headerMoveThumb.DragCompleted += (_, _) =>
         {
             _layoutCommitted(_subject);
+            IsMoving = false;
             _interactionChanged(false);
         };
         // 顶部边缘统一用于移动，并覆盖左右缩放区在顶部的交叉部分。
@@ -187,6 +196,8 @@ public sealed class SubjectTileControl : Grid
         RenderStoredStrokes();
         SetEditing(false);
     }
+
+    public bool IsMoving { get; private set; }
 
     public void ApplyModelLayout()
     {
@@ -469,34 +480,31 @@ public sealed class SubjectTileControl : Grid
     {
         int selectionStart = 0;
         int selectionEnd = 0;
+        StackPanel colors = new() { Orientation = Orientation.Horizontal, Spacing = 6, Padding = new Thickness(8) };
+        void RefreshSelection()
+        {
+            var format = editor.Document.GetRange(selectionStart, selectionEnd).CharacterFormat;
+            Windows.UI.Color selected = isHighlight ? format.BackgroundColor : format.ForegroundColor;
+            foreach (ColorSwatchButton swatch in colors.Children.OfType<ColorSwatchButton>())
+                swatch.SetSelected(!selected.Equals(TextConstants.UndefinedColor) &&
+                    (swatch.Tag as string == "clear" ? selected.Equals(TextConstants.AutoColor) : swatch.Color.Equals(selected)));
+        }
         Button button = CreateIconButton(glyph, tooltip, (_, _) =>
         {
             // Flyout 会夺走编辑器焦点，必须在打开前保存文本选区。
             selectionStart = editor.Document.Selection.StartPosition;
             selectionEnd = editor.Document.Selection.EndPosition;
+            RefreshSelection();
         });
-        StackPanel colors = new() { Orientation = Orientation.Horizontal, Spacing = 6, Padding = new Thickness(8) };
         if (isHighlight)
         {
             Button clearHighlight = CreateColorSwatch("#FFFFFF", 30);
-            clearHighlight.Content = new Grid
+            clearHighlight.Tag = "clear";
+            ((Grid)clearHighlight.Content).Children.Insert(0, new Line
             {
-                Width = 30,
-                Height = 30,
-                IsHitTestVisible = false,
-                Children =
-                {
-                    new Line
-                    {
-                        X1 = 2,
-                        Y1 = 2,
-                        X2 = 28,
-                        Y2 = 28,
-                        Stroke = MainViewModel.BrushFromHex("#EF4444"),
-                        StrokeThickness = 2
-                    }
-                }
-            };
+                X1 = 2, Y1 = 2, X2 = 28, Y2 = 28,
+                Stroke = MainViewModel.BrushFromHex("#EF4444"), StrokeThickness = 2
+            });
             ToolTipService.SetToolTip(clearHighlight, "取消高光");
             clearHighlight.Click += (_, _) =>
             {
@@ -505,13 +513,14 @@ public sealed class SubjectTileControl : Grid
                 range.CharacterFormat.BackgroundColor = TextConstants.AutoColor;
                 editor.Document.Selection.SetRange(selectionStart, selectionEnd);
                 CaptureRichText(editor, homework);
+                RefreshSelection();
                 button.Flyout.Hide();
                 editor.Focus(FocusState.Programmatic);
             };
             colors.Children.Add(clearHighlight);
         }
 
-        foreach (string hex in new[] { "#F7F7F9", "#FBBF24", "#F87171", "#60A5FA", "#4ADE80", "#F472B6" })
+        foreach (string hex in new[] { "#F7F7F9", "#FBBF24", "#F87171", "#60A5FA", "#4ADE80", "#F472B6" }.Select(ColorPalette.Resolve))
         {
             Button swatch = CreateColorSwatch(hex, 30);
             swatch.Click += (_, _) =>
@@ -521,12 +530,20 @@ public sealed class SubjectTileControl : Grid
                 else range.CharacterFormat.ForegroundColor = BoardTheme.DisplayContentColor(MainViewModel.BrushFromHex(hex).Color);
                 editor.Document.Selection.SetRange(selectionStart, selectionEnd);
                 CaptureRichText(editor, homework);
+                RefreshSelection();
                 button.Flyout.Hide();
                 editor.Focus(FocusState.Programmatic);
             };
             colors.Children.Add(swatch);
         }
         button.Flyout = new Flyout { Content = colors };
+        button.Flyout.Opening += (_, _) =>
+        {
+            // 键盘、自动化及指针打开菜单的事件顺序不同，在 Opening 也捕获一次选区。
+            selectionStart = editor.Document.Selection.StartPosition;
+            selectionEnd = editor.Document.Selection.EndPosition;
+            RefreshSelection();
+        };
         return button;
     }
 
@@ -534,7 +551,7 @@ public sealed class SubjectTileControl : Grid
     {
         Button button = CreateIconButton(FluentGlyphs.Color, "磁贴主题色", (_, _) => { });
         StackPanel colors = new() { Orientation = Orientation.Horizontal, Spacing = 6, Padding = new Thickness(8) };
-        foreach (string hex in new[] { "#4ADE80", "#818CF8", "#60A5FA", "#FBBF24", "#F472B6", "#2DD4BF", "#F87171" })
+        foreach (string hex in new[] { "#4ADE80", "#818CF8", "#60A5FA", "#FBBF24", "#F472B6", "#2DD4BF", "#F87171" }.Select(ColorPalette.Resolve))
         {
             Button swatch = CreateColorSwatch(hex, 32);
             swatch.Click += (_, _) =>
@@ -551,18 +568,16 @@ public sealed class SubjectTileControl : Grid
             colors.Children.Add(swatch);
         }
         button.Flyout = new Flyout { Content = colors };
+        button.Flyout.Opening += (_, _) =>
+        {
+            foreach (ColorSwatchButton swatch in colors.Children.OfType<ColorSwatchButton>())
+                swatch.SetSelected(swatch.Color.Equals(_subject.AccentBrush.Color));
+        };
         return button;
     }
 
-    private static Button CreateColorSwatch(string hex, double size) => new()
-    {
-        Width = size,
-        Height = size,
-        Padding = new Thickness(0),
-        Background = new SolidColorBrush(BoardTheme.DisplayContentColor(MainViewModel.BrushFromHex(hex).Color)),
-        BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(80, 0, 0, 0)),
-        BorderThickness = new Thickness(1),
-    };
+    private static ColorSwatchButton CreateColorSwatch(string hex, double size) =>
+        new(BoardTheme.DisplayContentColor(MainViewModel.BrushFromHex(hex).Color), size);
 
     private static TextBox CreateInlineEditor(string text, double fontSize, Brush foreground, bool singleLine) => new()
     {

@@ -11,6 +11,12 @@ public static class ColorPalette
 
     public static string Resolve(string hex) => ConvertHex(hex, IsMacaron);
 
+    public static bool IsPreset(string hex) => Vivid.Any(value => value.Equals(hex, StringComparison.OrdinalIgnoreCase))
+        || Macaron.Any(value => value.Equals(hex, StringComparison.OrdinalIgnoreCase));
+
+    public static string ResolveAccent(string hex, bool isExplicit, bool macaron) =>
+        isExplicit && !IsPreset(hex) ? hex : ConvertHex(hex, macaron);
+
     public static string ConvertHex(string hex, bool macaron)
     {
         int index = Array.FindIndex(Vivid, value => value.Equals(hex, StringComparison.OrdinalIgnoreCase));

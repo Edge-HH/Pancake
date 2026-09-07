@@ -16,6 +16,8 @@ foreach (string vivid in vividColors)
 }
 Check(ColorPalette.ConvertHex("#123456", true) == "#123456", "保留自定义颜色");
 Check(ColorPalette.ConvertHex("#F7F7F9", true) == "#F7F7F9", "保留中性文字颜色");
+Check(ColorPalette.ResolveAccent("#4ADE80", true, true) == "#A8D5BA", "旧项目中误标为手动色的内置色仍应跟随色系");
+Check(ColorPalette.ResolveAccent("#123456", true, true) == "#123456", "真正的自定义磁贴颜色不应跟随色系");
 const string rtf = @"{\rtf1{\colortbl;\red74\green222\blue128;\red251\green191\blue36;}\cf1 hello\highlight2 world}";
 string converted = ColorPalette.ConvertRtf(rtf, true);
 Check(converted.Contains(@"\cf1 hello\highlight2 world"), "保留文字和高光格式索引");
@@ -72,4 +74,7 @@ for (int offset = 0; offset < pcm.Length; offset += 480)
     previousAudible = audible;
 }
 Check(audibleRuns == 3, "PCM has exactly three distinct beeps");
+BoardSettingsState settings = JsonSerializer.Deserialize<BoardSettingsState>(JsonSerializer.Serialize(new BoardSettingsState { NoiseAlertVolume = .35 }))!;
+Check(Math.Abs(settings.NoiseAlertVolume - .35) < .001, "提示音音量应持久化");
+Check(GitHubUpdateService.IsInstallable("Pancake-win-x64-2.0.1.zip"), "便携版 Release 应被更新器识别");
 Console.WriteLine("PASS: light theme content, immediate noise rearming, and three-beep PCM.");

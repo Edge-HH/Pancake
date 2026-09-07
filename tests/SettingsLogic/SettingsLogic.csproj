@@ -11,5 +11,7 @@
     <Compile Include="../../src/Pancake/Services/DefaultContentColors.cs" Link="DefaultContentColors.cs" />
     <Compile Include="../../src/Pancake/Services/NoiseAlertGate.cs" Link="NoiseAlertGate.cs" />
     <Compile Include="../../src/Pancake/Services/NoiseAlertTone.cs" Link="NoiseAlertTone.cs" />
+    <Compile Include="../../src/Pancake/Services/ProjectState.cs" Link="ProjectState.cs" />
+    <Compile Include="../../src/Pancake/Services/GitHubUpdateService.cs" Link="GitHubUpdateService.cs" />
   </ItemGroup>
 </Project>
