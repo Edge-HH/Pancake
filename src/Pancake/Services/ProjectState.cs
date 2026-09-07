@@ -11,10 +11,18 @@ public sealed class BoardSettingsState
 {
     public string LayoutMode { get; set; } = "Split";
     public double SplitRatio { get; set; } = 0.4;
+    public int DockedWidgetLayoutVersion { get; set; }
     // 按布局模式和稳定组件标识保存位置，避免受约束布局覆盖自由布局坐标。
     public Dictionary<string, RegionPlacement> Widgets { get; set; } = new();
+    public HashSet<string> CustomizedDockedWidgets { get; set; } = [];
     public bool InfiniteBoard { get; set; }
     public double GridSize { get; set; } = 48;
+    public string GridStyle { get; set; } = "Grid";
+    public string GridColor { get; set; } = "#6956565C";
+    public double GridLineThickness { get; set; } = 1.6;
+    public string GridDotColor { get; set; } = "#8F56565C";
+    public double GridDotDiameter { get; set; } = 3;
+    public bool ShowGridWhileEditing { get; set; } = true;
     public double TileTitleSize { get; set; } = 29;
     public BackgroundSettings TileBackground { get; set; } = new();
     public bool SharedBackgroundEnabled { get; set; }

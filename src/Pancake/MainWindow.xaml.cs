@@ -48,6 +48,7 @@ public sealed partial class MainWindow : Window
     private int _activeTileInteractions;
     private double _renderedGridWidth;
     private double _renderedGridHeight;
+    private string _renderedGridAppearance = string.Empty;
     private bool IsGridSnappingEnabled = true;
     private uint? _globalGesturePointerId;
     private Point _globalGestureStart;
@@ -88,6 +89,7 @@ public sealed partial class MainWindow : Window
         {
             _isLoaded = true;
             ApplyActualTheme();
+            ApplyExtendedSettings();
             ShowInitialView();
             if (_initialView != "verification")
             {
@@ -209,6 +211,7 @@ public sealed partial class MainWindow : Window
         if (_isEditing || CurrentProject is null) return;
         ViewModel.BeginEditing();
         _widgetEditSnapshot = WidgetLayout.Copy(_settings.Widgets);
+        _dockedCustomizationEditSnapshot = [.. _settings.CustomizedDockedWidgets];
         _isEditing = true;
         UpdateEditButtonPosition();
         UpdateRichTextToolbar();
@@ -228,6 +231,7 @@ public sealed partial class MainWindow : Window
     {
         ViewModel.PublishEditing();
         _widgetEditSnapshot = null;
+        _dockedCustomizationEditSnapshot = null;
         _isEditing = false;
         UpdateEditButtonPosition();
         GlobalPenButton.IsChecked = false;
@@ -250,7 +254,9 @@ public sealed partial class MainWindow : Window
         if (await ShowConfirmAsync("放弃更改", "是否放弃本次更改？") != ContentDialogResult.Primary) return;
         ViewModel.DiscardEditing();
         if (_widgetEditSnapshot is not null) _settings.Widgets = _widgetEditSnapshot;
+        if (_dockedCustomizationEditSnapshot is not null) _settings.CustomizedDockedWidgets = _dockedCustomizationEditSnapshot;
         _widgetEditSnapshot = null;
+        _dockedCustomizationEditSnapshot = null;
         _isEditing = false;
         UpdateEditButtonPosition();
         GlobalPenButton.IsChecked = false;
@@ -505,11 +511,13 @@ public sealed partial class MainWindow : Window
         BoardCanvas.Height = height;
         GridCanvas.Width = width;
         GridCanvas.Height = height;
-        if (Math.Abs(width - _renderedGridWidth) > 0.5 || Math.Abs(height - _renderedGridHeight) > 0.5)
+        string gridAppearance = $"{GridAppearance.EffectiveStyle(_settings.GridStyle, _isEditing, _settings.ShowGridWhileEditing)}|{GridSize}|{_settings.GridColor}|{_settings.GridLineThickness}|{_settings.GridDotColor}|{_settings.GridDotDiameter}";
+        if (Math.Abs(width - _renderedGridWidth) > 0.5 || Math.Abs(height - _renderedGridHeight) > 0.5 || _renderedGridAppearance != gridAppearance)
         {
             RenderGrid(width, height);
             _renderedGridWidth = width;
             _renderedGridHeight = height;
+            _renderedGridAppearance = gridAppearance;
         }
         }
         finally { _updatingBoardBounds = false; }
@@ -540,18 +548,35 @@ public sealed partial class MainWindow : Window
     private void RenderGrid(double width, double height)
     {
         GridCanvas.Children.Clear();
-        // 无限画板只绘制视口附近的网格线，平移很远也不会创建成千上万的 XAML 对象。
+        string style = GridAppearance.EffectiveStyle(_settings.GridStyle, _isEditing, _settings.ShowGridWhileEditing);
+        if (style == "None") return;
+        // 无限画板只绘制视口附近的网格图形，平移很远也不会创建成千上万的 XAML 对象。
         double left = _settings.InfiniteBoard ? Math.Max(0, Math.Floor(BoardScroller.HorizontalOffset / BoardScroller.ZoomFactor / GridSize) * GridSize) : 0;
         double top = _settings.InfiniteBoard ? Math.Max(0, Math.Floor(BoardScroller.VerticalOffset / BoardScroller.ZoomFactor / GridSize) * GridSize) : 0;
         double right = _settings.InfiniteBoard ? Math.Min(width, left + BoardScroller.ActualWidth / BoardScroller.ZoomFactor + GridSize * 2) : width;
         double bottom = _settings.InfiniteBoard ? Math.Min(height, top + BoardScroller.ActualHeight / BoardScroller.ZoomFactor + GridSize * 2) : height;
+        if (style == "Dots")
+        {
+            double diameter = Math.Clamp(_settings.GridDotDiameter, 1, 12);
+            SolidColorBrush fill = new(GridAppearance.ParseColor(_settings.GridDotColor, Windows.UI.Color.FromArgb(143, 86, 86, 92)));
+            for (double y = top; y <= bottom; y += GridSize)
+            for (double x = left; x <= right; x += GridSize)
+            {
+                Ellipse dot = new() { Width = diameter, Height = diameter, Fill = fill };
+                Canvas.SetLeft(dot, x - diameter / 2); Canvas.SetTop(dot, y - diameter / 2);
+                GridCanvas.Children.Add(dot);
+            }
+            return;
+        }
+        SolidColorBrush stroke = new(GridAppearance.ParseColor(_settings.GridColor, Windows.UI.Color.FromArgb(105, 86, 86, 92)));
+        double thickness = Math.Clamp(_settings.GridLineThickness, .5, 5);
         for (double x = left; x <= right; x += GridSize)
         {
             GridCanvas.Children.Add(new Line
             {
                 X1 = x, X2 = x, Y1 = top, Y2 = bottom,
-                Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(105, 86, 86, 92)),
-                StrokeThickness = 1.6
+                Stroke = stroke,
+                StrokeThickness = thickness
             });
         }
         for (double y = top; y <= bottom; y += GridSize)
@@ -559,8 +584,8 @@ public sealed partial class MainWindow : Window
             GridCanvas.Children.Add(new Line
             {
                 X1 = left, X2 = right, Y1 = y, Y2 = y,
-                Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(105, 86, 86, 92)),
-                StrokeThickness = 1.6
+                Stroke = stroke,
+                StrokeThickness = thickness
             });
         }
     }
@@ -925,6 +950,18 @@ public sealed partial class MainWindow : Window
         {
             _library = _projectStore.Load();
             _settings = _library.Settings;
+            _settings.Widgets ??= [];
+            _settings.CustomizedDockedWidgets ??= [];
+            if (_settings.DockedWidgetLayoutVersion < 2)
+            {
+                foreach (string key in new[] { "SplitClock", "SplitComponents", "ClockModeClock", "ClockModeComponents" })
+                    _settings.Widgets.Remove(key);
+                _settings.CustomizedDockedWidgets.Clear();
+                _settings.DockedWidgetLayoutVersion = 2;
+            }
+            _settings.GridStyle = GridAppearance.EffectiveStyle(_settings.GridStyle, false, false);
+            _settings.GridLineThickness = Math.Clamp(_settings.GridLineThickness, .5, 5);
+            _settings.GridDotDiameter = Math.Clamp(_settings.GridDotDiameter, 1, 12);
             _library.ActiveProjectId = CurrentProject?.Id ?? _library.Projects.OrderByDescending(p => p.LastUsedAt).FirstOrDefault()?.Id;
             ViewModel.ReplaceSubjects(AppDataStore.RestoreSubjects(CurrentProject?.Subjects ?? []));
             ThemeComboBox.SelectedIndex = _settings.Theme switch { "Light" => 1, "Default" => 2, _ => 0 };

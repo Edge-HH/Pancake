@@ -119,6 +119,7 @@
                         <NavigationViewItem x:Name="AppearanceNavItem" Content="磁贴" Tag="AppearanceTile" IsSelected="True"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Grid" /></NavigationViewItem.Icon></NavigationViewItem>
                         <NavigationViewItem Content="背景板" Tag="AppearanceBackground"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Image" /></NavigationViewItem.Icon></NavigationViewItem>
                         <NavigationViewItem Content="主题" Tag="AppearanceTheme"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Color" /></NavigationViewItem.Icon></NavigationViewItem>
+                        <NavigationViewItem Content="网格" Tag="AppearanceGrid"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Grid" /></NavigationViewItem.Icon></NavigationViewItem>
                         <NavigationViewItem Content="控制窗" Tag="AppearanceToolbar"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Settings" /></NavigationViewItem.Icon></NavigationViewItem>
                     </NavigationViewItem.MenuItems>
                 </NavigationViewItem>

@@ -28,7 +28,7 @@ public sealed partial class MainWindow
         layout.Children.Add(Note("开启后可滚动、触摸平移、Ctrl + 滚轮缩放；编辑磁贴时可用滚动条平移。"));
         layout.Children.Add(Range("网格大小", 16, 160, _settings.GridSize, value =>
         { _settings.GridSize = value; _renderedGridWidth = 0; }));
-        layout.Children.Add(Note("分屏模式可拖动分隔条调整比例，拖至两端切换为单区；自由布局中在编辑模式拖动组件上边缘、右下角调整位置与大小。"));
+        layout.Children.Add(Note("分屏模式可拖动分隔条调整比例，拖至两端切换为单区；进入编辑模式后可拖动时钟或组件的任意位置，悬停时使用右下角灰色小框缩放。"));
         LayoutSettingsPanel.Children.Clear();
         RegisterSettingsPage("Layout", LayoutSettingsPanel, layout, "布局", "调整布局模式、无限作业板与网格。");
 
@@ -49,10 +49,32 @@ public sealed partial class MainWindow
             () => _settings.LayoutMode is "Split" or "Board" && !UseSharedBackground,
             () => _settings.LayoutMode is "Split" or "Board"));
         backgrounds.Children.Add(Note("跨区背景仅在分屏生效，开启后区域底图由跨区背景统一管理，毛玻璃仍可分别调整。自由布局使用磁贴样式和主题底色。"));
+        StackPanel grid = SettingsStack();
+        grid.Children.Add(Choice("样式", ["网格", "点阵", "不显示"], ["Grid", "Dots", "None"], _settings.GridStyle, value =>
+        { _settings.GridStyle = value; _renderedGridAppearance = string.Empty; }));
+        StackPanel gridLineSettings = SettingsStack();
+        gridLineSettings.Children.Add(ColorSetting("网格颜色", _settings.GridColor, value => _settings.GridColor = value));
+        gridLineSettings.Children.Add(Range("网格粗细", .5, 5, _settings.GridLineThickness, value =>
+        { _settings.GridLineThickness = value; _renderedGridAppearance = string.Empty; }));
+        StackPanel gridDotSettings = SettingsStack();
+        gridDotSettings.Children.Add(ColorSetting("点阵颜色", _settings.GridDotColor, value => _settings.GridDotColor = value));
+        gridDotSettings.Children.Add(Range("点的直径", 1, 12, _settings.GridDotDiameter, value =>
+        { _settings.GridDotDiameter = value; _renderedGridAppearance = string.Empty; }));
+        grid.Children.Add(gridLineSettings);
+        grid.Children.Add(gridDotSettings);
+        grid.Children.Add(Toggle("编辑时显示常规网格", _settings.ShowGridWhileEditing, value =>
+        { _settings.ShowGridWhileEditing = value; _renderedGridAppearance = string.Empty; }));
+        grid.Children.Add(Note("此页只改变网格显示样貌；网格吸附仍由编辑工具栏中的吸附按钮独立控制。"));
+        _refreshSettingAvailability.Add(() =>
+        {
+            gridLineSettings.Visibility = _settings.GridStyle == "Grid" ? Visibility.Visible : Visibility.Collapsed;
+            gridDotSettings.Visibility = _settings.GridStyle == "Dots" ? Visibility.Visible : Visibility.Collapsed;
+        });
         AppearanceSettingsPanel.Children.Clear();
         RegisterSettingsPage("AppearanceTile", AppearanceSettingsPanel, tile, "磁贴", "调整磁贴标题和背景样式。");
         RegisterSettingsPage("AppearanceBackground", AppearanceSettingsPanel, backgrounds, "背景板", "设置跨区、时钟与作业板背景。");
         RegisterSettingsPage("AppearanceTheme", AppearanceSettingsPanel, ThemeSettingsCard, "主题", "调整界面主题和看板色系。");
+        RegisterSettingsPage("AppearanceGrid", AppearanceSettingsPanel, grid, "网格", "设置网格的显示样式，不改变吸附逻辑。");
         RegisterSettingsPage("AppearanceToolbar", AppearanceSettingsPanel, ToolbarSettings(), "控制窗", "调整控制窗的显示、位置和外观。");
         ComponentSettingsPanel.Children.Clear();
         RegisterSettingsPage("ComponentsWeather", ComponentSettingsPanel, WeatherSettingsCard, "天气", "选择天气地区并查看预警。");
@@ -112,6 +134,20 @@ public sealed partial class MainWindow
     private static StackPanel SettingsStack() => new() { Spacing = 18, Margin = new Thickness(0, 16, 0, 0) };
     private static TextBlock Heading(string text) => new() { Text = text, FontSize = 22 };
     private static TextBlock Note(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Opacity = .75 };
+
+    private Button ColorSetting(string label, string value, Action<string> update)
+    {
+        ColorPicker picker = new() { IsAlphaEnabled = true, IsHexInputVisible = true,
+            Color = GridAppearance.ParseColor(value, Windows.UI.Color.FromArgb(105, 86, 86, 92)) };
+        Button button = new() { Content = label, Flyout = new Flyout { Content = picker } };
+        picker.ColorChanged += (_, args) =>
+        {
+            update(GridAppearance.FormatColor(args.NewColor));
+            _renderedGridAppearance = string.Empty;
+            SettingChanged();
+        };
+        return button;
+    }
 
     private void RegisterSettingsPage(string tag, StackPanel container, UIElement content, string title, string description)
     {

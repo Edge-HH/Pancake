@@ -5,6 +5,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Pancake.Controls;
@@ -240,11 +241,17 @@ public sealed partial class MainWindow
                 check(Math.Abs(clock.Width / clock.Height - DockedClockAspectRatio) < .01, mode + " clock keeps its scale ratio");
                 check(Math.Abs(components.Width / components.Height - DockedComponentsAspectRatio) < .01 && ClockComponents.Orientation == Orientation.Horizontal,
                     mode + " weather and noise scale together in one row");
-                check(FreeLayoutHandles.Children.Count == (mode == "Split" ? 5 : 4), mode + " exposes constrained clock and component handles while editing");
+                int expectedLayers = mode == "Split" ? 3 : 2;
+                check(FreeLayoutHandles.Children.Count == expectedLayers, mode + " exposes constrained clock and component interactions while editing");
+                var interactions = FreeLayoutHandles.Children.OfType<Grid>().ToList();
+                check(interactions.Count == 2 && interactions.All(layer => layer.Children.OfType<Thumb>().Count() == 2),
+                    mode + " allows dragging from the full clock and component surfaces");
+                check(interactions.SelectMany(layer => layer.Children.OfType<Thumb>()).Count(thumb => thumb.Opacity == 0) == 2,
+                    mode + " resize boxes stay hidden until pointer hover");
             }
             if (mode == "Free")
             {
-                check(FreeLayoutHandles.Children.Count == 6, "each free widget has move and resize handles");
+                check(FreeLayoutHandles.Children.OfType<Grid>().Count() == 3, "each free widget has a full-surface move layer and hover resize box");
                 WidgetLayout.Move(_settings.Widgets["Clock"], 15, 30, DisplayRoot.ActualWidth, DisplayRoot.ActualHeight);
                 WidgetLayout.Resize(_settings.Widgets["Weather"], 15, 20, DisplayRoot.ActualWidth, DisplayRoot.ActualHeight);
                 ApplyExtendedSettings(); await NextLayoutAsync(); SaveStateNow();
@@ -260,6 +267,15 @@ public sealed partial class MainWindow
         check(Math.Abs(BoardScroller.ZoomFactor - .75) < .01, "infinite board actually zooms");
         var gridLines = GridCanvas.Children.OfType<Microsoft.UI.Xaml.Shapes.Line>().Where(l => l.X1 == l.X2).ToList();
         check(gridLines.Count > 1 && Math.Abs(gridLines[1].X1 - gridLines[0].X1 - 64) < .01, "grid uses configured spacing");
+        _settings.ShowGridWhileEditing = false; _settings.GridStyle = "Dots"; _renderedGridAppearance = string.Empty; ApplyExtendedSettings(); await NextLayoutAsync();
+        check(GridCanvas.Children.OfType<Microsoft.UI.Xaml.Shapes.Ellipse>().Any() && !GridCanvas.Children.OfType<Microsoft.UI.Xaml.Shapes.Line>().Any(), "dot grid changes only the rendered appearance");
+        _settings.GridStyle = "None"; _renderedGridAppearance = string.Empty; ApplyExtendedSettings(); await NextLayoutAsync();
+        check(GridCanvas.Children.Count == 0 && IsGridSnappingEnabled, "hidden grid keeps snapping enabled");
+        _settings.ShowGridWhileEditing = true; _renderedGridAppearance = string.Empty; ApplyExtendedSettings(); await NextLayoutAsync();
+        check(GridCanvas.Children.OfType<Microsoft.UI.Xaml.Shapes.Line>().Any(), "editing override displays the regular grid");
+        FinishEditing(); await NextLayoutAsync();
+        check(GridCanvas.Children.Count == 0, "leaving edit mode restores the configured hidden grid");
+        EnterEditing(); _settings.GridStyle = "Grid"; _settings.ShowGridWhileEditing = true; _renderedGridAppearance = string.Empty;
         _settings.InfiniteBoard = false; _settings.GridSize = 48; _renderedGridWidth = 0;
         _settings.SharedBackgroundEnabled = true;
         _settings.SharedBackground.ImagePath = Path.Combine(output, "attachment.png");
@@ -269,6 +285,9 @@ public sealed partial class MainWindow
         ApplyExtendedSettings(); await NextLayoutAsync();
         check(Math.Abs(BoardScroller.ZoomFactor - 1) < .01 && BoardScroller.HorizontalOffset == 0 && BoardScroller.VerticalOffset == 0, $"disabling infinite board restores scale and position ({BoardScroller.ZoomFactor}, {BoardScroller.HorizontalOffset}, {BoardScroller.VerticalOffset})");
         check(UseSharedBackground && SharedBackgroundVisual.Children.OfType<Image>().Any(), "shared background image is a single cross-region layer");
+        Image sharedImage = SharedBackgroundVisual.Children.OfType<Image>().Single();
+        _settings.SplitRatio = .46; ApplyExtendedSettings(); await NextLayoutAsync();
+        check(ReferenceEquals(sharedImage, SharedBackgroundVisual.Children.OfType<Image>().Single()), "split changes reuse the loaded background image without a black reload frame");
         check(ClockBackgroundVisual.Children.OfType<Border>().Any(b => b.Background is BlurBackdropBrush) && BoardBackgroundVisual.Children.OfType<Border>().Any(b => b.Background is BlurBackdropBrush), "regions retain independent real blur layers");
         await SaveVisualAsync(RootShell, Path.Combine(output, "background-glass.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
         _settings.SharedBackgroundEnabled = false; _settings.ClockBackground.Glass = _settings.BoardBackground.Glass = _settings.TileBackground.Glass = false;

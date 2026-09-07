@@ -17,6 +17,7 @@ public sealed partial class MainWindow
     private bool _splitDragging;
     private double _splitDragRatio;
     private Dictionary<string, RegionPlacement>? _widgetEditSnapshot;
+    private HashSet<string>? _dockedCustomizationEditSnapshot;
 
     private void ApplyDisplayLayout()
     {
@@ -100,7 +101,7 @@ public sealed partial class MainWindow
 
     private void ClockPanel_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (_settings.LayoutMode is not ("Split" or "Clock")) return;
+        if (!_isLoaded || _settings.LayoutMode is not ("Split" or "Clock")) return;
         ApplyDockedClockLayout();
         UpdateLayoutHandles();
     }
@@ -108,21 +109,23 @@ public sealed partial class MainWindow
     private void ApplyDockedClockLayout()
     {
         double width = ClockPanel.ActualWidth, height = ClockPanel.ActualHeight;
-        if (width < 1 || height < 1) return;
+        if (!_isLoaded || width < 1 || height < 1) return;
 
-        string prefix = _settings.LayoutMode == "Split" ? "Split" : "ClockMode";
+        bool splitMode = _settings.LayoutMode == "Split";
+        string prefix = splitMode ? "Split" : "ClockMode";
         string clockKey = prefix + "Clock", componentsKey = prefix + "Components";
-        if (!_settings.Widgets.TryGetValue(clockKey, out RegionPlacement? clock))
+        if (!_settings.Widgets.TryGetValue(clockKey, out RegionPlacement? clock) || !_settings.CustomizedDockedWidgets.Contains(clockKey))
         {
-            double clockWidth = Math.Min(520, width * .76);
+            double clockWidth = Math.Min(splitMode ? 720 : 760, width * (splitMode ? .84 : .68));
             double clockHeight = clockWidth / DockedClockAspectRatio;
-            double componentsHeight = Math.Min(420, width * .72) / DockedComponentsAspectRatio;
-            double groupTop = Math.Max(0, (height - clockHeight - componentsHeight - 18) / 2);
+            double componentsHeight = Math.Min(splitMode ? 520 : 560, width * .72) / DockedComponentsAspectRatio;
+            double groupHeight = clockHeight + componentsHeight + 18;
+            double groupTop = Math.Max(0, (height - groupHeight) / 2 - (splitMode ? height * .08 : 0));
             _settings.Widgets[clockKey] = clock = new RegionPlacement { Y = groupTop, Width = clockWidth, Height = clockHeight };
         }
-        if (!_settings.Widgets.TryGetValue(componentsKey, out RegionPlacement? components))
+        if (!_settings.Widgets.TryGetValue(componentsKey, out RegionPlacement? components) || !_settings.CustomizedDockedWidgets.Contains(componentsKey))
         {
-            double componentsWidth = Math.Min(420, width * .72);
+            double componentsWidth = Math.Min(splitMode ? 520 : 560, width * .72);
             double componentsHeight = componentsWidth / DockedComponentsAspectRatio;
             double componentsY = Math.Min(Math.Max(0, height - componentsHeight), clock.Y + clock.Height + 18);
             _settings.Widgets[componentsKey] = components = new RegionPlacement { Y = componentsY, Width = componentsWidth, Height = componentsHeight };
@@ -177,69 +180,79 @@ public sealed partial class MainWindow
                 }
                 SettingChanged();
             };
+            Canvas.SetZIndex(_splitter, 100);
             FreeLayoutHandles.Children.Add(_splitter);
         }
         if (_settings.LayoutMode is "Split" or "Clock" && canEditWidgets)
         {
             string prefix = _settings.LayoutMode == "Split" ? "Split" : "ClockMode";
-            AddCenteredWidgetHandles(prefix + "Clock", ClockContentView, "时钟", DockedClockAspectRatio, 220);
-            AddCenteredWidgetHandles(prefix + "Components", ClockComponentsView, "组件栏", DockedComponentsAspectRatio, 240);
+            AddCenteredWidgetInteraction(prefix + "Clock", ClockContentView, "时钟", DockedClockAspectRatio, 220);
+            AddCenteredWidgetInteraction(prefix + "Components", ClockComponentsView, "组件栏", DockedComponentsAspectRatio, 240);
         }
         if (_settings.LayoutMode != "Free" || !canEditWidgets) return;
         foreach (var (key, view) in _freeWidgets)
         {
             RegionPlacement placement = _settings.Widgets[key];
-            void MoveHandles(Thumb move, Thumb resize)
-            {
-                Canvas.SetLeft(move, placement.X); Canvas.SetTop(move, placement.Y);
-                move.Width = placement.Width;
-                Canvas.SetLeft(resize, placement.X + placement.Width - 20); Canvas.SetTop(resize, placement.Y + placement.Height - 20);
-                Canvas.SetLeft(view, placement.X); Canvas.SetTop(view, placement.Y); view.Width = placement.Width; view.Height = placement.Height;
-            }
-            Thumb move = new() { Height = 18, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(120, 96, 165, 250)) };
-            Thumb resize = new() { Width = 20, Height = 20, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(200, 96, 165, 250)) };
-            ToolTipService.SetToolTip(move, "移动组件"); ToolTipService.SetToolTip(resize, "缩放组件");
-            move.DragDelta += (_, args) =>
-            {
-                WidgetLayout.Move(placement, args.HorizontalChange, args.VerticalChange, DisplayRoot.ActualWidth, DisplayRoot.ActualHeight);
-                MoveHandles(move, resize);
-            };
-            resize.DragDelta += (_, args) =>
-            {
-                WidgetLayout.Resize(placement, args.HorizontalChange, args.VerticalChange, DisplayRoot.ActualWidth, DisplayRoot.ActualHeight);
-                MoveHandles(move, resize);
-            };
-            move.DragCompleted += (_, _) => ScheduleSave(); resize.DragCompleted += (_, _) => ScheduleSave();
-            MoveHandles(move, resize); FreeLayoutHandles.Children.Add(move); FreeLayoutHandles.Children.Add(resize);
+            AddWidgetInteractionLayer(view, placement, key == "Clock" ? "时钟" : "组件",
+                (dx, dy) => WidgetLayout.Move(placement, dx, dy, DisplayRoot.ActualWidth, DisplayRoot.ActualHeight),
+                (dx, dy) => WidgetLayout.Resize(placement, dx, dy, DisplayRoot.ActualWidth, DisplayRoot.ActualHeight),
+                ScheduleSave);
         }
     }
 
-    private void AddCenteredWidgetHandles(string key, Viewbox view, string label, double aspectRatio, double minimumWidth)
+    private void AddCenteredWidgetInteraction(string key, Viewbox view, string label, double aspectRatio, double minimumWidth)
     {
         if (!_settings.Widgets.TryGetValue(key, out RegionPlacement? placement)) return;
         double width = ClockPanel.ActualWidth, height = ClockPanel.ActualHeight;
-        void PositionHandles(Thumb move, Thumb resize)
+        AddWidgetInteractionLayer(view, placement, label,
+            (_, dy) => WidgetLayout.MoveVerticallyCentered(placement, dy, width, height),
+            (dx, dy) => WidgetLayout.ResizeCentered(placement, dx, dy, aspectRatio, minimumWidth, width, height),
+            () => { _settings.CustomizedDockedWidgets.Add(key); ScheduleSave(); });
+    }
+
+    private void AddWidgetInteractionLayer(Viewbox view, RegionPlacement placement, string label,
+        Action<double, double> movePlacement, Action<double, double> resizePlacement, Action complete)
+    {
+        Grid interactionLayer = new() { Width = placement.Width, Height = placement.Height, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0)) };
+        Thumb move = new() { Style = (Style)Application.Current.Resources["InvisibleWidgetMoveThumbStyle"] };
+        Thumb resize = new()
         {
-            Canvas.SetLeft(move, placement.X); Canvas.SetTop(move, placement.Y);
-            move.Width = placement.Width;
-            Canvas.SetLeft(resize, placement.X + placement.Width - 20); Canvas.SetTop(resize, placement.Y + placement.Height - 20);
+            Width = 18, Height = 18, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
+            Style = (Style)Application.Current.Resources["WidgetResizeThumbStyle"], Opacity = 0
+        };
+        interactionLayer.Children.Add(move);
+        interactionLayer.Children.Add(resize);
+        bool dragging = false;
+        interactionLayer.PointerEntered += (_, _) => resize.Opacity = 1;
+        interactionLayer.PointerExited += (_, _) => { if (!dragging) resize.Opacity = 0; };
+        void PositionInteraction()
+        {
+            interactionLayer.Width = placement.Width; interactionLayer.Height = placement.Height;
+            Canvas.SetLeft(interactionLayer, placement.X); Canvas.SetTop(interactionLayer, placement.Y);
             ApplyCenteredPlacement(view, placement);
         }
-        Thumb move = new() { Height = 18, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(120, 96, 165, 250)) };
-        Thumb resize = new() { Width = 20, Height = 20, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(200, 96, 165, 250)) };
-        ToolTipService.SetToolTip(move, $"上下移动{label}（锁定中轴线）");
+        ToolTipService.SetToolTip(move, $"拖动{label}上下移动（锁定中轴线）");
         ToolTipService.SetToolTip(resize, $"缩放{label}");
         move.DragDelta += (_, args) =>
         {
-            WidgetLayout.MoveVerticallyCentered(placement, args.VerticalChange, width, height);
-            PositionHandles(move, resize);
+            movePlacement(args.HorizontalChange, args.VerticalChange);
+            PositionInteraction();
         };
+        move.DragStarted += (_, _) => dragging = true;
         resize.DragDelta += (_, args) =>
         {
-            WidgetLayout.ResizeCentered(placement, args.HorizontalChange, args.VerticalChange, aspectRatio, minimumWidth, width, height);
-            PositionHandles(move, resize);
+            resizePlacement(args.HorizontalChange, args.VerticalChange);
+            PositionInteraction();
         };
-        move.DragCompleted += (_, _) => ScheduleSave(); resize.DragCompleted += (_, _) => ScheduleSave();
-        PositionHandles(move, resize); FreeLayoutHandles.Children.Add(move); FreeLayoutHandles.Children.Add(resize);
+        resize.DragStarted += (_, _) => { dragging = true; resize.Opacity = 1; };
+        void CompleteDrag()
+        {
+            dragging = false;
+            resize.Opacity = 0;
+            complete();
+        }
+        move.DragCompleted += (_, _) => CompleteDrag(); resize.DragCompleted += (_, _) => CompleteDrag();
+        Canvas.SetZIndex(interactionLayer, 50);
+        PositionInteraction(); FreeLayoutHandles.Children.Add(interactionLayer);
     }
 }

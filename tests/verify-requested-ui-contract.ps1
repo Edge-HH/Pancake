@@ -73,10 +73,17 @@ if ($xaml -notmatch 'Content="外观"[^>]+SelectsOnInvoked="False"[\s\S]*?Naviga
 if ($xaml -notmatch 'x:Name="ClockComponentsView"' -or
     $xaml -notmatch 'x:Name="ClockComponents" Orientation="Horizontal"' -or
     $layout -notmatch '_settings\.LayoutMode is "Split" or "Clock"' -or
-    $layout -notmatch 'AddCenteredWidgetHandles\(' -or
+    $layout -notmatch 'AddCenteredWidgetInteraction\(' -or
     $widgetLayout -notmatch 'MoveVerticallyCentered' -or
     $widgetLayout -notmatch 'ResizeCentered') {
     $failures.Add('分屏和仅时钟模式缺少锁定中轴线的时钟与整排组件编辑。')
+}
+if ($xaml -notmatch 'Content="网格" Tag="AppearanceGrid"' -or
+    $settings -notmatch '编辑时显示常规网格' -or
+    $window -notmatch 'GridAppearance\.EffectiveStyle' -or
+    $window -notmatch 'style == "Dots"' -or
+    $window -notmatch 'style == "None"') {
+    $failures.Add('外观设置缺少独立于吸附逻辑的网格、点阵和隐藏样式。')
 }
 
 if ($failures.Count -gt 0) {
