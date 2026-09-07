@@ -17,23 +17,31 @@ public sealed partial class MainWindow
     private bool _projectOperation;
     private bool _applyingProjectAppearance;
     private SubjectBoard? _activeInkSubject;
-    private readonly TextBlock _inkSubjectLabel = new() { VerticalAlignment = VerticalAlignment.Center };
     private readonly InkToolSettings _inkSettings = new();
     private readonly StackPanel _inkColors = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
-    private readonly ComboBox _inkTool = new() { ItemsSource = new[] { "画笔", "橡皮擦" }, SelectedIndex = 0, Width = 105 };
+    private readonly ToggleButton _inkPen = new() { Content = new FluentIcon { Symbol = "Pen" }, IsChecked = true };
+    private readonly ToggleButton _inkEraser = new() { Content = new FluentIcon { Symbol = "Eraser" } };
     private ProjectDocument? CurrentProject => _library.Projects.FirstOrDefault(p => p.Id == _library.ActiveProjectId);
 
     private void InitializeProjectCommands()
     {
-        GlobalInkTools.Children.Add(_inkSubjectLabel);
-        _inkTool.SelectionChanged += (_, _) => _inkSettings.Eraser = _inkTool.SelectedIndex == 1;
-        GlobalInkTools.Children.Add(_inkTool);
+        void SelectTool(bool eraser) { _inkSettings.Eraser = eraser; _inkPen.IsChecked = !eraser; _inkEraser.IsChecked = eraser; }
+        _inkPen.Checked += (_, _) => SelectTool(false);
+        _inkEraser.Checked += (_, _) => SelectTool(true);
+        _inkPen.Click += (_, _) => _inkPen.IsChecked = true;
+        _inkEraser.Click += (_, _) => _inkEraser.IsChecked = true;
+        ToolTipService.SetToolTip(_inkPen, "画笔"); ToolTipService.SetToolTip(_inkEraser, "橡皮擦");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_inkPen, "画笔");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(_inkEraser, "橡皮擦");
+        GlobalInkTools.Children.Add(_inkPen); GlobalInkTools.Children.Add(_inkEraser);
         GlobalInkTools.Children.Add(_inkColors);
         RefreshInkPalette();
         Slider thickness = new() { Minimum = 2, Maximum = 18, StepFrequency = 1, Value = 5, Width = 110, Header = "粗细" };
         thickness.ValueChanged += (_, args) => _inkSettings.Thickness = args.NewValue;
         GlobalInkTools.Children.Add(thickness);
-        Button clear = new() { Content = "清空笔迹" };
+        Button clear = new() { Content = new FluentIcon { Symbol = "Delete", Foreground = new SolidColorBrush(Microsoft.UI.Colors.Red) } };
+        ToolTipService.SetToolTip(clear, "清空笔迹");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(clear, "清空笔迹");
         clear.Click += ClearInk_Click;
         GlobalInkTools.Children.Add(clear);
         UpdateProjectCommands();
@@ -53,7 +61,7 @@ public sealed partial class MainWindow
             swatch.Click += (_, _) =>
             {
                 _inkSettings.Color = color;
-                _inkTool.SelectedIndex = 0;
+                _inkSettings.Eraser = false; _inkPen.IsChecked = true; _inkEraser.IsChecked = false;
                 foreach (ColorSwatchButton candidate in _inkColors.Children)
                     candidate.SetSelected(ReferenceEquals(candidate, swatch));
             };
@@ -91,7 +99,7 @@ public sealed partial class MainWindow
         RenameProjectMenu.IsEnabled = DeleteProjectMenu.IsEnabled = SaveProjectMenu.IsEnabled = ExportProjectMenu.IsEnabled = exists && _storageReady;
         GlobalPenButton.IsEnabled = exists;
         EmptyProjectPanel.Visibility = !exists && SettingsRoot.Visibility != Visibility.Visible ? Visibility.Visible : Visibility.Collapsed;
-        BoardWorkspace.Visibility = exists ? Visibility.Visible : Visibility.Collapsed;
+        BoardWorkspace.Visibility = exists && _settings.LayoutMode != "Clock" ? Visibility.Visible : Visibility.Collapsed;
         EditBoardButton.IsEnabled = exists;
         UpdateInkSubjectLabel();
     }
@@ -295,6 +303,12 @@ public sealed partial class MainWindow
         GlobalInkToolbar.Visibility = drawing ? Visibility.Visible : Visibility.Collapsed;
         RichTextToolbar.Visibility = _isEditing && !drawing ? Visibility.Visible : Visibility.Collapsed;
         AddSubjectButton.IsEnabled = GridSnapToggleButton.IsEnabled = !drawing;
+        // 隐藏当前不可操作的按钮，避免 WinUI 禁用态出现灰色底框。
+        AddSubjectButton.Visibility = _isEditing && !drawing ? Visibility.Visible : Visibility.Collapsed;
+        GridSnapToggleButton.Visibility = _isEditing && !drawing ? Visibility.Visible : Visibility.Collapsed;
+        AutoArrangeButton.Visibility = _isEditing && !drawing ? Visibility.Visible : Visibility.Collapsed;
+        UpdateLayoutHandles();
+        ApplyToolbarSettings();
         foreach (SubjectTileControl tile in BoardCanvas.Children.OfType<SubjectTileControl>()) tile.SetInkMode(drawing, _inkSettings);
         UpdateInkSubjectLabel();
     }
@@ -302,7 +316,6 @@ public sealed partial class MainWindow
     private void UpdateInkSubjectLabel()
     {
         if (_activeInkSubject is not null && !ViewModel.Subjects.Contains(_activeInkSubject)) _activeInkSubject = null;
-        _inkSubjectLabel.Text = _activeInkSubject is null ? "在任意磁贴上书写" : $"当前：{_activeInkSubject.Name}";
     }
 
     private async void ClearInk_Click(object sender, RoutedEventArgs e)

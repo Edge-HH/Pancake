@@ -78,3 +78,25 @@ BoardSettingsState settings = JsonSerializer.Deserialize<BoardSettingsState>(Jso
 Check(Math.Abs(settings.NoiseAlertVolume - .35) < .001, "提示音音量应持久化");
 Check(GitHubUpdateService.IsInstallable("Pancake-win-x64-2.0.1.zip"), "便携版 Release 应被更新器识别");
 Console.WriteLine("PASS: light theme content, immediate noise rearming, and three-beep PCM.");
+
+var defaults = JsonSerializer.Deserialize<BoardSettingsState>("{}")!;
+Check(defaults.LayoutMode == "Split" && defaults.ToolbarIconOnly && defaults.UpdateSource == "GitHub" && defaults.GridSize == 48, "旧配置应使用兼容的布局、无字模式与更新源默认值");
+var placement = new RegionPlacement { X = 100, Y = 80, Width = 200, Height = 100 };
+WidgetLayout.Move(placement, 50, 20, 1000, 800);
+Check(placement.X == 150 && placement.Y == 100, "组件拖动应准确累计位移");
+WidgetLayout.Resize(placement, 80, 40, 1000, 800);
+Check(placement.Width == 280 && placement.Height == 140, "组件缩放应准确累计尺寸");
+WidgetLayout.Move(placement, -1000, -1000, 1000, 800);
+Check(placement.X == 0 && placement.Y == 0, "组件移动不能越过左上边界");
+WidgetLayout.Resize(placement, -1000, -1000, 1000, 800);
+Check(placement.Width == 80 && placement.Height == 48, "组件应保留最小可操作尺寸");
+Check(WidgetLayout.CompleteSplit(0) == "Board" && WidgetLayout.CompleteSplit(1) == "Clock" && WidgetLayout.CompleteSplit(.5) == "Split", "分隔条两端应切换单区，中间保留分屏");
+defaults.Widgets["FutureComponent"] = placement;
+defaults.TileBackground = new() { Color = "#123456", ImageMode = "Fit", Glass = true, Blur = 43.2 };
+defaults.InfiniteBoard = true; defaults.ToolbarScale = 1.37; defaults.UpdateSource = "Gitee";
+var restored = JsonSerializer.Deserialize<BoardSettingsState>(JsonSerializer.Serialize(defaults))!;
+Check(restored.Widgets.ContainsKey("FutureComponent") && restored.TileBackground.Blur == 43.2 && restored.InfiniteBoard && restored.ToolbarScale == 1.37 && restored.UpdateSource == "Gitee", "组件扩展、外观、无限画板与更新源应完整持久化");
+var widgetSnapshot = WidgetLayout.Copy(defaults.Widgets);
+placement.X = 500;
+Check(widgetSnapshot["FutureComponent"].X == 0, "放弃组件编辑所用的快照必须独立于当前模型");
+Console.WriteLine("PASS: settings migration, widget movement/resizing, split endpoints, precision and persistence.");

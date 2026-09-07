@@ -106,6 +106,8 @@ public sealed partial class MainWindow
                 chinese.TileWidth = 420; chinese.TileHeight = 320; tile.ApplyModelLayout();
                 GlobalPenButton.IsChecked = true; await NextLayoutAsync();
                 Check(GlobalInkToolbar.Visibility == Visibility.Visible && !AddSubjectButton.IsEnabled, "global ink mode owns editing input");
+                Check(AddSubjectButton.Visibility == Visibility.Collapsed, "ink mode hides disabled add button instead of drawing a gray rectangle");
+                Check(GlobalInkToolbar.BorderThickness.Left >= 1, "ink toolbar has a visible outline");
                 await SaveVisualAsync(RootShell, Path.Combine(output, "editor.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
                 GlobalPenButton.IsChecked = false;
                 CaptureCurrentProject();
@@ -204,6 +206,7 @@ public sealed partial class MainWindow
                 var settingsSplitView = FindVisuals<SplitView>(SettingsRoot).First(view => view.Name == "RootSplitView");
                 Check(settingsSplitView.CornerRadius == new CornerRadius(0), "settings navigation pane joins the content with square corners");
                 await SaveVisualAsync(RootShell, Path.Combine(output, "about.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+                await VerifyExtendedSettingsAsync(output, Check);
                 evidence.Add("UI_VERIFICATION_OK");
             }
             catch (Exception ex) { evidence.Add("UI_VERIFICATION_FAILED\n" + ex); }
@@ -213,6 +216,90 @@ public sealed partial class MainWindow
                 Close();
             }
         };
+    }
+
+    private async Task VerifyExtendedSettingsAsync(string output, Action<bool, string> check)
+    {
+        FinishEditing();
+        _appWindow!.Resize(new Windows.Graphics.SizeInt32(2400, 1500));
+        await NextLayoutAsync();
+        foreach (string mode in new[] { "Split", "Board", "Clock", "Free", "Split" })
+        {
+            _settings.LayoutMode = mode; ApplyExtendedSettings(); ShowBoard(); EnterEditing(); await NextLayoutAsync();
+            check(ClockPanel.Visibility == (mode is "Board" or "Free" ? Visibility.Collapsed : Visibility.Visible), mode + " clock visibility");
+            check(BoardWorkspace.Visibility == (mode == "Clock" ? Visibility.Collapsed : Visibility.Visible), mode + " board visibility");
+            check(_freeWidgets.Count == (mode == "Free" ? 3 : 0), mode + " independent component hosts");
+            if (mode == "Free")
+            {
+                check(FreeLayoutHandles.Children.Count == 6, "each free widget has move and resize handles");
+                WidgetLayout.Move(_settings.Widgets["Clock"], 15, 30, DisplayRoot.ActualWidth, DisplayRoot.ActualHeight);
+                WidgetLayout.Resize(_settings.Widgets["Weather"], 15, 20, DisplayRoot.ActualWidth, DisplayRoot.ActualHeight);
+                ApplyExtendedSettings(); await NextLayoutAsync(); SaveStateNow();
+                var persisted = _projectStore.Load().Settings;
+                check(persisted.Widgets["Clock"].X == _settings.Widgets["Clock"].X && persisted.Widgets["Weather"].Height == _settings.Widgets["Weather"].Height, "widget movement and resizing reach actual persisted settings");
+                check(_freeWidgets["Clock"].Width == _settings.Widgets["Clock"].Width, "widget host follows placement dimensions");
+            }
+            await SaveVisualAsync(RootShell, Path.Combine(output, "layout-" + mode + ".png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+        }
+        _settings.InfiniteBoard = true; _settings.GridSize = 64; _renderedGridWidth = 0; ApplyExtendedSettings(); await NextLayoutAsync();
+        check(BoardScroller.ZoomMode == ZoomMode.Enabled && BoardSurface.Width > BoardScroller.ActualWidth, "infinite board extends beyond viewport");
+        BoardScroller.ChangeView(120, 80, .75f, true); await NextLayoutAsync();
+        check(Math.Abs(BoardScroller.ZoomFactor - .75) < .01, "infinite board actually zooms");
+        var gridLines = GridCanvas.Children.OfType<Microsoft.UI.Xaml.Shapes.Line>().Where(l => l.X1 == l.X2).ToList();
+        check(gridLines.Count > 1 && Math.Abs(gridLines[1].X1 - gridLines[0].X1 - 64) < .01, "grid uses configured spacing");
+        _settings.InfiniteBoard = false; _settings.GridSize = 48; _renderedGridWidth = 0;
+        _settings.SharedBackgroundEnabled = true;
+        _settings.SharedBackground.ImagePath = Path.Combine(output, "attachment.png");
+        _settings.ClockBackground.Glass = true; _settings.ClockBackground.Blur = 35;
+        _settings.BoardBackground.Glass = true; _settings.BoardBackground.Blur = 8;
+        _settings.TileBackground.Glass = true; _settings.TileBackground.Blur = 15; _settings.TileTitleSize = 36;
+        ApplyExtendedSettings(); await NextLayoutAsync();
+        check(Math.Abs(BoardScroller.ZoomFactor - 1) < .01 && BoardScroller.HorizontalOffset == 0 && BoardScroller.VerticalOffset == 0, $"disabling infinite board restores scale and position ({BoardScroller.ZoomFactor}, {BoardScroller.HorizontalOffset}, {BoardScroller.VerticalOffset})");
+        check(UseSharedBackground && SharedBackgroundVisual.Children.OfType<Image>().Any(), "shared background image is a single cross-region layer");
+        check(ClockBackgroundVisual.Children.OfType<Border>().Any(b => b.Background is BlurBackdropBrush) && BoardBackgroundVisual.Children.OfType<Border>().Any(b => b.Background is BlurBackdropBrush), "regions retain independent real blur layers");
+        await SaveVisualAsync(RootShell, Path.Combine(output, "background-glass.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+        _settings.SharedBackgroundEnabled = false; _settings.ClockBackground.Glass = _settings.BoardBackground.Glass = _settings.TileBackground.Glass = false;
+        _settings.ToolbarIconOnly = false;
+        GlobalPenButton.IsChecked = true;
+        _inkEraser.IsChecked = true;
+        check(_inkSettings.Eraser && _inkPen.IsChecked == false, "eraser icon selects erasing exclusively");
+        _inkPen.IsChecked = true;
+        check(!_inkSettings.Eraser && _inkEraser.IsChecked == false, "pen icon returns to drawing exclusively");
+        foreach (string position in new[] { "BottomLeft", "BottomCenter", "BottomRight", "TopCenter", "TopLeft", "TopRight", "CenterLeft", "CenterRight" })
+        {
+            _settings.ToolbarPosition = position; ApplyExtendedSettings(); await NextLayoutAsync();
+            check(ToolbarItems.Orientation == (position.StartsWith("Center") ? Orientation.Vertical : Orientation.Horizontal), position + " toolbar orientation");
+            check(_toolbarLabels[EditBoardButton].Label.Visibility == Visibility.Visible, position + " button names visible");
+            var rect = FloatingToolbar.TransformToVisual(RootShell).TransformBounds(new Rect(0, 0, FloatingToolbar.ActualWidth, FloatingToolbar.ActualHeight));
+            var penRect = GlobalInkToolbar.TransformToVisual(RootShell).TransformBounds(new Rect(0, 0, GlobalInkToolbar.ActualWidth, GlobalInkToolbar.ActualHeight));
+            check(rect.Right <= RootShell.ActualWidth + 1 && rect.Bottom <= RootShell.ActualHeight + 1, position + " toolbar fits window");
+            check(rect.Right <= penRect.Left || rect.Left >= penRect.Right || rect.Bottom <= penRect.Top || rect.Top >= penRect.Bottom, position + " pen and main toolbar do not overlap");
+            if (position == "CenterLeft") await SaveVisualAsync(RootShell, Path.Combine(output, "toolbar-vertical.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+        }
+        GlobalPenButton.IsChecked = false; _settings.ToolbarPosition = "BottomCenter"; _settings.ToolbarIconOnly = true; ApplyExtendedSettings();
+        FinishEditing(); ShowSettings();
+        foreach (var nav in SettingsRoot.MenuItems.Concat(SettingsRoot.FooterMenuItems).OfType<NavigationViewItem>())
+        {
+            SettingsRoot.SelectedItem = nav; await NextLayoutAsync();
+            StackPanel panel = nav.Tag.ToString() switch { "Layout" => LayoutSettingsPanel, "Appearance" => AppearanceSettingsPanel, "Components" => ComponentSettingsPanel, _ => AboutSettingsPanel };
+            var buttons = ((StackPanel)((ScrollViewer)panel.Children[0]).Content).Children.OfType<Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>().ToList();
+            foreach (var button in buttons)
+            {
+                var peer = new Microsoft.UI.Xaml.Automation.Peers.ToggleButtonAutomationPeer(button);
+                ((Microsoft.UI.Xaml.Automation.Provider.IToggleProvider)peer.GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Toggle)).Toggle();
+                await NextLayoutAsync();
+                check(((Grid)panel.Children[1]).Children.Count == 1, nav.Tag + "/" + button.Content + " tab has content");
+            }
+        }
+        SettingsRoot.SelectedItem = AppearanceNavItem;
+        await NextLayoutAsync();
+        await SaveVisualAsync(RootShell, Path.Combine(output, "settings-v203.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+        // 小窗口和最大尺寸组合仍能通过滚动访问全部按钮。
+        _appWindow.Resize(new Windows.Graphics.SizeInt32(1440, 900));
+        _settings.ToolbarScale = 2; _settings.ToolbarIconOnly = false;
+        ShowBoard(); EnterEditing(); ApplyExtendedSettings(); await NextLayoutAsync();
+        check(MainToolbarScroll.ScrollableWidth > 0, "oversized toolbar remains horizontally scrollable in a narrow window");
+        _settings.ToolbarScale = 1; _settings.ToolbarIconOnly = true; ApplyExtendedSettings();
     }
 
     private async Task NextLayoutAsync()

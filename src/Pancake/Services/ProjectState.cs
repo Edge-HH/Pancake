@@ -9,6 +9,27 @@ public sealed class AppState
 
 public sealed class BoardSettingsState
 {
+    public string LayoutMode { get; set; } = "Split";
+    public double SplitRatio { get; set; } = 0.4;
+    // 按稳定组件标识保存位置，新增组件无需改变自由布局的拖动/缩放机制。
+    public Dictionary<string, RegionPlacement> Widgets { get; set; } = new();
+    public bool InfiniteBoard { get; set; }
+    public double GridSize { get; set; } = 48;
+    public double TileTitleSize { get; set; } = 29;
+    public BackgroundSettings TileBackground { get; set; } = new();
+    public bool SharedBackgroundEnabled { get; set; }
+    public BackgroundSettings SharedBackground { get; set; } = new();
+    public BackgroundSettings ClockBackground { get; set; } = new();
+    public BackgroundSettings BoardBackground { get; set; } = new();
+    public bool ToolbarIconOnly { get; set; } = true;
+    public string ToolbarPosition { get; set; } = "BottomCenter";
+    public double ToolbarScale { get; set; } = 1;
+    public double ToolbarRadius { get; set; } = 14;
+    public double ToolbarHorizontalInset { get; set; } = 24;
+    public double ToolbarVerticalInset { get; set; } = 24;
+    public bool ToolbarGlass { get; set; }
+    public double ToolbarBlur { get; set; } = 20;
+    public string UpdateSource { get; set; } = "GitHub";
     public string Theme { get; set; } = "Dark";
     public string Palette { get; set; } = "Vivid";
     public double NoiseIntervalSeconds { get; set; } = 0.1;
@@ -48,6 +69,24 @@ public sealed class HomeworkState
     public bool HasHandwriting { get; set; }
     public List<AttachmentState> Attachments { get; set; } = [];
     public List<FontFallbackState> FontFallbacks { get; set; } = [];
+}
+
+/// <summary>背景样式属于软件设置，资源复制到 data 后不依赖原图片位置。</summary>
+public sealed class BackgroundSettings
+{
+    public string Color { get; set; } = "";
+    public string ImagePath { get; set; } = "";
+    public string ImageMode { get; set; } = "Zoom";
+    public bool Glass { get; set; }
+    public double Blur { get; set; } = 20;
+}
+
+public sealed class RegionPlacement
+{
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
 }
 
 /// <summary>缺失字体的原始名称与 UTF-16 范围，显示回退不能抹掉用户的字体选择。</summary>

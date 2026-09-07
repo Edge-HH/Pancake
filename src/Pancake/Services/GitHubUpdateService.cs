@@ -6,7 +6,11 @@ using System.Text.Json;
 
 namespace Pancake.Services;
 
-public sealed record GitHubReleaseUpdate(Version Version, string Tag, string AssetName, string DownloadUrl, string? Digest);
+public sealed record ReleaseAsset(string Name, string Url, string? Digest);
+public sealed record GitHubReleaseUpdate(Version Version, string Tag, string AssetName, string DownloadUrl, string? Digest)
+{
+    public IReadOnlyList<ReleaseAsset> Parts { get; init; } = [];
+}
 
 public sealed class GitHubUpdateService
 {

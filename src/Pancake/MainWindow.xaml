@@ -63,37 +63,39 @@
         </Grid>
 
         <Grid x:Name="DisplayRoot" Grid.Row="1" Background="{ThemeResource BoardBackgroundBrush}">
+            <icons:BackgroundVisual x:Name="SharedBackgroundVisual" />
             <Grid x:Name="DisplayGrid">
                 <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="0" /></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="2*" MinWidth="400" /><ColumnDefinition Width="3*" /></Grid.ColumnDefinitions>
                 <Border x:Name="ClockPanel" Grid.Row="0" Grid.Column="0" Background="{ThemeResource BoardSurfaceBrush}" BorderBrush="{ThemeResource BoardLineBrush}" BorderThickness="0,0,1,0">
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="18">
+                    <Grid><icons:BackgroundVisual x:Name="ClockBackgroundVisual" /><Viewbox x:Name="ClockContentView" Stretch="Uniform" Margin="12"><StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="18">
                         <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="7">
                             <TextBlock x:Name="MainTimeText" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="112" FontWeight="Light" Foreground="{ThemeResource BoardTextBrush}" Text="11:20" />
                             <TextBlock x:Name="SecondsText" Margin="0,17,0,0" VerticalAlignment="Top" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="28" Foreground="{ThemeResource BoardTextBrush}" Text="10" />
                         </StackPanel>
                         <TextBlock x:Name="ClockDateText" HorizontalAlignment="Center" FontSize="20" Foreground="{ThemeResource BoardTextBrush}" />
-                        <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
-                            <Border Padding="16,10" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
+                        <StackPanel x:Name="ClockComponents" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                            <Border x:Name="WeatherWidget" Padding="16,10" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
                                 <StackPanel Orientation="Horizontal" Spacing="9"><icons:FluentIcon Foreground="{ThemeResource BoardWarningBrush}" Symbol="Weather" /><TextBlock x:Name="WeatherText" FontSize="14" Foreground="{ThemeResource BoardTextBrush}" Text="天气未配置" /></StackPanel>
                             </Border>
-                            <Border Padding="16,10" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
+                            <Border x:Name="NoiseWidget" Padding="16,10" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
                                 <StackPanel Orientation="Horizontal" Spacing="9"><icons:FluentIcon Foreground="{ThemeResource BoardSuccessBrush}" Symbol="Microphone" /><TextBlock x:Name="NoiseText" FontSize="14" Foreground="{ThemeResource BoardTextBrush}" Text="42 dB · 安静" /></StackPanel>
                             </Border>
                         </StackPanel>
-                    </StackPanel>
+                    </StackPanel></Viewbox></Grid>
                 </Border>
 
                 <Grid x:Name="BoardWorkspace" Grid.Row="0" Grid.Column="1" Background="{ThemeResource BoardSurfaceBrush}">
-                    <Grid x:Name="BoardViewport" Background="{ThemeResource BoardSurfaceBrush}" SizeChanged="BoardViewport_SizeChanged">
-                        <Grid x:Name="BoardSurface" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="{ThemeResource BoardSurfaceBrush}">
+                    <icons:BackgroundVisual x:Name="BoardBackgroundVisual" /><ScrollViewer x:Name="BoardScroller" HorizontalContentAlignment="Left" VerticalContentAlignment="Top" ZoomMode="Disabled" HorizontalScrollMode="Disabled" VerticalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled" MinZoomFactor="0.2" MaxZoomFactor="4"><Grid x:Name="BoardViewport" Background="Transparent" SizeChanged="BoardViewport_SizeChanged">
+                        <Grid x:Name="BoardSurface" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent">
                             <Canvas x:Name="GridCanvas" IsHitTestVisible="False" />
                             <Canvas x:Name="BoardCanvas" />
                             <Canvas x:Name="AlignmentCanvas" IsHitTestVisible="False" />
                         </Grid>
-                    </Grid>
+                    </Grid></ScrollViewer>
                 </Grid>
             </Grid>
+            <Canvas x:Name="FreeWidgetsCanvas" /><Canvas x:Name="FreeLayoutHandles" IsHitTestVisible="False" />
         </Grid>
 
         <NavigationView x:Name="SettingsRoot" Grid.Row="1" Visibility="Collapsed"
@@ -101,6 +103,7 @@
                         IsSettingsVisible="False" IsPaneOpen="True" Loaded="SettingsRoot_Loaded"
                         SelectionChanged="SettingsNavigation_SelectionChanged">
             <NavigationView.MenuItems>
+                <NavigationViewItem Content="布局" Tag="Layout"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Layout" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem x:Name="AppearanceNavItem" Content="外观" Tag="Appearance" IsSelected="True"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Color" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="组件" Tag="Components"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Components" /></NavigationViewItem.Icon></NavigationViewItem>
             </NavigationView.MenuItems>
@@ -113,10 +116,11 @@
                     <TextBlock x:Name="SettingsPageTitle" FontSize="36" Foreground="{ThemeResource BoardTextBrush}" Text="外观" />
                     <TextBlock x:Name="SettingsPageDescription" FontSize="15" Foreground="{ThemeResource BoardTextSecondaryBrush}" Text="调整界面主题和看板色系。" />
                 </StackPanel>
+                <StackPanel x:Name="LayoutSettingsPanel" Visibility="Collapsed" />
                 <StackPanel x:Name="AppearanceSettingsPanel" Spacing="22">
-                <Border Style="{StaticResource BoardCardStyle}">
+                <Border x:Name="ThemeSettingsCard" Style="{StaticResource BoardCardStyle}">
                     <StackPanel Spacing="18">
-                        <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="外观与显示" />
+                        <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="主题" />
                         <Grid ColumnSpacing="24">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="260" /></Grid.ColumnDefinitions>
                             <StackPanel Spacing="3"><TextBlock FontSize="15" FontWeight="SemiBold" Text="主题" /><TextBlock FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="深色更接近教室黑板，强光环境可切换浅色" /></StackPanel>
@@ -132,7 +136,7 @@
 
                 </StackPanel>
                 <StackPanel x:Name="ComponentSettingsPanel" Spacing="22" Visibility="Collapsed">
-                <Border Style="{StaticResource BoardCardStyle}">
+                <Border x:Name="WeatherSettingsCard" Style="{StaticResource BoardCardStyle}">
                     <StackPanel Spacing="18">
                         <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="天气" />
                         <TextBlock FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="使用 小米天气API ，请在下方选择地区" />
@@ -149,7 +153,7 @@
                         </StackPanel>
                     </StackPanel>
                 </Border>
-                <Border Style="{StaticResource BoardCardStyle}">
+                <Border x:Name="NoiseSettingsCard" Style="{StaticResource BoardCardStyle}">
                     <StackPanel Spacing="18">
                         <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="麦克风噪音检测" />
                         <TextBlock FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="只计算实时音量，不录音、不保存音频；系统拒绝麦克风权限时会停止检测。" />
@@ -174,7 +178,7 @@
                 </Border>
                 </StackPanel>
                 <StackPanel x:Name="AboutSettingsPanel" Spacing="24" Visibility="Collapsed">
-                    <Border Style="{StaticResource BoardCardStyle}">
+                    <Border x:Name="VersionSettingsCard" Style="{StaticResource BoardCardStyle}">
                         <StackPanel Spacing="24">
                             <TextBlock FontSize="22" Text="应用信息" />
                             <Grid ColumnSpacing="24">
@@ -183,7 +187,7 @@
                                 <TextBlock x:Name="AppVersionText" Grid.Column="1" TextWrapping="Wrap" VerticalAlignment="Center" />
                             </Grid>
                             <Border Height="1" Background="{ThemeResource BoardLineBrush}" />
-                            <Grid ColumnSpacing="24">
+                            <Grid x:Name="RepositorySettingsCard" ColumnSpacing="24">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                 <TextBlock Text="项目仓库" VerticalAlignment="Center" />
                                 <HyperlinkButton Grid.Column="1" NavigateUri="https://github.com/Edge-HH/Pancake" Background="{ThemeResource BoardSurfaceSecondaryBrush}" CornerRadius="8" Padding="14,8">
@@ -202,11 +206,13 @@
                             </Grid>
                         </StackPanel>
                     </Border>
-                    <Border Style="{StaticResource BoardCardStyle}">
+                    <Border x:Name="UpdateSettingsCard" Style="{StaticResource BoardCardStyle}">
                         <StackPanel Spacing="16">
                             <TextBlock FontSize="22" Text="更新" />
                             <TextBlock Text="本软件使用 HarmonyOS Sans 字体与 Fluent System Icons。字体版权与完整许可见程序 Assets/Fonts 目录。" TextWrapping="Wrap" />
-                            <TextBlock Text="从 GitHub Releases 获取并安装最新版本。" Foreground="{ThemeResource BoardTextSecondaryBrush}" />
+                            <TextBlock Text="从所选更新源获取并安装最新版本。" Foreground="{ThemeResource BoardTextSecondaryBrush}" />
+                            <ComboBox x:Name="UpdateSourceComboBox" Header="更新源"><ComboBoxItem Content="GitHub" /><ComboBoxItem Content="Gitee" /></ComboBox>
+                            <TextBlock x:Name="UpdateSourceHint" TextWrapping="Wrap" />
                             <ToggleSwitch x:Name="AutoUpdateToggle" Header="启动时自动检查更新" IsOn="True" Toggled="AutoUpdateToggle_Toggled" />
                             <Grid ColumnSpacing="20">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -226,8 +232,8 @@
             <Button Content="导入 .pch" Click="ImportProject_Click" HorizontalAlignment="Center" />
         </StackPanel>
         <InfoBar x:Name="StorageInfoBar" Grid.Row="1" VerticalAlignment="Top" Canvas.ZIndex="150" Severity="Error" IsOpen="False" />
-        <Border x:Name="GlobalInkToolbar" Grid.RowSpan="2" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,94" Padding="12" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="12" Canvas.ZIndex="110" Visibility="Collapsed">
-            <StackPanel x:Name="GlobalInkTools" Orientation="Horizontal" Spacing="10" />
+        <Border x:Name="GlobalInkToolbar" Grid.RowSpan="2" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,94" Padding="12" Background="{ThemeResource BoardSurfaceBrush}" BorderBrush="{ThemeResource BoardLineBrush}" BorderThickness="1" CornerRadius="12" Canvas.ZIndex="110" Visibility="Collapsed">
+            <ScrollViewer x:Name="InkToolbarScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"><StackPanel x:Name="GlobalInkTools" Orientation="Horizontal" Spacing="10" /></ScrollViewer>
         </Border>
         <Grid x:Name="ExportOverlay" Grid.RowSpan="2" Canvas.ZIndex="200" Background="{ThemeResource BoardBackgroundBrush}" Visibility="Collapsed" />
 
@@ -244,7 +250,7 @@
             BorderThickness="1"
             CornerRadius="14"
             Canvas.ZIndex="100">
-            <StackPanel x:Name="ToolbarItems" Orientation="Horizontal" Spacing="4">
+            <ScrollViewer x:Name="MainToolbarScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"><StackPanel x:Name="ToolbarItems" Orientation="Horizontal" Spacing="4">
                 <ToggleButton x:Name="GlobalPenButton" Width="44" Height="44" Padding="10" Background="Transparent" BorderThickness="0" Visibility="Collapsed" AutomationProperties.Name="画笔" Checked="GlobalPen_Changed" Unchecked="GlobalPen_Changed">
                     <icons:FluentIcon Symbol="Pen" />
                 </ToggleButton>
@@ -286,7 +292,7 @@
                 <Button x:Name="EditBoardButton" Click="EditBoardButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="编辑看板">
                     <icons:FluentIcon x:Name="EditBoardIcon" Symbol="Edit" />
                 </Button>
-            </StackPanel>
+            </StackPanel></ScrollViewer>
         </Border>
     </Grid>
 </Window>

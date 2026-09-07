@@ -5,6 +5,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/Pancake/Services/PortableUpdateService.cs" Link="PortableUpdateService.cs" />
+    <Compile Include="../../src/Pancake/Services/GitHubUpdateService.cs" Link="GitHubUpdateService.cs" />
+    <Compile Include="../../src/Pancake/Services/ReleaseUpdateService.cs" Link="ReleaseUpdateService.cs" />
+    <Compile Include="../../src/Pancake/Services/SplitUpdatePackage.cs" Link="SplitUpdatePackage.cs" />
+    <Content Include="../../src/Pancake/Tools/7zip/**/*" Link="Tools/7zip/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../src/Pancake/ApplyUpdate.ps1" Link="ApplyUpdate.ps1" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

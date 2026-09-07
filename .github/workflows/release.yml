@@ -65,6 +65,21 @@ jobs:
           .\tests\verify-requested-ui-contract.ps1
           .\tests\verify-rich-text-roundtrip.ps1
 
+      - name: 🪟 验证真实窗口与新版设置
+        shell: pwsh
+        run: |
+          dotnet publish .\src\Pancake\Pancake.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:WindowsAppSDKSelfContained=true -p:EnableUiVerification=true -o .\artifacts\ui-check --nologo
+          if ($LASTEXITCODE -ne 0) { throw 'UI 验证程序构建失败。' }
+          .\tests\verify-ui.ps1 -PublishDirectory .\artifacts\ui-check -EvidenceDirectory .\artifacts\ui-evidence
+
+      - name: 📷 保留窗口测试证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pancake-ui-evidence
+          path: .\artifacts\ui-evidence
+          if-no-files-found: ignore
+
       - name: 📦 生成自带运行环境的程序
         shell: pwsh
         run: |
@@ -74,6 +89,7 @@ jobs:
             --self-contained true `
             -p:Platform=x64 `
             -p:WindowsAppSDKSelfContained=true `
+            -p:EnableUiVerification=false `
             -p:Version=${{ steps.version.outputs.version }} `
             -o .\artifacts\publish `
             --nologo

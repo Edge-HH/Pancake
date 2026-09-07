@@ -45,6 +45,7 @@ public sealed class SubjectTileControl : Grid
     private readonly TextBox _nameEditor;
     private readonly Thumb _headerMoveThumb;
     private readonly Border _frame;
+    private readonly BackgroundVisual _backgroundVisual = new();
     private readonly TextBlock _watermark;
     private InkToolSettings _inkSettings = new();
     private uint? _inkPointerId;
@@ -91,7 +92,10 @@ public sealed class SubjectTileControl : Grid
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        _frame.Child = content;
+        Grid layers = new();
+        layers.Children.Add(_backgroundVisual);
+        layers.Children.Add(content);
+        _frame.Child = layers;
 
         _watermark = new TextBlock
         {
@@ -198,6 +202,14 @@ public sealed class SubjectTileControl : Grid
     }
 
     public bool IsMoving { get; private set; }
+
+    public void ApplyAppearance(BoardSettingsState settings)
+    {
+        _nameEditor.FontSize = settings.TileTitleSize;
+        _nameEditor.MaxWidth = Math.Max(240, Width - 150);
+        _frame.Background = null;
+        _backgroundVisual.Apply(settings.TileBackground, BoardTheme.SurfaceBrush);
+    }
 
     public void ApplyModelLayout()
     {

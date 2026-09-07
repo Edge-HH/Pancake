@@ -46,7 +46,7 @@ if ($windowXaml -match 'x:Name="BoardScrollViewer"' -or $windowXaml -notmatch 'x
     $failures.Add('右侧磁贴板仍由 ScrollViewer 承载，画布仍可能被拖动或在大视口中居中留白。')
 }
 
-if ($windowCode -notmatch 'GridSize\s*=\s*(4[8-9]|[5-9][0-9])' -or $windowCode -notmatch 'IsGridSnappingEnabled') {
+if ($windowCode -notmatch 'GridSize\s*=>\s*Math.Clamp\(_settings.GridSize' -or $windowCode -notmatch 'IsGridSnappingEnabled') {
     $failures.Add('粗网格和可关闭的吸附状态尚未实现。')
 }
 

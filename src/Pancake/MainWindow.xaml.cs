@@ -20,7 +20,7 @@ namespace Pancake;
 
 public sealed partial class MainWindow : Window
 {
-    private const double GridSize = 48;
+    private double GridSize => Math.Clamp(_settings.GridSize, 16, 160);
     private static readonly Brush FullScreenHintBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 220, 38, 38));
     private static readonly Brush ToolbarButtonBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0));
     private readonly DispatcherTimer _clockTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -29,7 +29,7 @@ public sealed partial class MainWindow : Window
     private readonly NoiseMonitorService _noiseMonitor = new();
     private readonly XiaomiWeatherService _weatherService = new();
     private readonly WeatherCityCatalog _weatherCityCatalog = new();
-    private readonly GitHubUpdateService _updateService = new();
+    private readonly ReleaseUpdateService _updateService = new();
     private readonly AppDataStore _dataStore = new();
     private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(600) };
     private BoardSettingsState _settings = new();
@@ -61,6 +61,8 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         LoadPersistentState();
         InitializeProjectCommands();
+        InitializeExtendedSettings();
+        InitializeBoardNavigation();
 
         RootShell.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(RootShell_GlobalPointerPressed), true);
         RootShell.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(RootShell_GlobalPointerMoved), true);
@@ -206,6 +208,7 @@ public sealed partial class MainWindow : Window
     {
         if (_isEditing || CurrentProject is null) return;
         ViewModel.BeginEditing();
+        _widgetEditSnapshot = WidgetLayout.Copy(_settings.Widgets);
         _isEditing = true;
         UpdateEditButtonPosition();
         UpdateRichTextToolbar();
@@ -218,11 +221,13 @@ public sealed partial class MainWindow : Window
         DiscardEditButton.Visibility = Visibility.Visible;
         UpdateGridSnapHint();
         SetTilesEditing(true);
+        ApplyExtendedSettings();
     }
 
     private void FinishEditing()
     {
         ViewModel.PublishEditing();
+        _widgetEditSnapshot = null;
         _isEditing = false;
         UpdateEditButtonPosition();
         GlobalPenButton.IsChecked = false;
@@ -236,6 +241,7 @@ public sealed partial class MainWindow : Window
         GridSnapToggleButton.Visibility = Visibility.Collapsed;
         DiscardEditButton.Visibility = Visibility.Collapsed;
         SetTilesEditing(false);
+        ApplyExtendedSettings();
         ScheduleSave();
     }
 
@@ -243,6 +249,8 @@ public sealed partial class MainWindow : Window
     {
         if (await ShowConfirmAsync("放弃更改", "是否放弃本次更改？") != ContentDialogResult.Primary) return;
         ViewModel.DiscardEditing();
+        if (_widgetEditSnapshot is not null) _settings.Widgets = _widgetEditSnapshot;
+        _widgetEditSnapshot = null;
         _isEditing = false;
         UpdateEditButtonPosition();
         GlobalPenButton.IsChecked = false;
@@ -250,6 +258,7 @@ public sealed partial class MainWindow : Window
         _activeTileInteractions = 0;
         BuildTiles();
         EditBoardIcon.Glyph = FluentGlyphs.Edit;
+        ApplyExtendedSettings();
         GlobalPenButton.Visibility = Visibility.Collapsed;
         AddSubjectButton.Visibility = Visibility.Collapsed;
         AutoArrangeButton.Visibility = Visibility.Collapsed;
@@ -310,6 +319,7 @@ public sealed partial class MainWindow : Window
             }
         };
         tile.InkActivated += subject => { _activeInkSubject = subject; UpdateInkSubjectLabel(); };
+        tile.ApplyAppearance(_settings);
         tile.SetEditing(_isEditing);
         Canvas.SetLeft(tile, subject.X);
         Canvas.SetTop(tile, subject.Y);
@@ -353,13 +363,18 @@ public sealed partial class MainWindow : Window
     private async void AutoArrangeButton_Click(object sender, RoutedEventArgs e)
     {
         if (!_isEditing || ViewModel.Subjects.Count == 0) return;
-        double width = BoardViewport.ActualWidth > 1 ? BoardViewport.ActualWidth : 1100;
-        double height = BoardViewport.ActualHeight > 1 ? BoardViewport.ActualHeight : 780;
+        double width = BoardScroller.ActualWidth > 1 ? BoardScroller.ActualWidth : 1100;
+        double height = BoardScroller.ActualHeight > 1 ? BoardScroller.ActualHeight : 780;
         try
         {
+            if (_settings.InfiniteBoard)
+            {
+                width = Math.Max(width, ViewModel.Subjects.Max(s => s.TileWidth));
+                height = Math.Max(height, ViewModel.Subjects.Sum(s => s.TileHeight + GridSize));
+            }
             if (IsGridSnappingEnabled)
             {
-                var gridPlacements = BoardLayout.ArrangeGrid(ViewModel.Subjects.Select(s => (s.TileWidth, s.TileHeight)).ToList(), width, height);
+                var gridPlacements = BoardLayout.ArrangeGrid(ViewModel.Subjects.Select(s => (s.TileWidth, s.TileHeight)).ToList(), width, height, GridSize);
                 for (int index = 0; index < gridPlacements.Count; index++)
                 {
                     var subject = ViewModel.Subjects[index];
@@ -439,7 +454,7 @@ public sealed partial class MainWindow : Window
         ScheduleSave();
     }
 
-    private static double SnapToGrid(double value) => Math.Round(value / GridSize) * GridSize;
+    private double SnapToGrid(double value) => Math.Round(value / GridSize) * GridSize;
 
     private SubjectTileControl? FindTile(SubjectBoard subject) => BoardCanvas.Children
         .OfType<SubjectTileControl>()
@@ -468,9 +483,22 @@ public sealed partial class MainWindow : Window
 
     private void UpdateBoardBounds()
     {
+        if (_updatingBoardBounds) return;
+        _updatingBoardBounds = true;
+        try
+        {
         // XAML 在首次布局前会报告 0；使用设计基准尺寸可避免启动时把磁贴压缩到最小值。
-        double width = BoardViewport.ActualWidth > 1 ? BoardViewport.ActualWidth : 1100;
-        double height = BoardViewport.ActualHeight > 1 ? BoardViewport.ActualHeight : 780;
+        double width = BoardScroller.ActualWidth > 1 ? BoardScroller.ActualWidth : 1100;
+        double height = BoardScroller.ActualHeight > 1 ? BoardScroller.ActualHeight : 780;
+        if (_settings.InfiniteBoard)
+        {
+            width = Math.Max(width / BoardScroller.ZoomFactor, ViewModel.Subjects.Select(s => s.X + s.TileWidth + 600).DefaultIfEmpty(2000).Max());
+            height = Math.Max(height / BoardScroller.ZoomFactor, ViewModel.Subjects.Select(s => s.Y + s.TileHeight + 600).DefaultIfEmpty(1600).Max());
+            _infiniteWidth = Math.Max(_infiniteWidth, Math.Max(width, (BoardScroller.HorizontalOffset + BoardScroller.ActualWidth) / BoardScroller.ZoomFactor + 600));
+            _infiniteHeight = Math.Max(_infiniteHeight, Math.Max(height, (BoardScroller.VerticalOffset + BoardScroller.ActualHeight) / BoardScroller.ZoomFactor + 600));
+            width = _infiniteWidth; height = _infiniteHeight;
+        }
+        else { _infiniteWidth = _infiniteHeight = 0; }
         BoardSurface.Width = width;
         BoardSurface.Height = height;
         BoardCanvas.Width = width;
@@ -483,6 +511,8 @@ public sealed partial class MainWindow : Window
             _renderedGridWidth = width;
             _renderedGridHeight = height;
         }
+        }
+        finally { _updatingBoardBounds = false; }
     }
 
     private void BoardViewport_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -494,10 +524,15 @@ public sealed partial class MainWindow : Window
 
     private void ClampSubjectToViewport(SubjectBoard subject)
     {
-        double viewportWidth = BoardViewport.ActualWidth > 1 ? BoardViewport.ActualWidth : 1100;
-        double viewportHeight = BoardViewport.ActualHeight > 1 ? BoardViewport.ActualHeight : 780;
-        subject.TileWidth = Math.Clamp(subject.TileWidth, 280, viewportWidth);
-        subject.TileHeight = Math.Clamp(subject.TileHeight, SubjectTileControl.MinimumTileHeight, viewportHeight);
+        if (_settings.InfiniteBoard)
+        {
+            subject.X = Math.Max(0, subject.X); subject.Y = Math.Max(0, subject.Y);
+            UpdateBoardBounds(); return;
+        }
+        double viewportWidth = BoardScroller.ActualWidth > 1 ? BoardScroller.ActualWidth : 1100;
+        double viewportHeight = BoardScroller.ActualHeight > 1 ? BoardScroller.ActualHeight : 780;
+        subject.TileWidth = Math.Clamp(subject.TileWidth, Math.Min(280, viewportWidth), viewportWidth);
+        subject.TileHeight = Math.Clamp(subject.TileHeight, Math.Min(SubjectTileControl.MinimumTileHeight, viewportHeight), viewportHeight);
         subject.X = Math.Clamp(subject.X, 0, Math.Max(0, viewportWidth - subject.TileWidth));
         subject.Y = Math.Clamp(subject.Y, 0, Math.Max(0, viewportHeight - subject.TileHeight));
     }
@@ -505,20 +540,25 @@ public sealed partial class MainWindow : Window
     private void RenderGrid(double width, double height)
     {
         GridCanvas.Children.Clear();
-        for (double x = 0; x <= width; x += GridSize)
+        // 无限画板只绘制视口附近的网格线，平移很远也不会创建成千上万的 XAML 对象。
+        double left = _settings.InfiniteBoard ? Math.Max(0, Math.Floor(BoardScroller.HorizontalOffset / BoardScroller.ZoomFactor / GridSize) * GridSize) : 0;
+        double top = _settings.InfiniteBoard ? Math.Max(0, Math.Floor(BoardScroller.VerticalOffset / BoardScroller.ZoomFactor / GridSize) * GridSize) : 0;
+        double right = _settings.InfiniteBoard ? Math.Min(width, left + BoardScroller.ActualWidth / BoardScroller.ZoomFactor + GridSize * 2) : width;
+        double bottom = _settings.InfiniteBoard ? Math.Min(height, top + BoardScroller.ActualHeight / BoardScroller.ZoomFactor + GridSize * 2) : height;
+        for (double x = left; x <= right; x += GridSize)
         {
             GridCanvas.Children.Add(new Line
             {
-                X1 = x, X2 = x, Y1 = 0, Y2 = height,
+                X1 = x, X2 = x, Y1 = top, Y2 = bottom,
                 Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(105, 86, 86, 92)),
                 StrokeThickness = 1.6
             });
         }
-        for (double y = 0; y <= height; y += GridSize)
+        for (double y = top; y <= bottom; y += GridSize)
         {
             GridCanvas.Children.Add(new Line
             {
-                X1 = 0, X2 = width, Y1 = y, Y2 = y,
+                X1 = left, X2 = right, Y1 = y, Y2 = y,
                 Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(105, 86, 86, 92)),
                 StrokeThickness = 1.6
             });
@@ -542,7 +582,7 @@ public sealed partial class MainWindow : Window
     private void UpdateGridSnapHint()
     {
         ToolTipService.SetToolTip(GridSnapToggleButton, IsGridSnappingEnabled
-            ? "网格吸附已开启：位置和大小吸附到 48px 网格"
+            ? $"网格吸附已开启：位置和大小吸附到 {GridSize:0.#}px 网格"
             : "网格吸附已关闭：磁贴仍限制在可视区域内");
     }
 
@@ -552,12 +592,14 @@ public sealed partial class MainWindow : Window
     {
         if (AppearanceSettingsPanel is null || ComponentSettingsPanel is null || AboutSettingsPanel is null) return;
         string page = (args.SelectedItem as NavigationViewItem)?.Tag?.ToString() ?? "Appearance";
+        LayoutSettingsPanel.Visibility = page == "Layout" ? Visibility.Visible : Visibility.Collapsed;
         AppearanceSettingsPanel.Visibility = page == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
         ComponentSettingsPanel.Visibility = page == "Components" ? Visibility.Visible : Visibility.Collapsed;
         AboutSettingsPanel.Visibility = page == "About" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsPageTitle.Text = page switch { "Components" => "组件", "About" => "关于", _ => "外观" };
+        SettingsPageTitle.Text = page switch { "Layout" => "布局", "Components" => "组件", "About" => "关于", _ => "外观" };
         SettingsPageDescription.Text = page switch
         {
+            "Layout" => "调整布局模式、无限作业板与网格。",
             "Components" => "设置天气和麦克风噪音检测。",
             "About" => "查看版本信息并访问 Pancake 项目仓库。",
             _ => "调整界面主题和看板色系。"
@@ -598,6 +640,7 @@ public sealed partial class MainWindow : Window
     {
         BoardTheme.IsLight = RootShell.ActualTheme == ElementTheme.Light;
         if (!_isLoaded) return;
+        ApplyExtendedSettings();
         RefreshInkPalette();
         // 已有笔迹保留原始颜色；富文本在加载和保存时进行默认内容色转换。
         BuildTiles();
@@ -850,8 +893,10 @@ public sealed partial class MainWindow : Window
         _checkingForUpdates = true;
         try
         {
-            UpdateStatusText.Text = "正在检查 GitHub Release…";
-            GitHubReleaseUpdate? update = await _updateService.CheckAsync("Edge-HH/Pancake");
+            UpdateStatusText.Text = $"正在检查 {_settings.UpdateSource} Release…";
+            await RefreshUpdateSourceHintAsync();
+            var latest = await _updateService.GetLatestAsync(_settings.UpdateSource);
+            GitHubReleaseUpdate? update = latest is not null && ReleaseUpdateService.IsNewer(latest.Version, typeof(MainWindow).Assembly.GetName().Version!) ? latest.Update : null;
             if (update is null)
             {
                 UpdateStatusText.Text = "当前已是最新版，或最新 Release 没有可安装资产。";
@@ -859,7 +904,8 @@ public sealed partial class MainWindow : Window
             }
             UpdateStatusText.Text = $"发现 {update.Tag}，正在下载 {update.AssetName}…";
             string package = await _updateService.DownloadAsync(update, _dataStore.DataDirectory);
-            bool portable = System.IO.Path.GetExtension(package).Equals(".zip", StringComparison.OrdinalIgnoreCase);
+            bool portable = System.IO.Path.GetExtension(package).Equals(".zip", StringComparison.OrdinalIgnoreCase) || System.IO.Path.GetExtension(package).Equals(".7z", StringComparison.OrdinalIgnoreCase);
+            if (portable) package = await SplitUpdatePackage.NormalizeAsync(package);
             UpdateStatusText.Text = portable ? $"{update.Tag} 便携版已下载，可以自动更新。" : $"{update.Tag} 已下载，等待安装。";
             string prompt = portable
                 ? $"已下载 {update.Tag} 便携版。现在保存项目并重启更新吗？程序将自动解压、覆盖旧版本并重新启动，项目和设置会保留。"
@@ -1006,29 +1052,8 @@ public sealed partial class MainWindow : Window
 
     private void RootShell_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        bool compact = e.NewSize.Width < 900;
-        if (compact)
-        {
-            DisplayGrid.ColumnDefinitions[0].MinWidth = 0;
-            DisplayGrid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
-            DisplayGrid.ColumnDefinitions[1].Width = new GridLength(0);
-            DisplayGrid.RowDefinitions[0].Height = new GridLength(300);
-            DisplayGrid.RowDefinitions[1].Height = new GridLength(1, GridUnitType.Star);
-            Grid.SetColumn(ClockPanel, 0); Grid.SetRow(ClockPanel, 0); Grid.SetColumn(BoardWorkspace, 0); Grid.SetRow(BoardWorkspace, 1);
-            ClockPanel.BorderThickness = new Thickness(0, 0, 0, 1);
-            MainTimeText.FontSize = 72;
-        }
-        else
-        {
-            DisplayGrid.ColumnDefinitions[0].MinWidth = 400;
-            DisplayGrid.ColumnDefinitions[0].Width = new GridLength(2, GridUnitType.Star);
-            DisplayGrid.ColumnDefinitions[1].Width = new GridLength(3, GridUnitType.Star);
-            DisplayGrid.RowDefinitions[0].Height = new GridLength(1, GridUnitType.Star);
-            DisplayGrid.RowDefinitions[1].Height = new GridLength(0);
-            Grid.SetColumn(ClockPanel, 0); Grid.SetRow(ClockPanel, 0); Grid.SetColumn(BoardWorkspace, 1); Grid.SetRow(BoardWorkspace, 0);
-            ClockPanel.BorderThickness = new Thickness(0, 0, 1, 0);
-            MainTimeText.FontSize = 112;
-        }
+        ApplyDisplayLayout();
+        ApplyToolbarSettings();
     }
 
     private async Task<ContentDialogResult> ShowConfirmAsync(string title, string message)
