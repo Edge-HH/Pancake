@@ -59,9 +59,14 @@ try
         ProcessStartInfo start = new("powershell.exe") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true, RedirectStandardOutput = true };
         foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(AppContext.BaseDirectory, "ApplyUpdate.ps1"), "-Configuration", configuration, "-SkipRestart" }) start.ArgumentList.Add(argument);
         using var process = Process.Start(start)!;
-        if (!process.WaitForExit(20000)) { process.Kill(); throw new Exception("更新脚本超时"); }
+        // GitHub Windows runner 首次启动 Windows PowerShell 与杀毒扫描会明显慢于本机，
+        // 同时异步排空输出，避免重定向管道写满后进程和测试互相等待。
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(60000)) { process.Kill(true); throw new Exception("更新脚本在 60 秒内未结束"); }
+        Task.WaitAll(output, error);
         if (process.ExitCode != 0 && !File.Exists(Path.Combine(Path.GetDirectoryName(configuration)!, "update.log")))
-            throw new Exception("更新程序启动失败：" + process.StandardError.ReadToEnd());
+            throw new Exception("更新程序启动失败：" + error.Result);
         return process.ExitCode;
     }
     string valid = Package("valid", ("Assets/new.txt", "asset"));
