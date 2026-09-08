@@ -52,6 +52,13 @@ public partial class App : Application
                     ? "ink"
                     : "display";
 #if PANCAKE_UI_TESTS
+        if (commandLine.Contains("--verify-fullscreen-hint", StringComparison.OrdinalIgnoreCase))
+        {
+            _window = new MainWindow(false, "verification");
+            _window.ScheduleFullScreenHintVerification();
+            _window.Activate();
+            return;
+        }
         if (commandLine.Contains("--verify-ui", StringComparison.OrdinalIgnoreCase))
         {
             _window = new MainWindow(false, "verification");

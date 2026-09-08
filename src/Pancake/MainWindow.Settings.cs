@@ -33,23 +33,28 @@ public sealed partial class MainWindow
         RegisterSettingsPage("Layout", LayoutSettingsPanel, layout, "布局", "调整布局模式、无限作业板与网格。");
 
         StackPanel tile = SettingsStack();
+        tile.Children.Add(CreateAppearancePreview("Tile"));
         tile.Children.Add(Range("标题大小", 16, 72, _settings.TileTitleSize, value => _settings.TileTitleSize = value));
         tile.Children.Add(BackgroundEditor(_settings.TileBackground, () => true, () => true));
         StackPanel backgrounds = SettingsStack();
+        backgrounds.Children.Add(CreateAppearancePreview("Shared"));
         var shared = Toggle("使用跨区背景", _settings.SharedBackgroundEnabled, value => _settings.SharedBackgroundEnabled = value);
         backgrounds.Children.Add(shared);
         _refreshSettingAvailability.Add(() => shared.IsEnabled = _settings.LayoutMode == "Split");
         backgrounds.Children.Add(BackgroundEditor(_settings.SharedBackground, () => _settings.LayoutMode == "Split" && _settings.SharedBackgroundEnabled, () => false, false));
+        backgrounds.Children.Add(CreateAppearancePreview("Clock"));
         backgrounds.Children.Add(Heading("时钟区域背景"));
         backgrounds.Children.Add(BackgroundEditor(_settings.ClockBackground,
             () => _settings.LayoutMode is "Split" or "Clock" && !UseSharedBackground,
             () => _settings.LayoutMode is "Split" or "Clock"));
+        backgrounds.Children.Add(CreateAppearancePreview("Board"));
         backgrounds.Children.Add(Heading("作业板区域背景"));
         backgrounds.Children.Add(BackgroundEditor(_settings.BoardBackground,
             () => _settings.LayoutMode is "Split" or "Board" && !UseSharedBackground,
             () => _settings.LayoutMode is "Split" or "Board"));
         backgrounds.Children.Add(Note("跨区背景仅在分屏生效，开启后区域底图由跨区背景统一管理，毛玻璃仍可分别调整。自由布局使用磁贴样式和主题底色。"));
         StackPanel grid = SettingsStack();
+        grid.Children.Add(CreateAppearancePreview("Grid"));
         grid.Children.Add(Choice("样式", ["网格", "点阵", "不显示"], ["Grid", "Dots", "None"], _settings.GridStyle, value =>
         { _settings.GridStyle = value; _renderedGridAppearance = string.Empty; }));
         StackPanel gridLineSettings = SettingsStack();
@@ -77,6 +82,9 @@ public sealed partial class MainWindow
         RegisterSettingsPage("AppearanceGrid", AppearanceSettingsPanel, grid, "网格", "设置网格的显示样式，不改变吸附逻辑。");
         RegisterSettingsPage("AppearanceToolbar", AppearanceSettingsPanel, ToolbarSettings(), "控制窗", "调整控制窗的显示、位置和外观。");
         ComponentSettingsPanel.Children.Clear();
+        ((StackPanel)NoiseSettingsCard.Child).Children.Insert(2,
+            Toggle("最小化时暂停监测", _settings.PauseNoiseWhenMinimized, value =>
+            { _settings.PauseNoiseWhenMinimized = value; RefreshNoiseSuspension(); }));
         RegisterSettingsPage("ComponentsWeather", ComponentSettingsPanel, WeatherSettingsCard, "天气", "选择天气地区并查看预警。");
         RegisterSettingsPage("ComponentsNoise", ComponentSettingsPanel, NoiseSettingsCard, "噪音检测", "设置麦克风检测、报警与校准。");
         var versionContent = (StackPanel)VersionSettingsCard.Child;
@@ -107,9 +115,11 @@ public sealed partial class MainWindow
         repositories.Children.Add(gitee);
         var updateCard = AboutSettingsPanel.Children.Last();
         AboutSettingsPanel.Children.Clear();
-        RegisterSettingsPage("AboutRepositories", AboutSettingsPanel, repositories, "仓库", "访问 Pancake 的代码仓库。");
-        RegisterSettingsPage("AboutVersion", AboutSettingsPanel, VersionSettingsCard, "版本", "查看当前 Pancake 版本信息。");
-        RegisterSettingsPage("AboutUpdate", AboutSettingsPanel, updateCard, "更新", "检查更新并选择更新来源。");
+        StackPanel about = SettingsStack();
+        about.Children.Add(VersionSettingsCard);
+        about.Children.Add(repositories);
+        about.Children.Add(updateCard);
+        RegisterSettingsPage("About", AboutSettingsPanel, about, "关于", "查看版本、访问仓库与检查更新。");
         UpdateSourceComboBox.SelectedIndex = _settings.UpdateSource == "Gitee" ? 1 : 0;
         UpdateSourceComboBox.SelectionChanged += async (_, _) =>
         {
@@ -127,7 +137,7 @@ public sealed partial class MainWindow
             content.Children.Add(icon); content.Children.Add(label); button.Content = content;
             _toolbarLabels[button] = (icon, label);
         }
-        ShowSettingsPage((SettingsRoot.SelectedItem as NavigationViewItem)?.Tag?.ToString() ?? "AppearanceTile");
+        ShowSettingsPage("AppearanceTile");
         ApplyExtendedSettings();
     }
 
@@ -159,6 +169,7 @@ public sealed partial class MainWindow
     private void ShowSettingsPage(string tag)
     {
         if (!_settingsPages.TryGetValue(tag, out SettingsPage? selected)) return;
+        _selectedSettingsPage = tag;
         foreach (StackPanel container in _settingsPages.Values.Select(page => page.Container).Distinct())
             container.Visibility = Visibility.Collapsed;
         foreach (SettingsPage page in _settingsPages.Values)
@@ -169,6 +180,7 @@ public sealed partial class MainWindow
         SettingsPageTitle.Text = selected.Title;
         SettingsPageDescription.Text = selected.Description;
         SettingsContentScrollViewer.ChangeView(null, 0, null, true);
+        RefreshAppearancePreviews();
     }
 
     private void SettingChanged()
@@ -246,6 +258,23 @@ public sealed partial class MainWindow
     private StackPanel ToolbarSettings()
     {
         StackPanel panel = SettingsStack();
+        panel.Children.Add(CreateAppearancePreview("Toolbar"));
+        panel.Children.Add(Toggle("自动隐藏", _settings.ToolbarAutoHide, value => _settings.ToolbarAutoHide = value));
+        NumberBox hideTime = new() { Header = "自动隐藏时间（秒）", Minimum = 1, Maximum = 600,
+            Value = ToolbarAutoHidePolicy.NormalizeDelay(_settings.ToolbarAutoHideSeconds),
+            SmallChange = 1, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
+        hideTime.ValueChanged += (_, args) =>
+        {
+            if (!double.IsFinite(args.NewValue)) return;
+            _settings.ToolbarAutoHideSeconds = ToolbarAutoHidePolicy.NormalizeDelay(args.NewValue);
+            SettingChanged();
+        };
+        panel.Children.Add(hideTime);
+        var animation = Choice("隐藏动画", ["渐入渐出", "飞出"], ["Fade", "Fly"],
+            _settings.ToolbarHideAnimation, value => _settings.ToolbarHideAnimation = value);
+        panel.Children.Add(animation);
+        panel.Children.Add(Note("仅在查看模式下无操作时隐藏；移动鼠标、触摸或按键后重新显示。飞出动画朝最近的窗口边框移动。"));
+        _refreshSettingAvailability.Add(() => hideTime.IsEnabled = animation.IsEnabled = _settings.ToolbarAutoHide);
         panel.Children.Add(Toggle("无字模式", _settings.ToolbarIconOnly, value => _settings.ToolbarIconOnly = value));
         panel.Children.Add(Choice("位置", ["左下", "居中下", "右下", "上居中", "左上", "右上", "左居中（竖置）", "右居中（竖置）"],
             ["BottomLeft", "BottomCenter", "BottomRight", "TopCenter", "TopLeft", "TopRight", "CenterLeft", "CenterRight"],
@@ -281,6 +310,8 @@ public sealed partial class MainWindow
         BoardScroller.HorizontalScrollMode = BoardScroller.VerticalScrollMode = _settings.InfiniteBoard ? ScrollMode.Enabled : ScrollMode.Disabled;
         BoardScroller.HorizontalScrollBarVisibility = BoardScroller.VerticalScrollBarVisibility = _settings.InfiniteBoard ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
         UpdateBoardBounds(); ApplyToolbarSettings();
+        RecordToolbarActivity(false);
+        RefreshAppearancePreviews();
         if (!_settings.InfiniteBoard)
         {
             // ScrollViewer 在内容尺寸变化的同一轮布局会丢弃 ChangeView；新尺寸提交后再复位。
@@ -303,17 +334,26 @@ public sealed partial class MainWindow
         double scale = Math.Clamp(_settings.ToolbarScale, .6, 2);
         foreach (var (button, pair) in _toolbarLabels)
         {
-            pair.Label.Text = AutomationProperties.GetName(button);
-            pair.Label.Visibility = _settings.ToolbarIconOnly ? Visibility.Collapsed : Visibility.Visible;
+            bool showFullScreenHint = ReferenceEquals(button, FullScreenButton) && _showFullScreenExitHint;
+            pair.Label.Text = showFullScreenHint && vertical ? "退\n出\n全\n屏" : AutomationProperties.GetName(button);
+            pair.Label.Visibility = !_settings.ToolbarIconOnly || showFullScreenHint ? Visibility.Visible : Visibility.Collapsed;
             var content = (StackPanel)button.Content;
-            content.Orientation = vertical ? Orientation.Horizontal : Orientation.Vertical;
-            bool labelFirst = position.StartsWith("Top") || position == "CenterLeft";
+            // 全屏提示沿工具栏轴向扩展，避免竖置控制窗被横排的四字标签撑宽。
+            content.Orientation = showFullScreenHint
+                ? vertical ? Orientation.Vertical : Orientation.Horizontal
+                : vertical ? Orientation.Horizontal : Orientation.Vertical;
+            bool horizontalFullScreenHint = showFullScreenHint && !vertical;
+            if (pair.Icon is FrameworkElement iconElement)
+                iconElement.VerticalAlignment = horizontalFullScreenHint ? VerticalAlignment.Center : VerticalAlignment.Stretch;
+            pair.Label.VerticalAlignment = horizontalFullScreenHint ? VerticalAlignment.Center : VerticalAlignment.Stretch;
+            bool labelFirst = !showFullScreenHint && (position.StartsWith("Top") || position == "CenterLeft");
             content.Children.Clear();
             if (labelFirst) content.Children.Add(pair.Label);
             content.Children.Add(pair.Icon);
             if (!labelFirst) content.Children.Add(pair.Label);
-            button.Width = (_settings.ToolbarIconOnly ? 44 : 88) * scale;
-            button.Height = (_settings.ToolbarIconOnly ? 44 : 64) * scale;
+            button.Width = showFullScreenHint && !vertical ? double.NaN : (_settings.ToolbarIconOnly ? 44 : 88) * scale;
+            button.Height = showFullScreenHint && vertical ? double.NaN : (_settings.ToolbarIconOnly ? 44 : 64) * scale;
+            button.MinWidth = button.MinHeight = showFullScreenHint ? 44 * scale : 0;
             button.Padding = new Thickness(6 * scale);
             pair.Label.FontSize = 10 * scale;
             if (pair.Icon is FluentIcon glyph) glyph.FontSize = 18 * scale;
@@ -326,7 +366,12 @@ public sealed partial class MainWindow
             if (button.Content is FluentIcon glyph) glyph.FontSize = 20 * scale;
         }
         foreach (var swatch in _inkColors.Children.OfType<ColorSwatchButton>()) swatch.Width = swatch.Height = 32 * scale;
-        foreach (var slider in GlobalInkTools.Children.OfType<Slider>()) slider.Width = 110 * scale;
+        foreach (var slider in GlobalInkTools.Children.OfType<Slider>())
+        {
+            slider.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
+            slider.Width = (vertical ? 40 : 110) * scale;
+            slider.Height = (vertical ? 110 : 40) * scale;
+        }
         FloatingToolbar.CornerRadius = GlobalInkToolbar.CornerRadius = new CornerRadius(_settings.ToolbarRadius);
         FloatingToolbar.Padding = new Thickness(7 * scale);
         GlobalInkToolbar.Padding = new Thickness(12 * scale);

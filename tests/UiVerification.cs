@@ -18,6 +18,29 @@ namespace Pancake;
 
 public sealed partial class MainWindow
 {
+    internal void ScheduleFullScreenHintVerification()
+    {
+        RootShell.Loaded += async (_, _) =>
+        {
+            string output = Path.Combine(AppContext.BaseDirectory, "verification");
+            Directory.CreateDirectory(output);
+            List<string> evidence = [];
+            try
+            {
+                void Check(bool condition, string message) { if (!condition) throw new Exception(message); evidence.Add("PASS: " + message); }
+                await NextLayoutAsync();
+                await VerifyFullScreenHintAsync(output, Check);
+                evidence.Add("FULLSCREEN_HINT_VERIFICATION_OK");
+            }
+            catch (Exception ex) { evidence.Add("FULLSCREEN_HINT_VERIFICATION_FAILED\n" + ex); }
+            finally
+            {
+                File.WriteAllLines(Path.Combine(output, "fullscreen-result.txt"), evidence);
+                Close();
+            }
+        };
+    }
+
     internal void ScheduleUiVerification()
     {
         RootShell.Loaded += async (_, _) =>
@@ -54,6 +77,28 @@ public sealed partial class MainWindow
                     AppDomain.CurrentDomain.FirstChanceException -= backdropExceptionHandler;
                 }
                 Check(backdropExceptions.Count == 0, "Mica configuration does not throw while window focus changes");
+                ShowSettings();
+                await NextLayoutAsync();
+                var initiallySelectedSettingsItems = SettingsRoot.MenuItems.Concat(SettingsRoot.FooterMenuItems)
+                    .OfType<NavigationViewItem>()
+                    .SelectMany(item => item.MenuItems.OfType<NavigationViewItem>().DefaultIfEmpty(item))
+                    .Where(item => item.IsSelected)
+                    .ToList();
+                Check(ReferenceEquals(SettingsRoot.SelectedItem, AppearanceNavItem) &&
+                    initiallySelectedSettingsItems.Count == 1,
+                    "opening settings has exactly one selected navigation item with its indicator");
+                NavigationViewItem backgroundNavigationItem = AppearanceNavigationGroup.MenuItems
+                    .OfType<NavigationViewItem>()
+                    .Single(item => item.Tag?.ToString() == "AppearanceBackground");
+                SettingsRoot.SelectedItem = backgroundNavigationItem;
+                await NextLayoutAsync();
+                Check(backgroundNavigationItem.IsSelected && !AppearanceNavItem.IsSelected &&
+                    SettingsPageTitle.Text == "背景板",
+                    "changing settings page clears the previous selected background");
+                SettingsRoot.SelectedItem = AppearanceNavItem;
+                await NextLayoutAsync();
+                ShowBoard();
+                await NextLayoutAsync();
                 _settings.AutoUpdateEnabled = false;
                 _library = new ProjectLibrary { Settings = _settings };
                 ProjectDocument project = ProjectStore.Create(_library, false);
@@ -204,11 +249,12 @@ public sealed partial class MainWindow
                 Check(paletteEditor.Document.GetRange(0, 2).CharacterFormat.BackgroundColor.Equals(TextConstants.AutoColor), "clear highlighting retains automatic background color");
                 PaletteComboBox.SelectedIndex = 0;
                 ShowSettings(); AppearanceNavigationGroup.IsExpanded = false; AboutNavigationGroup.IsExpanded = true;
-                SettingsRoot.SelectedItem = AboutVersionNavItem; await NextLayoutAsync();
+                SettingsRoot.SelectedItem = AboutNavigationGroup; await NextLayoutAsync();
                 var settingsSplitView = FindVisuals<SplitView>(SettingsRoot).First(view => view.Name == "RootSplitView");
                 Check(settingsSplitView.CornerRadius == new CornerRadius(0), "settings navigation pane joins the content with square corners");
                 await SaveVisualAsync(RootShell, Path.Combine(output, "about.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
                 await VerifyExtendedSettingsAsync(output, Check);
+                await VerifyPresentationSettingsAsync(output, Check);
                 evidence.Add("UI_VERIFICATION_OK");
             }
             catch (Exception ex) { evidence.Add("UI_VERIFICATION_FAILED\n" + ex); }
@@ -225,6 +271,7 @@ public sealed partial class MainWindow
         FinishEditing();
         _appWindow!.Resize(new Windows.Graphics.SizeInt32(2400, 1500));
         await NextLayoutAsync();
+        await VerifyFullScreenHintAsync(output, check);
         foreach (string mode in new[] { "Split", "Board", "Clock", "Free", "Split" })
         {
             _settings.LayoutMode = mode; ApplyExtendedSettings(); ShowBoard(); EnterEditing(); await NextLayoutAsync();
@@ -238,7 +285,9 @@ public sealed partial class MainWindow
                 RegionPlacement components = _settings.Widgets[prefix + "Components"];
                 check(Math.Abs(clock.X + clock.Width / 2 - ClockPanel.ActualWidth / 2) < .01, mode + " clock stays on the center axis");
                 check(Math.Abs(components.X + components.Width / 2 - ClockPanel.ActualWidth / 2) < .01, mode + " component row stays on the center axis");
-                check(Math.Abs(clock.Width / clock.Height - DockedClockAspectRatio) < .01, mode + " clock keeps its scale ratio");
+                double clockContentAspect = ClockContentView.Child.DesiredSize.Width / ClockContentView.Child.DesiredSize.Height;
+                check(Math.Abs(clock.Width / clock.Height - clockContentAspect) < .01,
+                    mode + " clock bounds match the actual content ratio without one-sided blank space");
                 check(Math.Abs(components.Width / components.Height - DockedComponentsAspectRatio) < .01 && ClockComponents.Orientation == Orientation.Horizontal,
                     mode + " weather and noise scale together in one row");
                 int expectedLayers = mode == "Split" ? 3 : 2;
@@ -297,10 +346,15 @@ public sealed partial class MainWindow
         check(_inkSettings.Eraser && _inkPen.IsChecked == false, "eraser icon selects erasing exclusively");
         _inkPen.IsChecked = true;
         check(!_inkSettings.Eraser && _inkEraser.IsChecked == false, "pen icon returns to drawing exclusively");
+        Slider thicknessSlider = GlobalInkTools.Children.OfType<Slider>().Single();
         foreach (string position in new[] { "BottomLeft", "BottomCenter", "BottomRight", "TopCenter", "TopLeft", "TopRight", "CenterLeft", "CenterRight" })
         {
             _settings.ToolbarPosition = position; ApplyExtendedSettings(); await NextLayoutAsync();
-            check(ToolbarItems.Orientation == (position.StartsWith("Center") ? Orientation.Vertical : Orientation.Horizontal), position + " toolbar orientation");
+            bool verticalToolbar = position.StartsWith("Center");
+            check(ToolbarItems.Orientation == (verticalToolbar ? Orientation.Vertical : Orientation.Horizontal), position + " toolbar orientation");
+            check(thicknessSlider.Orientation == (verticalToolbar ? Orientation.Vertical : Orientation.Horizontal), position + " ink thickness orientation");
+            check(verticalToolbar ? thicknessSlider.ActualHeight > thicknessSlider.ActualWidth : thicknessSlider.ActualWidth > thicknessSlider.ActualHeight,
+                position + " ink thickness track follows the toolbar axis");
             check(_toolbarLabels[EditBoardButton].Label.Visibility == Visibility.Visible, position + " button names visible");
             var rect = FloatingToolbar.TransformToVisual(RootShell).TransformBounds(new Rect(0, 0, FloatingToolbar.ActualWidth, FloatingToolbar.ActualHeight));
             var penRect = GlobalInkToolbar.TransformToVisual(RootShell).TransformBounds(new Rect(0, 0, GlobalInkToolbar.ActualWidth, GlobalInkToolbar.ActualHeight));
@@ -308,7 +362,9 @@ public sealed partial class MainWindow
             check(rect.Right <= penRect.Left || rect.Left >= penRect.Right || rect.Bottom <= penRect.Top || rect.Top >= penRect.Bottom, position + " pen and main toolbar do not overlap");
             if (position == "CenterLeft") await SaveVisualAsync(RootShell, Path.Combine(output, "toolbar-vertical.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
         }
-        GlobalPenButton.IsChecked = false; _settings.ToolbarPosition = "BottomCenter"; _settings.ToolbarIconOnly = true; ApplyExtendedSettings();
+        GlobalPenButton.IsChecked = false;
+        _settings.ToolbarIconOnly = true;
+        _settings.ToolbarPosition = "BottomCenter"; ApplyExtendedSettings();
         FinishEditing(); ShowSettings();
         var settingsPages = SettingsRoot.MenuItems.Concat(SettingsRoot.FooterMenuItems)
             .OfType<NavigationViewItem>()
@@ -316,8 +372,11 @@ public sealed partial class MainWindow
             .Where(item => item.Tag is not null)
             .ToList();
         check(settingsPages.Count == _settingsPages.Count, "each settings content page has a navigation item");
-        check(SettingsRoot.MenuItems.OfType<NavigationViewItem>().Count(item => item.MenuItems.Count > 0) == 3,
+        check(SettingsRoot.MenuItems.OfType<NavigationViewItem>().Count(item => item.MenuItems.Count > 0) == 2,
             "settings subpages live in expandable navigation groups");
+        check(ReferenceEquals(SettingsRoot.SelectedItem, AboutNavigationGroup) &&
+            settingsPages.Count(item => item.IsSelected) == 1,
+            "reopening settings preserves exactly one selected navigation item");
         foreach (NavigationViewItem nav in settingsPages)
         {
             foreach (NavigationViewItem group in SettingsRoot.MenuItems.OfType<NavigationViewItem>().Where(item => item.MenuItems.Count > 0))
@@ -327,11 +386,14 @@ public sealed partial class MainWindow
             check(page.Container.Visibility == Visibility.Visible && page.Content.Visibility == Visibility.Visible, nav.Tag + " navigation page has content");
             check(SettingsPageTitle.Text == page.Title, nav.Tag + " navigation page updates the title");
             check(nav.IsSelected, nav.Tag + " navigation item shows the selected state");
+            check(settingsPages.Count(item => item.IsSelected) == 1,
+                nav.Tag + " navigation clears the previous selected background");
         }
-        SettingsRoot.SelectedItem = AppearanceNavItem;
         AppearanceNavigationGroup.IsExpanded = true;
         ComponentsNavigationGroup.IsExpanded = AboutNavigationGroup.IsExpanded = false;
+        SettingsRoot.SelectedItem = AppearanceNavItem;
         await NextLayoutAsync();
+        await Task.Delay(250);
         await SaveVisualAsync(RootShell, Path.Combine(output, "settings-v203.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
         // 小窗口和最大尺寸组合仍能通过滚动访问全部按钮。
         _appWindow.Resize(new Windows.Graphics.SizeInt32(1440, 900));
@@ -339,6 +401,110 @@ public sealed partial class MainWindow
         ShowBoard(); EnterEditing(); ApplyExtendedSettings(); await NextLayoutAsync();
         check(MainToolbarScroll.ScrollableWidth > 0, "oversized toolbar remains horizontally scrollable in a narrow window");
         _settings.ToolbarScale = 1; _settings.ToolbarIconOnly = true; ApplyExtendedSettings();
+    }
+
+    private async Task VerifyFullScreenHintAsync(string output, Action<bool, string> check)
+    {
+        ShowBoard(); FinishEditing();
+        _settings.ToolbarIconOnly = true;
+        _settings.ToolbarScale = 1;
+        SetFullScreen(true); await NextLayoutAsync();
+        foreach (string position in new[] { "CenterLeft", "BottomCenter" })
+        {
+            _settings.ToolbarPosition = position; ApplyExtendedSettings();
+            bool verticalToolbar = position.StartsWith("Center");
+            var (icon, exitLabel) = _toolbarLabels[FullScreenButton];
+            double iconFontSize = ((FluentIcon)icon).FontSize;
+            ShowFullScreenExitHint(); await NextLayoutAsync();
+            StackPanel content = (StackPanel)FullScreenButton.Content;
+            check(exitLabel.Visibility == Visibility.Visible && FindVisuals<TextBlock>(FullScreenButton).Count(label =>
+                    label.Visibility == Visibility.Visible && label.Text.Replace("\n", string.Empty) == "退出全屏") == 1,
+                position + " fullscreen hint has one visible label");
+            check(exitLabel.Text == (verticalToolbar ? "退\n出\n全\n屏" : "退出全屏"), position + " fullscreen hint text follows the toolbar axis");
+            check(content.Orientation == (verticalToolbar ? Orientation.Vertical : Orientation.Horizontal) &&
+                ReferenceEquals(content.Children[0], icon) && ReferenceEquals(content.Children[1], exitLabel),
+                position + " fullscreen hint extends after the unchanged icon");
+            check(Math.Abs(((FluentIcon)icon).FontSize - iconFontSize) < .01,
+                position + " fullscreen hint keeps the icon size");
+            Rect iconRect = icon.TransformToVisual(FullScreenButton).TransformBounds(new Rect(0, 0, icon.ActualSize.X, icon.ActualSize.Y));
+            Rect labelRect = exitLabel.TransformToVisual(FullScreenButton).TransformBounds(new Rect(0, 0, exitLabel.ActualWidth, exitLabel.ActualHeight));
+            check(labelRect.Left >= 0 && labelRect.Top >= 0 && labelRect.Right <= FullScreenButton.ActualWidth && labelRect.Bottom <= FullScreenButton.ActualHeight,
+                position + " fullscreen hint label fits inside its button");
+            check(verticalToolbar
+                    ? Math.Abs(FullScreenButton.ActualWidth - 44) < 1 && FullScreenButton.ActualHeight > 44 && labelRect.Top >= iconRect.Bottom
+                    : Math.Abs(FullScreenButton.ActualHeight - 44) < 1 && FullScreenButton.ActualWidth > 44 && labelRect.Left >= iconRect.Right,
+                position + " fullscreen hint grows only along the toolbar axis");
+            await SaveVisualAsync(RootShell, Path.Combine(output, $"fullscreen-hint-{position}.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+            HideFullScreenExitHint();
+        }
+        SetFullScreen(false); _settings.ToolbarPosition = "BottomCenter"; ApplyExtendedSettings();
+    }
+
+    private async Task VerifyPresentationSettingsAsync(string output, Action<bool, string> check)
+    {
+        FinishEditing(); SetFullScreen(false); ShowSettings();
+        SettingsRoot.SelectedItem = AboutNavigationGroup;
+        await NextLayoutAsync();
+        check(AboutNavigationGroup.MenuItems.Count == 0 && SettingsPageTitle.Text == "关于" &&
+            FindVisuals<Border>(_settingsPages["About"].Content).Contains(VersionSettingsCard) &&
+            FindVisuals<Border>(_settingsPages["About"].Content).Contains(UpdateSettingsCard) &&
+            FindVisuals<Grid>(_settingsPages["About"].Content).Contains(RepositorySettingsCard), "About combines version repositories and updates on one page");
+        foreach (string page in new[] { "AppearanceTile", "AppearanceBackground", "AppearanceGrid", "AppearanceToolbar" })
+        {
+            ShowSettingsPage(page); await NextLayoutAsync();
+            var previews = FindVisuals<Border>(_settingsPages[page].Content).Where(border => border.Name.EndsWith("AppearancePreview")).ToList();
+            check(previews.Count == (page == "AppearanceBackground" ? 3 : 1) && previews.All(preview => preview.ActualWidth > 0 && preview.ActualHeight > 0),
+                page + " has all requested live previews");
+            await SaveVisualAsync(RootShell, Path.Combine(output, page + "-preview.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+        }
+        ShowSettingsPage("AppearanceTile");
+        _settings.TileTitleSize = 47; ApplyExtendedSettings(); await NextLayoutAsync();
+        check(FindVisuals<TextBox>(_appearancePreviews["Tile"]).Any(text => Math.Abs(text.FontSize - 47) < .01), "tile preview applies title size immediately");
+        _settings.TileTitleSize = 29;
+        ShowSettingsPage("AppearanceBackground");
+        _settings.SharedBackgroundEnabled = false; _settings.LayoutMode = "Split";
+        _settings.ClockBackground.Color = "#123456"; ApplyExtendedSettings(); await NextLayoutAsync();
+        check(FindVisuals<BackgroundVisual>(_appearancePreviews["Clock"]).Any(background => background.Background is SolidColorBrush brush && brush.Color.R == 0x12),
+            "clock preview applies background color immediately");
+        check(FindVisuals<TextBlock>(_appearancePreviews["Clock"]).Any(text => text.Text == MainTimeText.Text), "clock preview uses the live time");
+        _settings.ClockBackground.Color = "";
+        ShowSettingsPage("AppearanceToolbar");
+        _settings.ToolbarPosition = "CenterLeft"; _settings.ToolbarRadius = 37; ApplyExtendedSettings(); await NextLayoutAsync();
+        var toolbarPreview = FindVisuals<Border>(_appearancePreviews["Toolbar"]).Single(border => border.Name == "ToolbarPreviewFrame");
+        check(toolbarPreview.HorizontalAlignment == HorizontalAlignment.Left && toolbarPreview.CornerRadius.TopLeft == 37,
+            "toolbar preview follows position and corner radius");
+        _settings.ToolbarRadius = 14; _settings.ToolbarPosition = "BottomCenter";
+        _settings.ToolbarAutoHide = true; _settings.ToolbarAutoHideSeconds = 1; _settings.ToolbarHideAnimation = "Fade";
+        ApplyExtendedSettings(); ShowBoard(); await NextLayoutAsync();
+        _lastToolbarActivity = Environment.TickCount64 - 2000;
+        await Task.Delay(650);
+        check(_toolbarHidden && FloatingToolbar.Opacity < .01 && !FloatingToolbar.IsHitTestVisible, "idle timer fades the toolbar and disables invisible hit targets");
+        RecordToolbarActivity(); await Task.Delay(400);
+        check(!_toolbarHidden && FloatingToolbar.Opacity > .99 && FloatingToolbar.IsHitTestVisible, "activity restores toolbar opacity and interaction");
+        _settings.ToolbarHideAnimation = "Fly"; ApplyExtendedSettings(); await NextLayoutAsync();
+        _lastToolbarActivity = Environment.TickCount64 - 2000; await Task.Delay(650);
+        check(_toolbarHidden && _toolbarTranslation.Y > 0 && FloatingToolbar.Opacity > .99 &&
+            FloatingToolbar.TransformToVisual(RootShell).TransformPoint(new Point()).Y >= RootShell.ActualHeight,
+            "fly animation moves the entire toolbar beyond the nearest bottom edge");
+        RecordToolbarActivity(); await Task.Delay(400);
+        check(!_toolbarHidden && Math.Abs(_toolbarTranslation.Y) < .01, "fly animation returns to the original toolbar position");
+        EnterEditing(); _lastToolbarActivity = Environment.TickCount64 - 2000; await Task.Delay(200);
+        check(!_toolbarHidden, "editing mode keeps the toolbar visible");
+        FinishEditing(); ShowSettings(); _lastToolbarActivity = Environment.TickCount64 - 2000; await Task.Delay(200);
+        check(!_toolbarHidden, "settings mode keeps the toolbar visible");
+        _settings.ToolbarAutoHide = false;
+        _settings.PauseNoiseWhenMinimized = true;
+        var presenter = (OverlappedPresenter)_appWindow!.Presenter;
+        presenter.Minimize(); await Task.Delay(400);
+        check(_noiseSuspended && NoiseText.Text == "监测已暂停", "minimizing the real window suspends noise monitoring");
+        UpdateNoiseDisplay(100); ProcessNoiseAlert(100);
+        check(NoiseText.Text == "监测已暂停", "queued samples cannot overwrite suspended noise state");
+        presenter.Restore(); await Task.Delay(400);
+        check(!_noiseSuspended, "restoring the window clears noise suspension");
+        _settings.PauseNoiseWhenMinimized = false;
+        presenter.Minimize(); await Task.Delay(300);
+        check(!_noiseSuspended, "minimizing with pause disabled leaves monitoring active");
+        presenter.Restore(); ApplyExtendedSettings(); await NextLayoutAsync();
     }
 
     private async Task NextLayoutAsync()

@@ -64,8 +64,11 @@ if ($theme -notmatch 'NavigationViewContentGridCornerRadius">0</CornerRadius>' -
 }
 if ($xaml -notmatch 'Content="外观"[^>]+SelectsOnInvoked="False"[\s\S]*?NavigationViewItem\.MenuItems' -or
     $xaml -notmatch 'Content="磁贴" Tag="AppearanceTile"' -or
+    $xaml -notmatch 'Content="磁贴" Tag="AppearanceTile"[^\r\n]*<icons:FluentIcon Symbol="Board"' -or
     $xaml -notmatch 'Content="背景板" Tag="AppearanceBackground"' -or
     $xaml -notmatch 'Content="天气" Tag="ComponentsWeather"' -or
+    $xaml -match 'x:Name="AppearanceNavItem"[^>]+IsSelected=' -or
+    $window -notmatch 'SettingsRoot\.SelectedItem\s*=\s*AppearanceNavItem' -or
     $settings -match 'SetTabs\(' -or
     $settings -match 'Orientation\s*=\s*Orientation\.Horizontal[\s\S]*?ToggleButton tab') {
     $failures.Add('设置子页面仍未移入左侧层级导航，或内容区仍保留横向分页按钮。')
@@ -74,11 +77,14 @@ if ($xaml -notmatch 'x:Name="ClockComponentsView"' -or
     $xaml -notmatch 'x:Name="ClockComponents" Orientation="Horizontal"' -or
     $layout -notmatch '_settings\.LayoutMode is "Split" or "Clock"' -or
     $layout -notmatch 'AddCenteredWidgetInteraction\(' -or
+    $layout -notmatch 'ClockContentView\.Child\?\.DesiredSize' -or
+    $xaml -notmatch 'SizeChanged="ClockContent_SizeChanged"' -or
     $widgetLayout -notmatch 'MoveVerticallyCentered' -or
     $widgetLayout -notmatch 'ResizeCentered') {
     $failures.Add('分屏和仅时钟模式缺少锁定中轴线的时钟与整排组件编辑。')
 }
 if ($xaml -notmatch 'Content="网格" Tag="AppearanceGrid"' -or
+    $xaml -notmatch 'Content="网格" Tag="AppearanceGrid"[^\r\n]*<icons:FluentIcon Symbol="Grid"' -or
     $settings -notmatch '编辑时显示常规网格' -or
     $window -notmatch 'GridAppearance\.EffectiveStyle' -or
     $window -notmatch 'style == "Dots"' -or

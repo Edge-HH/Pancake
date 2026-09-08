@@ -37,6 +37,9 @@ public sealed class BoardSettingsState
     public double ToolbarVerticalInset { get; set; } = 24;
     public bool ToolbarGlass { get; set; }
     public double ToolbarBlur { get; set; } = 20;
+    public bool ToolbarAutoHide { get; set; }
+    public double ToolbarAutoHideSeconds { get; set; } = 5;
+    public string ToolbarHideAnimation { get; set; } = "Fade";
     public string UpdateSource { get; set; } = "GitHub";
     public string Theme { get; set; } = "Dark";
     public string Palette { get; set; } = "Vivid";
@@ -44,6 +47,7 @@ public sealed class BoardSettingsState
     public string MicrophoneDeviceId { get; set; } = "";
     public double NoiseThresholdDb { get; set; } = 60;
     public bool NoiseAlertEnabled { get; set; }
+    public bool PauseNoiseWhenMinimized { get; set; }
     public double NoiseAlertVolume { get; set; } = 1;
     public double CalibrationTargetDb { get; set; } = 40;
     public bool ShowWeatherAlerts { get; set; } = true;

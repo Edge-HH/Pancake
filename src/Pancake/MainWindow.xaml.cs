@@ -41,6 +41,7 @@ public sealed partial class MainWindow : Window
     private bool _isLoaded;
     private bool _refreshingDevices;
     private bool _checkingForUpdates;
+    private bool _showFullScreenExitHint;
     private readonly NoiseAlertGate _noiseAlertGate = new();
     private readonly NoiseAlertPlayer _noiseAlertPlayer = new();
     private readonly System.Diagnostics.Stopwatch _noiseAlertClock = System.Diagnostics.Stopwatch.StartNew();
@@ -84,6 +85,7 @@ public sealed partial class MainWindow : Window
         SystemBackdrop = new PersistentMicaBackdrop();
         InitializeAppWindow();
         InitializeTimersAndServices();
+        InitializePresentationBehavior();
 
         RootShell.Loaded += (_, _) =>
         {
@@ -109,6 +111,8 @@ public sealed partial class MainWindow : Window
             _isLoaded = false;
             _clockTimer.Stop();
             _weatherTimer.Stop();
+            _presentationTimer.Stop();
+            _toolbarAnimation?.Stop();
             SaveStateNow();
             _noiseMonitor.Dispose();
             _noiseAlertPlayer.Dispose();
@@ -132,6 +136,7 @@ public sealed partial class MainWindow : Window
         _noiseMonitor.LevelAvailable += (_, level) => DispatcherQueue.TryEnqueue(() => UpdateNoiseDisplay(level));
         _noiseMonitor.CaptureFailed += (_, message) => DispatcherQueue.TryEnqueue(() =>
         {
+            if (!_isLoaded || _noiseSuspended || ShouldSuspendNoise) return;
             NoiseText.Text = "麦克风不可用";
             MicrophoneStatusInfoBar.Severity = InfoBarSeverity.Error;
             MicrophoneStatusInfoBar.Message = $"麦克风启动失败：{message}";
@@ -153,6 +158,7 @@ public sealed partial class MainWindow : Window
         MainTimeText.Text = now.ToString("HH:mm");
         SecondsText.Text = now.ToString("ss");
         ClockDateText.Text = dateText;
+
 
     }
 
@@ -176,6 +182,7 @@ public sealed partial class MainWindow : Window
 
     private void ShowBoard()
     {
+        RecordToolbarActivity(false);
         UpdateEditButtonPosition();
         DisplayRoot.Visibility = Visibility.Visible;
         SettingsRoot.Visibility = Visibility.Collapsed;
@@ -187,8 +194,15 @@ public sealed partial class MainWindow : Window
 
     private void ShowSettings()
     {
+        RecordToolbarActivity(false);
         DisplayRoot.Visibility = Visibility.Collapsed;
         SettingsRoot.Visibility = Visibility.Visible;
+        if (SettingsRoot.SelectedItem is null)
+        {
+            // 等导航模板加载并显示后再设置默认项，确保背景和选中指示条使用同一状态。
+            AppearanceNavigationGroup.IsExpanded = true;
+            SettingsRoot.SelectedItem = AppearanceNavItem;
+        }
         ProjectCommands.Visibility = Visibility.Collapsed;
         EmptyProjectPanel.Visibility = Visibility.Collapsed;
         BackToBoardButton.Visibility = Visibility.Visible;
@@ -555,6 +569,13 @@ public sealed partial class MainWindow : Window
         double top = _settings.InfiniteBoard ? Math.Max(0, Math.Floor(BoardScroller.VerticalOffset / BoardScroller.ZoomFactor / GridSize) * GridSize) : 0;
         double right = _settings.InfiniteBoard ? Math.Min(width, left + BoardScroller.ActualWidth / BoardScroller.ZoomFactor + GridSize * 2) : width;
         double bottom = _settings.InfiniteBoard ? Math.Min(height, top + BoardScroller.ActualHeight / BoardScroller.ZoomFactor + GridSize * 2) : height;
+        DrawGrid(GridCanvas, style, left, top, right, bottom);
+    }
+
+    private void DrawGrid(Canvas canvas, string style, double left, double top, double right, double bottom)
+    {
+        canvas.Children.Clear();
+        if (style == "None") return;
         if (style == "Dots")
         {
             double diameter = Math.Clamp(_settings.GridDotDiameter, 1, 12);
@@ -564,7 +585,7 @@ public sealed partial class MainWindow : Window
             {
                 Ellipse dot = new() { Width = diameter, Height = diameter, Fill = fill };
                 Canvas.SetLeft(dot, x - diameter / 2); Canvas.SetTop(dot, y - diameter / 2);
-                GridCanvas.Children.Add(dot);
+                canvas.Children.Add(dot);
             }
             return;
         }
@@ -572,7 +593,7 @@ public sealed partial class MainWindow : Window
         double thickness = Math.Clamp(_settings.GridLineThickness, .5, 5);
         for (double x = left; x <= right; x += GridSize)
         {
-            GridCanvas.Children.Add(new Line
+            canvas.Children.Add(new Line
             {
                 X1 = x, X2 = x, Y1 = top, Y2 = bottom,
                 Stroke = stroke,
@@ -581,7 +602,7 @@ public sealed partial class MainWindow : Window
         }
         for (double y = top; y <= bottom; y += GridSize)
         {
-            GridCanvas.Children.Add(new Line
+            canvas.Children.Add(new Line
             {
                 X1 = left, X2 = right, Y1 = y, Y2 = y,
                 Stroke = stroke,
@@ -688,6 +709,7 @@ public sealed partial class MainWindow : Window
 
     private void StartNoiseMonitoring()
     {
+        if (ShouldSuspendNoise) { RefreshNoiseSuspension(); return; }
         _noiseMonitor.IntervalSeconds = _settings.NoiseIntervalSeconds;
         _noiseMonitor.CalibrationOffsetDb = _settings.MicrophoneCalibrationDb;
         MicrophoneStatusInfoBar.Severity = InfoBarSeverity.Informational;
@@ -780,6 +802,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateNoiseDisplay(double level)
     {
+        if (!_isLoaded || _noiseSuspended || ShouldSuspendNoise) return;
         bool noisy = level >= _settings.NoiseThresholdDb;
         string state = noisy ? "吵闹" : level < Math.Min(45, _settings.NoiseThresholdDb) ? "安静" : "适中";
         NoiseText.Text = $"{level:0} dB · {state}";
@@ -795,7 +818,7 @@ public sealed partial class MainWindow : Window
 
     private void ProcessNoiseAlert(double level)
     {
-        if (!_isLoaded) return;
+        if (!_isLoaded || _noiseSuspended || ShouldSuspendNoise) return;
         if (_noiseAlertGate.ShouldPlay(level, _settings.NoiseThresholdDb, _settings.NoiseAlertEnabled, _noiseAlertClock.Elapsed.TotalSeconds))
             PlayNoiseAlert();
     }
@@ -1041,9 +1064,10 @@ public sealed partial class MainWindow : Window
     private void ShowFullScreenExitHint()
     {
         if (_isEditing || !_isFullScreen) return;
-        FullScreenLabel.Visibility = Visibility.Visible;
+        _showFullScreenExitHint = true;
         FullScreenButton.Background = FullScreenHintBrush;
         FullScreenButton.Foreground = BoardTheme.TextBrush;
+        ApplyToolbarSettings();
         _fullScreenLabelTimer.Stop();
         _fullScreenLabelTimer.Start();
     }
@@ -1051,9 +1075,10 @@ public sealed partial class MainWindow : Window
     private void HideFullScreenExitHint()
     {
         _fullScreenLabelTimer.Stop();
-        FullScreenLabel.Visibility = Visibility.Collapsed;
+        _showFullScreenExitHint = false;
         FullScreenButton.Background = ToolbarButtonBrush;
         FullScreenButton.Foreground = BoardTheme.TextBrush;
+        ApplyToolbarSettings();
     }
 
     private void SetFullScreen(bool isFullScreen)
@@ -1062,9 +1087,8 @@ public sealed partial class MainWindow : Window
         _appWindow.SetPresenter(isFullScreen ? AppWindowPresenterKind.FullScreen : AppWindowPresenterKind.Overlapped);
         _isFullScreen = isFullScreen;
         FullScreenIcon.Glyph = isFullScreen ? FluentGlyphs.ExitFullScreen : FluentGlyphs.FullScreen;
-        FullScreenLabel.Text = isFullScreen ? "退出全屏" : "进入全屏";
-        HideFullScreenExitHint();
         AutomationProperties.SetName(FullScreenButton, isFullScreen ? "退出全屏" : "进入全屏");
+        HideFullScreenExitHint();
     }
 
     private void RootShell_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -1078,6 +1102,8 @@ public sealed partial class MainWindow : Window
     {
         ApplyDisplayLayout();
         ApplyToolbarSettings();
+        RecordToolbarActivity(false);
+        RefreshAppearancePreviews();
     }
 
     private async Task<ContentDialogResult> ShowConfirmAsync(string title, string message)

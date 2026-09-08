@@ -105,3 +105,24 @@ var widgetSnapshot = WidgetLayout.Copy(defaults.Widgets);
 placement.X = 500;
 Check(widgetSnapshot["FutureComponent"].X == 0, "放弃组件编辑所用的快照必须独立于当前模型");
 Console.WriteLine("PASS: settings migration, widget movement/resizing, split endpoints, precision and persistence.");
+
+Check(!defaults.ToolbarAutoHide && !defaults.PauseNoiseWhenMinimized && defaults.ToolbarAutoHideSeconds == 5,
+    "旧配置保持控制窗常驻和最小化继续监测");
+var presentationSettings = JsonSerializer.Deserialize<BoardSettingsState>(JsonSerializer.Serialize(new BoardSettingsState
+{
+    ToolbarAutoHide = true, ToolbarAutoHideSeconds = 17, ToolbarHideAnimation = "Fly", PauseNoiseWhenMinimized = true
+}))!;
+Check(presentationSettings.ToolbarAutoHide && presentationSettings.ToolbarAutoHideSeconds == 17 &&
+    presentationSettings.ToolbarHideAnimation == "Fly" && presentationSettings.PauseNoiseWhenMinimized, "自动隐藏和最小化暂停设置往返持久化");
+Check(!ToolbarAutoHidePolicy.ShouldHide(true, true, false, 4.99, 5) &&
+    ToolbarAutoHidePolicy.ShouldHide(true, true, false, 5, 5), "空闲时间到达阈值才隐藏");
+Check(!ToolbarAutoHidePolicy.ShouldHide(false, true, false, 100, 5) &&
+    !ToolbarAutoHidePolicy.ShouldHide(true, false, false, 100, 5) &&
+    !ToolbarAutoHidePolicy.ShouldHide(true, true, true, 100, 5), "关闭开关、设置和编辑模式、持续操作都不得隐藏");
+Check(ToolbarAutoHidePolicy.NormalizeDelay(double.NaN) == 5 && ToolbarAutoHidePolicy.NormalizeDelay(-1) == 1 &&
+    ToolbarAutoHidePolicy.NormalizeDelay(9999) == 600, "非法等待时间使用可用的默认值或边界");
+Check(ToolbarAutoHidePolicy.ExitOffset(20, 300, 100, 100, 1000, 800) == (-121d, 0d), "最近左边框时完整飞出窗口");
+Check(ToolbarAutoHidePolicy.ExitOffset(880, 300, 100, 100, 1000, 800) == (121d, 0d), "最近右边框时完整飞出窗口");
+Check(ToolbarAutoHidePolicy.ExitOffset(450, 20, 100, 100, 1000, 800) == (0d, -121d), "最近上边框时完整飞出窗口");
+Check(ToolbarAutoHidePolicy.ExitOffset(450, 680, 100, 100, 1000, 800) == (0d, 121d), "最近下边框时完整飞出窗口");
+Console.WriteLine("PASS: presentation settings persistence, idle boundaries, interaction guards and nearest-edge animation geometry.");

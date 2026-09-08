@@ -9,7 +9,7 @@ namespace Pancake;
 
 public sealed partial class MainWindow
 {
-    private const double DockedClockAspectRatio = 2.4;
+    private const double DockedClockFallbackAspectRatio = 1.8;
     private const double DockedComponentsAspectRatio = 6.5;
     private readonly Dictionary<string, Viewbox> _freeWidgets = [];
     private Thumb? _splitter;
@@ -106,6 +106,25 @@ public sealed partial class MainWindow
         UpdateLayoutHandles();
     }
 
+    private void ClockContent_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (!_isLoaded || _layingOut || _settings.LayoutMode is not ("Split" or "Clock")) return;
+        ApplyDockedClockLayout();
+        UpdateLayoutHandles();
+    }
+
+    private double DockedClockAspectRatio
+    {
+        get
+        {
+            double contentWidth = ClockContentView.Child?.DesiredSize.Width ?? 0;
+            double contentHeight = ClockContentView.Child?.DesiredSize.Height ?? 0;
+            return contentWidth > 1 && contentHeight > 1
+                ? Math.Clamp(contentWidth / contentHeight, 1, 4)
+                : DockedClockFallbackAspectRatio;
+        }
+    }
+
     private void ApplyDockedClockLayout()
     {
         double width = ClockPanel.ActualWidth, height = ClockPanel.ActualHeight;
@@ -114,14 +133,20 @@ public sealed partial class MainWindow
         bool splitMode = _settings.LayoutMode == "Split";
         string prefix = splitMode ? "Split" : "ClockMode";
         string clockKey = prefix + "Clock", componentsKey = prefix + "Components";
+        double clockAspectRatio = DockedClockAspectRatio;
         if (!_settings.Widgets.TryGetValue(clockKey, out RegionPlacement? clock) || !_settings.CustomizedDockedWidgets.Contains(clockKey))
         {
             double clockWidth = Math.Min(splitMode ? 720 : 760, width * (splitMode ? .84 : .68));
-            double clockHeight = clockWidth / DockedClockAspectRatio;
+            double clockHeight = clockWidth / clockAspectRatio;
             double componentsHeight = Math.Min(splitMode ? 520 : 560, width * .72) / DockedComponentsAspectRatio;
             double groupHeight = clockHeight + componentsHeight + 18;
             double groupTop = Math.Max(0, (height - groupHeight) / 2 - (splitMode ? height * .08 : 0));
             _settings.Widgets[clockKey] = clock = new RegionPlacement { Y = groupTop, Width = clockWidth, Height = clockHeight };
+        }
+        else if (Math.Abs(clock.Width / Math.Max(1, clock.Height) - clockAspectRatio) > .01)
+        {
+            // 旧版本用固定宽高比保存了多余的右侧空白；保留视觉高度，只收紧宽度并重新回到中轴线。
+            clock.Width = clock.Height * clockAspectRatio;
         }
         if (!_settings.Widgets.TryGetValue(componentsKey, out RegionPlacement? components) || !_settings.CustomizedDockedWidgets.Contains(componentsKey))
         {
@@ -130,7 +155,7 @@ public sealed partial class MainWindow
             double componentsY = Math.Min(Math.Max(0, height - componentsHeight), clock.Y + clock.Height + 18);
             _settings.Widgets[componentsKey] = components = new RegionPlacement { Y = componentsY, Width = componentsWidth, Height = componentsHeight };
         }
-        WidgetLayout.ResizeCentered(clock, 0, 0, DockedClockAspectRatio, 220, width, height);
+        WidgetLayout.ResizeCentered(clock, 0, 0, clockAspectRatio, 220, width, height);
         WidgetLayout.ResizeCentered(components, 0, 0, DockedComponentsAspectRatio, 240, width, height);
         ApplyCenteredPlacement(ClockContentView, clock);
         ApplyCenteredPlacement(ClockComponentsView, components);

@@ -72,7 +72,7 @@
                         <icons:BackgroundVisual x:Name="ClockBackgroundVisual" />
                         <Canvas x:Name="ClockLayoutCanvas">
                             <Viewbox x:Name="ClockContentView" Stretch="Uniform">
-                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="18">
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="18" SizeChanged="ClockContent_SizeChanged">
                                     <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="7">
                                         <TextBlock x:Name="MainTimeText" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="112" FontWeight="Light" Foreground="{ThemeResource BoardTextBrush}" Text="11:20" />
                                         <TextBlock x:Name="SecondsText" Margin="0,17,0,0" VerticalAlignment="Top" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="28" Foreground="{ThemeResource BoardTextBrush}" Text="10" />
@@ -116,7 +116,7 @@
                 <NavigationViewItem x:Name="AppearanceNavigationGroup" Content="外观" IsExpanded="True" SelectsOnInvoked="False">
                     <NavigationViewItem.Icon><icons:FluentIcon Symbol="Color" /></NavigationViewItem.Icon>
                     <NavigationViewItem.MenuItems>
-                        <NavigationViewItem x:Name="AppearanceNavItem" Content="磁贴" Tag="AppearanceTile" IsSelected="True"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Grid" /></NavigationViewItem.Icon></NavigationViewItem>
+                        <NavigationViewItem x:Name="AppearanceNavItem" Content="磁贴" Tag="AppearanceTile"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Board" /></NavigationViewItem.Icon></NavigationViewItem>
                         <NavigationViewItem Content="背景板" Tag="AppearanceBackground"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Image" /></NavigationViewItem.Icon></NavigationViewItem>
                         <NavigationViewItem Content="主题" Tag="AppearanceTheme"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Color" /></NavigationViewItem.Icon></NavigationViewItem>
                         <NavigationViewItem Content="网格" Tag="AppearanceGrid"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Grid" /></NavigationViewItem.Icon></NavigationViewItem>
@@ -130,13 +130,8 @@
                         <NavigationViewItem Content="噪音检测" Tag="ComponentsNoise"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Microphone" /></NavigationViewItem.Icon></NavigationViewItem>
                     </NavigationViewItem.MenuItems>
                 </NavigationViewItem>
-                <NavigationViewItem x:Name="AboutNavigationGroup" Content="关于" SelectsOnInvoked="False">
+                <NavigationViewItem x:Name="AboutNavigationGroup" Content="关于" Tag="About">
                     <NavigationViewItem.Icon><icons:FluentIcon Symbol="Info" /></NavigationViewItem.Icon>
-                    <NavigationViewItem.MenuItems>
-                        <NavigationViewItem Content="仓库" Tag="AboutRepositories"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Folder" /></NavigationViewItem.Icon></NavigationViewItem>
-                        <NavigationViewItem x:Name="AboutVersionNavItem" Content="版本" Tag="AboutVersion"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Info" /></NavigationViewItem.Icon></NavigationViewItem>
-                        <NavigationViewItem Content="更新" Tag="AboutUpdate"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Reset" /></NavigationViewItem.Icon></NavigationViewItem>
-                    </NavigationViewItem.MenuItems>
                 </NavigationViewItem>
             </NavigationView.MenuItems>
             <ScrollViewer x:Name="SettingsContentScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
@@ -310,10 +305,7 @@
                     <icons:FluentIcon Symbol="Settings" />
                 </Button>
                 <Button x:Name="FullScreenButton" Click="FullScreenButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="进入全屏">
-                    <StackPanel Orientation="Horizontal" Spacing="7">
-                        <icons:FluentIcon x:Name="FullScreenIcon" Symbol="FullScreen" />
-                        <TextBlock x:Name="FullScreenLabel" Text="退出全屏" Visibility="Collapsed" />
-                    </StackPanel>
+                    <icons:FluentIcon x:Name="FullScreenIcon" Symbol="FullScreen" />
                 </Button>
                 <Button x:Name="DiscardEditButton" Click="DiscardEditButton_Click" Style="{StaticResource BoardIconButtonStyle}" Visibility="Collapsed" AutomationProperties.Name="放弃修改">
                     <icons:FluentIcon Symbol="Dismiss" />
