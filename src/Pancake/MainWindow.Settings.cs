@@ -34,8 +34,8 @@ public sealed partial class MainWindow
 
         StackPanel tile = SettingsStack();
         tile.Children.Add(CreateAppearancePreview("Tile"));
-        tile.Children.Add(Range("标题大小", 16, 72, _settings.TileTitleSize, value => _settings.TileTitleSize = value));
-        tile.Children.Add(BackgroundEditor(_settings.TileBackground, () => true, () => true));
+        tile.Children.Add(Range("标题大小", 16, 72, _settings.TileTitleSize, value => _settings.TileTitleSize = value, TileTitleSizeChanged));
+        tile.Children.Add(BackgroundEditor(_settings.TileBackground, () => true, () => true, surface: true));
         StackPanel backgrounds = SettingsStack();
         backgrounds.Children.Add(CreateAppearancePreview("Shared"));
         var shared = Toggle("使用跨区背景", _settings.SharedBackgroundEnabled, value => _settings.SharedBackgroundEnabled = value);
@@ -98,7 +98,13 @@ public sealed partial class MainWindow
         githubLink.Margin = new Thickness(0, 12, 0, 0);
         StackPanel repositories = SettingsStack();
         repositories.Children.Add(RepositorySettingsCard);
-        HyperlinkButton gitee = new() { NavigateUri = new Uri("https://gitee.com/EdgeHH/pancake/"), Padding = new Thickness(14, 8, 14, 8) };
+        HyperlinkButton gitee = new()
+        {
+            NavigateUri = new Uri("https://gitee.com/EdgeHH/pancake/"),
+            Background = (Brush)Application.Current.Resources["BoardSurfaceSecondaryBrush"],
+            CornerRadius = new CornerRadius(8),
+            Padding = new Thickness(14, 8, 14, 8)
+        };
         StackPanel link = new() { Orientation = Orientation.Horizontal, Spacing = 12 };
         link.Children.Add(new Viewbox { Width = 24, Height = 24, Child = new Microsoft.UI.Xaml.Shapes.Path
         {
@@ -143,6 +149,13 @@ public sealed partial class MainWindow
 
     private static StackPanel SettingsStack() => new() { Spacing = 18, Margin = new Thickness(0, 16, 0, 0) };
     private static TextBlock Heading(string text) => new() { Text = text, FontSize = 22 };
+
+    private static CornerRadius MatchToolbarButtonRadius(double toolbarRadius, double toolbarPadding, double width, double height)
+    {
+        // 按钮底色位于悬浮窗内侧，圆角需扣除内边距并受按钮短边限制，避免悬停色块被外框裁切。
+        double radius = Math.Clamp(toolbarRadius - toolbarPadding, 0, Math.Min(width, height) / 2);
+        return new CornerRadius(radius);
+    }
     private static TextBlock Note(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, Opacity = .75 };
 
     private Button ColorSetting(string label, string value, Action<string> update)
@@ -196,10 +209,19 @@ public sealed partial class MainWindow
         return toggle;
     }
 
-    private Slider Range(string label, double min, double max, double value, Action<double> update)
+    private void TileTitleSizeChanged()
+    {
+        // 连续拖动不走全窗口刷新，保留预览编辑器以及所有背景资源。
+        foreach (SubjectTileControl tile in BoardCanvas.Children.OfType<SubjectTileControl>())
+            tile.ApplyTitleSize(_settings.TileTitleSize);
+        _tileAppearancePreview?.ApplyTitleSize(_settings.TileTitleSize);
+        ScheduleSave();
+    }
+
+    private Slider Range(string label, double min, double max, double value, Action<double> update, Action? changed = null)
     {
         Slider slider = new() { Header = label, Minimum = min, Maximum = max, Value = Math.Clamp(double.IsFinite(value) ? value : min, min, max), StepFrequency = .01 };
-        slider.ValueChanged += (_, args) => { update(args.NewValue); SettingChanged(); };
+        slider.ValueChanged += (_, args) => { update(args.NewValue); (changed ?? SettingChanged)(); };
         return slider;
     }
 
@@ -212,39 +234,65 @@ public sealed partial class MainWindow
         return combo;
     }
 
-    private StackPanel BackgroundEditor(BackgroundSettings style, Func<bool> allowImage, Func<bool> allowGlass, bool includeGlass = true)
+    private StackPanel SurfaceColorEditor(string color, double opacity, Func<bool> cleared, Action<string, bool> updateColor, Action<double> updateOpacity)
+    {
+        StackPanel panel = SettingsStack();
+        ColorPicker picker = new() { IsAlphaEnabled = false, IsHexInputVisible = true,
+            Color = GridAppearance.ParseColor(color, BoardTheme.SurfaceBrush.Color) };
+        // 显式应用允许清除后重新选择同一种颜色，无需依赖 ColorChanged。
+        StackPanel flyoutContent = SettingsStack();
+        flyoutContent.Children.Add(picker);
+        Button apply = new() { Content = "应用颜色" };
+        Flyout flyout = new() { Content = flyoutContent };
+        void ApplyColor()
+        {
+            updateColor($"#{picker.Color.R:X2}{picker.Color.G:X2}{picker.Color.B:X2}", false);
+            SettingChanged();
+        }
+        picker.ColorChanged += (_, _) => ApplyColor();
+        apply.Click += (_, _) => { ApplyColor(); flyout.Hide(); };
+        flyoutContent.Children.Add(apply);
+        panel.Children.Add(new Button { Content = "背景颜色", Flyout = flyout });
+        Slider transparency = Range("背景颜色透明度（%）", 0, 100, (1 - opacity) * 100,
+            value => updateOpacity(1 - value / 100));
+        transparency.StepFrequency = 1;
+        panel.Children.Add(transparency);
+        Button clear = new() { Content = "清除背景颜色" };
+        clear.Click += (_, _) => { updateColor("", true); SettingChanged(); };
+        panel.Children.Add(clear);
+        Button reset = new() { Content = "恢复主题背景色" };
+        reset.Click += (_, _) => { updateColor("", false); SettingChanged(); };
+        panel.Children.Add(reset);
+        panel.Children.Add(Note("透明度只影响背景颜色：0% 不透明，100% 完全透明。清除颜色会保留已开启的毛玻璃效果和背景媒体。"));
+        _refreshSettingAvailability.Add(() => { transparency.IsEnabled = !cleared(); clear.IsEnabled = !cleared(); });
+        return panel;
+    }
+
+    private StackPanel BackgroundEditor(BackgroundSettings style, Func<bool> allowImage, Func<bool> allowGlass, bool includeGlass = true, bool surface = false)
     {
         StackPanel panel = SettingsStack(), imageControls = SettingsStack();
         ColorPicker color = new() { IsAlphaEnabled = false, IsHexInputVisible = true };
         try { color.Color = ViewModels.MainViewModel.BrushFromHex(string.IsNullOrEmpty(style.Color) ? "#202024" : style.Color).Color; } catch { }
         color.ColorChanged += (_, args) => { style.Color = $"#{args.NewColor.R:X2}{args.NewColor.G:X2}{args.NewColor.B:X2}"; SettingChanged(); };
-        imageControls.Children.Add(new Button { Content = "背景颜色", Flyout = new Flyout { Content = color } });
-        Button pick = new() { Content = "选择背景图片" };
-        pick.Click += async (_, _) =>
-        {
-            try
-            {
-                FileOpenPicker picker = new();
-                foreach (string ext in new[] { ".png", ".jpg", ".jpeg", ".bmp", ".webp" }) picker.FileTypeFilter.Add(ext);
-                WinRT.Interop.InitializeWithWindow.Initialize(picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
-                var file = await picker.PickSingleFileAsync();
-                if (file is null) return;
-                string directory = Path.Combine(_dataStore.DataDirectory, "backgrounds"); Directory.CreateDirectory(directory);
-                string owned = Path.Combine(directory, Guid.NewGuid().ToString("N") + file.FileType);
-                File.Copy(file.Path, owned); style.ImagePath = owned; SettingChanged();
-            }
-            catch (Exception ex) { await ShowMessageAsync("无法设置背景", ex.Message, "知道了"); }
-        };
-        imageControls.Children.Add(pick);
+        if (surface)
+            panel.Children.Add(SurfaceColorEditor(style.Color, style.ColorOpacity, () => style.ColorCleared,
+                (value, cleared) => { style.Color = value; style.ColorCleared = cleared; }, value => style.ColorOpacity = value));
+        else
+            imageControls.Children.Add(new Button { Content = "背景颜色", Flyout = new Flyout { Content = color } });
+        imageControls.Children.Add(new ContentControl { Content = CreateBackgroundMediaEditor(style), HorizontalContentAlignment = HorizontalAlignment.Stretch });
         imageControls.Children.Add(Choice("图片模式", ["缩放", "拉伸", "适应"], ["Zoom", "Stretch", "Fit"], style.ImageMode, value => style.ImageMode = value));
-        Button clear = new() { Content = "清除图片" };
-        clear.Click += (_, _) => { style.ImagePath = ""; SettingChanged(); };
+        Button clear = new() { Content = "清除背景媒体" };
+        clear.Click += (_, _) => { style.ImagePath = ""; style.Playlist.Clear(); SettingChanged(); };
         imageControls.Children.Add(clear);
         Button reset = new() { Content = "恢复主题背景色" };
         reset.Click += (_, _) => { style.Color = ""; SettingChanged(); };
-        imageControls.Children.Add(reset);
+        if (!surface) imageControls.Children.Add(reset);
         panel.Children.Add(imageControls);
-        _refreshSettingAvailability.Add(() => { foreach (Control control in imageControls.Children.OfType<Control>()) control.IsEnabled = allowImage(); });
+        _refreshSettingAvailability.Add(() =>
+        {
+            foreach (Control control in imageControls.Children.OfType<Control>()) control.IsEnabled = allowImage();
+            imageControls.Opacity = allowImage() ? 1 : .5;
+        });
         if (includeGlass)
         {
             var glass = Toggle("毛玻璃效果", style.Glass, value => style.Glass = value);
@@ -258,7 +306,12 @@ public sealed partial class MainWindow
     private StackPanel ToolbarSettings()
     {
         StackPanel panel = SettingsStack();
+        panel.Children.Add(CreateToolbarPositionPicker());
         panel.Children.Add(CreateAppearancePreview("Toolbar"));
+        panel.Children.Add(SurfaceColorEditor(_settings.ToolbarBackgroundColor, _settings.ToolbarBackgroundOpacity,
+            () => _settings.ToolbarBackgroundColorCleared,
+            (value, cleared) => { _settings.ToolbarBackgroundColor = value; _settings.ToolbarBackgroundColorCleared = cleared; },
+            value => _settings.ToolbarBackgroundOpacity = value));
         panel.Children.Add(Toggle("自动隐藏", _settings.ToolbarAutoHide, value => _settings.ToolbarAutoHide = value));
         NumberBox hideTime = new() { Header = "自动隐藏时间（秒）", Minimum = 1, Maximum = 600,
             Value = ToolbarAutoHidePolicy.NormalizeDelay(_settings.ToolbarAutoHideSeconds),
@@ -276,9 +329,6 @@ public sealed partial class MainWindow
         panel.Children.Add(Note("仅在查看模式下无操作时隐藏；移动鼠标、触摸或按键后重新显示。飞出动画朝最近的窗口边框移动。"));
         _refreshSettingAvailability.Add(() => hideTime.IsEnabled = animation.IsEnabled = _settings.ToolbarAutoHide);
         panel.Children.Add(Toggle("无字模式", _settings.ToolbarIconOnly, value => _settings.ToolbarIconOnly = value));
-        panel.Children.Add(Choice("位置", ["左下", "居中下", "右下", "上居中", "左上", "右上", "左居中（竖置）", "右居中（竖置）"],
-            ["BottomLeft", "BottomCenter", "BottomRight", "TopCenter", "TopLeft", "TopRight", "CenterLeft", "CenterRight"],
-            _settings.ToolbarPosition, value => _settings.ToolbarPosition = value));
         panel.Children.Add(Range("大小", .6, 2, _settings.ToolbarScale, value => _settings.ToolbarScale = value));
         panel.Children.Add(Range("圆角", 0, 60, _settings.ToolbarRadius, value => _settings.ToolbarRadius = value));
         var horizontal = Range("距左右边框", 0, 200, _settings.ToolbarHorizontalInset, value => _settings.ToolbarHorizontalInset = value);
@@ -294,6 +344,10 @@ public sealed partial class MainWindow
         });
         return panel;
     }
+
+    private Brush CreateToolbarBackground() => SurfaceBackground.Create(
+        _settings.ToolbarBackgroundColor, _settings.ToolbarBackgroundOpacity,
+        _settings.ToolbarBackgroundColorCleared, _settings.ToolbarGlass, _settings.ToolbarBlur);
 
     private bool UseSharedBackground => _settings.LayoutMode == "Split" && _settings.SharedBackgroundEnabled;
     private void ApplyExtendedSettings()
@@ -332,38 +386,52 @@ public sealed partial class MainWindow
         MainToolbarScroll.HorizontalScrollBarVisibility = InkToolbarScroll.HorizontalScrollBarVisibility = vertical ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
         MainToolbarScroll.VerticalScrollBarVisibility = InkToolbarScroll.VerticalScrollBarVisibility = vertical ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
         double scale = Math.Clamp(_settings.ToolbarScale, .6, 2);
+        double toolbarPadding = 7 * scale;
         foreach (var (button, pair) in _toolbarLabels)
         {
             bool showFullScreenHint = ReferenceEquals(button, FullScreenButton) && _showFullScreenExitHint;
-            pair.Label.Text = showFullScreenHint && vertical ? "退\n出\n全\n屏" : AutomationProperties.GetName(button);
+            // 已显示文字时，滑动提示只变更背景色，不再改变按钮的排版、字号或尺寸。
+            bool expandFullScreenHint = showFullScreenHint && _settings.ToolbarIconOnly;
+            pair.Label.Text = AutomationProperties.GetName(button);
             pair.Label.Visibility = !_settings.ToolbarIconOnly || showFullScreenHint ? Visibility.Visible : Visibility.Collapsed;
             var content = (StackPanel)button.Content;
-            // 全屏提示沿工具栏轴向扩展，避免竖置控制窗被横排的四字标签撑宽。
-            content.Orientation = showFullScreenHint
+            // 无字模式下临时提示沿工具栏轴向扩展；常规文字始终横排在图标下方。
+            content.Orientation = expandFullScreenHint
                 ? vertical ? Orientation.Vertical : Orientation.Horizontal
-                : vertical ? Orientation.Horizontal : Orientation.Vertical;
-            bool horizontalFullScreenHint = showFullScreenHint && !vertical;
+                : Orientation.Vertical;
+            content.Spacing = (vertical && !expandFullScreenHint ? 2 : 4) * scale;
+            bool horizontalFullScreenHint = expandFullScreenHint && !vertical;
             if (pair.Icon is FrameworkElement iconElement)
                 iconElement.VerticalAlignment = horizontalFullScreenHint ? VerticalAlignment.Center : VerticalAlignment.Stretch;
             pair.Label.VerticalAlignment = horizontalFullScreenHint ? VerticalAlignment.Center : VerticalAlignment.Stretch;
-            bool labelFirst = !showFullScreenHint && (position.StartsWith("Top") || position == "CenterLeft");
+            // 竖版统一把较小的标签放在图标下方，避免文字从侧面撑宽悬浮窗。
+            bool labelFirst = !expandFullScreenHint && !vertical && position.StartsWith("Top");
             content.Children.Clear();
             if (labelFirst) content.Children.Add(pair.Label);
             content.Children.Add(pair.Icon);
             if (!labelFirst) content.Children.Add(pair.Label);
-            button.Width = showFullScreenHint && !vertical ? double.NaN : (_settings.ToolbarIconOnly ? 44 : 88) * scale;
-            button.Height = showFullScreenHint && vertical ? double.NaN : (_settings.ToolbarIconOnly ? 44 : 64) * scale;
-            button.MinWidth = button.MinHeight = showFullScreenHint ? 44 * scale : 0;
+            button.Width = expandFullScreenHint && !vertical
+                ? double.NaN
+                : (_settings.ToolbarIconOnly ? 44 : vertical ? 64 : 88) * scale;
+            button.Height = expandFullScreenHint && vertical ? double.NaN : (_settings.ToolbarIconOnly ? 44 : 64) * scale;
+            button.MinWidth = button.MinHeight = expandFullScreenHint ? 44 * scale : 0;
             button.Padding = new Thickness(6 * scale);
-            pair.Label.FontSize = 10 * scale;
+            pair.Label.FontSize = (vertical ? 8 : 10) * scale;
             if (pair.Icon is FluentIcon glyph) glyph.FontSize = 18 * scale;
+            double buttonWidth = double.IsNaN(button.Width) ? 88 * scale : button.Width;
+            double buttonHeight = double.IsNaN(button.Height) ? 64 * scale : button.Height;
+            button.CornerRadius = MatchToolbarButtonRadius(_settings.ToolbarRadius, toolbarPadding, buttonWidth, buttonHeight);
         }
+        foreach (var button in ToolbarItems.Children.OfType<ButtonBase>().Where(button => !_toolbarLabels.ContainsKey(button)))
+            button.CornerRadius = MatchToolbarButtonRadius(_settings.ToolbarRadius, toolbarPadding, 44, 44);
         ToolbarItems.Spacing = 4 * scale;
         FullScreenIcon.FontSize = 18 * scale;
         foreach (var button in GlobalInkTools.Children.OfType<ButtonBase>())
         {
             button.Width = button.Height = 40 * scale;
             if (button.Content is FluentIcon glyph) glyph.FontSize = 20 * scale;
+            if (button.Content is Viewbox { Child: IconSourceElement } vectorIcon)
+                vectorIcon.Width = vectorIcon.Height = 20 * scale;
         }
         foreach (var swatch in _inkColors.Children.OfType<ColorSwatchButton>()) swatch.Width = swatch.Height = 32 * scale;
         foreach (var slider in GlobalInkTools.Children.OfType<Slider>())
@@ -373,15 +441,15 @@ public sealed partial class MainWindow
             slider.Height = (vertical ? 110 : 40) * scale;
         }
         FloatingToolbar.CornerRadius = GlobalInkToolbar.CornerRadius = new CornerRadius(_settings.ToolbarRadius);
-        FloatingToolbar.Padding = new Thickness(7 * scale);
+        FloatingToolbar.Padding = new Thickness(toolbarPadding);
         GlobalInkToolbar.Padding = new Thickness(12 * scale);
-        FloatingToolbar.Background = _settings.ToolbarGlass ? new BlurBackdropBrush(_settings.ToolbarBlur) : BoardTheme.SurfaceBrush;
-        GlobalInkToolbar.Background = _settings.ToolbarGlass ? new BlurBackdropBrush(_settings.ToolbarBlur) : BoardTheme.SurfaceBrush;
+        FloatingToolbar.Background = CreateToolbarBackground();
+        GlobalInkToolbar.Background = CreateToolbarBackground();
         FloatingToolbar.HorizontalAlignment = GlobalInkToolbar.HorizontalAlignment = position.EndsWith("Left") ? HorizontalAlignment.Left : position.EndsWith("Right") ? HorizontalAlignment.Right : HorizontalAlignment.Center;
         FloatingToolbar.VerticalAlignment = GlobalInkToolbar.VerticalAlignment = position.StartsWith("Top") ? VerticalAlignment.Top : vertical ? VerticalAlignment.Center : VerticalAlignment.Bottom;
         double x = _settings.ToolbarHorizontalInset, y = _settings.ToolbarVerticalInset;
         FloatingToolbar.Margin = new Thickness(x, y, x, y);
-        double offset = ((_settings.ToolbarIconOnly ? 44 : vertical ? 88 : 64) + 14) * scale + 12;
+        double offset = ((_settings.ToolbarIconOnly ? 44 : 64) + 14) * scale + 12;
         GlobalInkToolbar.Margin = vertical
             ? new Thickness(x + (position.EndsWith("Left") ? offset : 0), y, x + (position.EndsWith("Right") ? offset : 0), y)
             : new Thickness(x, y + (position.StartsWith("Top") ? offset : 0), x, y + (position.StartsWith("Bottom") ? offset : 0));

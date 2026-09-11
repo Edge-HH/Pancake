@@ -333,11 +333,11 @@ public sealed partial class MainWindow
         _settings.TileBackground.Glass = true; _settings.TileBackground.Blur = 15; _settings.TileTitleSize = 36;
         ApplyExtendedSettings(); await NextLayoutAsync();
         check(Math.Abs(BoardScroller.ZoomFactor - 1) < .01 && BoardScroller.HorizontalOffset == 0 && BoardScroller.VerticalOffset == 0, $"disabling infinite board restores scale and position ({BoardScroller.ZoomFactor}, {BoardScroller.HorizontalOffset}, {BoardScroller.VerticalOffset})");
-        check(UseSharedBackground && SharedBackgroundVisual.Children.OfType<Image>().Any(), "shared background image is a single cross-region layer");
-        Image sharedImage = SharedBackgroundVisual.Children.OfType<Image>().Single();
+        check(UseSharedBackground && FindVisuals<Image>(SharedBackgroundVisual).Any(), "shared background image is a single cross-region layer");
+        Image sharedImage = FindVisuals<Image>(SharedBackgroundVisual).Single();
         _settings.SplitRatio = .46; ApplyExtendedSettings(); await NextLayoutAsync();
-        check(ReferenceEquals(sharedImage, SharedBackgroundVisual.Children.OfType<Image>().Single()), "split changes reuse the loaded background image without a black reload frame");
-        check(ClockBackgroundVisual.Children.OfType<Border>().Any(b => b.Background is BlurBackdropBrush) && BoardBackgroundVisual.Children.OfType<Border>().Any(b => b.Background is BlurBackdropBrush), "regions retain independent real blur layers");
+        check(ReferenceEquals(sharedImage, FindVisuals<Image>(SharedBackgroundVisual).Single()), "split changes reuse the loaded background image without a black reload frame");
+        check(FindVisuals<Border>(ClockBackgroundVisual).Any(b => b.Background is BlurBackdropBrush) && FindVisuals<Border>(BoardBackgroundVisual).Any(b => b.Background is BlurBackdropBrush), "regions retain independent real blur layers");
         await SaveVisualAsync(RootShell, Path.Combine(output, "background-glass.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
         _settings.SharedBackgroundEnabled = false; _settings.ClockBackground.Glass = _settings.BoardBackground.Glass = _settings.TileBackground.Glass = false;
         _settings.ToolbarIconOnly = false;
@@ -347,6 +347,14 @@ public sealed partial class MainWindow
         _inkPen.IsChecked = true;
         check(!_inkSettings.Eraser && _inkEraser.IsChecked == false, "pen icon returns to drawing exclusively");
         Slider thicknessSlider = GlobalInkTools.Children.OfType<Slider>().Single();
+        foreach (ToggleButton button in new[] { _inkPen, _inkEraser })
+        {
+            bool usesInsetVector = button.Content is Viewbox { Child: IconSourceElement { IconSource: PathIconSource source } } viewbox &&
+                viewbox.Width >= 20 && viewbox.Height >= 20 &&
+                source.Data.Bounds.Left > 0 && source.Data.Bounds.Top > 0 &&
+                source.Data.Bounds.Right < 20 && source.Data.Bounds.Bottom < 20;
+            check(usesInsetVector, "ink tool vector stays inside its unclipped 20 DIP viewport");
+        }
         foreach (string position in new[] { "BottomLeft", "BottomCenter", "BottomRight", "TopCenter", "TopLeft", "TopRight", "CenterLeft", "CenterRight" })
         {
             _settings.ToolbarPosition = position; ApplyExtendedSettings(); await NextLayoutAsync();
@@ -356,6 +364,20 @@ public sealed partial class MainWindow
             check(verticalToolbar ? thicknessSlider.ActualHeight > thicknessSlider.ActualWidth : thicknessSlider.ActualWidth > thicknessSlider.ActualHeight,
                 position + " ink thickness track follows the toolbar axis");
             check(_toolbarLabels[EditBoardButton].Label.Visibility == Visibility.Visible, position + " button names visible");
+            if (verticalToolbar)
+            {
+                foreach (var labeledButton in new[] { BackToBoardButton, FullScreenButton, EditBoardButton })
+                {
+                    var pair = _toolbarLabels[labeledButton];
+                    StackPanel content = (StackPanel)labeledButton.Content;
+                    check(content.Orientation == Orientation.Vertical &&
+                        ReferenceEquals(content.Children[0], pair.Icon) &&
+                        ReferenceEquals(content.Children[1], pair.Label),
+                        position + " button name is directly below its icon");
+                    check(Math.Abs(labeledButton.Width - 64) < .01 && Math.Abs(pair.Label.FontSize - 8) < .01,
+                        position + " labeled button stays narrow with smaller text");
+                }
+            }
             var rect = FloatingToolbar.TransformToVisual(RootShell).TransformBounds(new Rect(0, 0, FloatingToolbar.ActualWidth, FloatingToolbar.ActualHeight));
             var penRect = GlobalInkToolbar.TransformToVisual(RootShell).TransformBounds(new Rect(0, 0, GlobalInkToolbar.ActualWidth, GlobalInkToolbar.ActualHeight));
             check(rect.Right <= RootShell.ActualWidth + 1 && rect.Bottom <= RootShell.ActualHeight + 1, position + " toolbar fits window");
@@ -408,6 +430,7 @@ public sealed partial class MainWindow
         ShowBoard(); FinishEditing();
         _settings.ToolbarIconOnly = true;
         _settings.ToolbarScale = 1;
+        _settings.ToolbarRadius = 60;
         SetFullScreen(true); await NextLayoutAsync();
         foreach (string position in new[] { "CenterLeft", "BottomCenter" })
         {
@@ -420,7 +443,7 @@ public sealed partial class MainWindow
             check(exitLabel.Visibility == Visibility.Visible && FindVisuals<TextBlock>(FullScreenButton).Count(label =>
                     label.Visibility == Visibility.Visible && label.Text.Replace("\n", string.Empty) == "退出全屏") == 1,
                 position + " fullscreen hint has one visible label");
-            check(exitLabel.Text == (verticalToolbar ? "退\n出\n全\n屏" : "退出全屏"), position + " fullscreen hint text follows the toolbar axis");
+            check(exitLabel.Text == "退出全屏", position + " fullscreen hint keeps text horizontal");
             check(content.Orientation == (verticalToolbar ? Orientation.Vertical : Orientation.Horizontal) &&
                 ReferenceEquals(content.Children[0], icon) && ReferenceEquals(content.Children[1], exitLabel),
                 position + " fullscreen hint extends after the unchanged icon");
@@ -434,10 +457,33 @@ public sealed partial class MainWindow
                     ? Math.Abs(FullScreenButton.ActualWidth - 44) < 1 && FullScreenButton.ActualHeight > 44 && labelRect.Top >= iconRect.Bottom
                     : Math.Abs(FullScreenButton.ActualHeight - 44) < 1 && FullScreenButton.ActualWidth > 44 && labelRect.Left >= iconRect.Right,
                 position + " fullscreen hint grows only along the toolbar axis");
+            double expectedRadius = Math.Min(60 - 7, Math.Min(FullScreenButton.ActualWidth, FullScreenButton.ActualHeight) / 2);
+            check(Math.Abs(FullScreenButton.CornerRadius.TopLeft - expectedRadius) < 1,
+                position + " fullscreen hint corner follows the maximum toolbar radius without clipping");
             await SaveVisualAsync(RootShell, Path.Combine(output, $"fullscreen-hint-{position}.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
             HideFullScreenExitHint();
         }
-        SetFullScreen(false); _settings.ToolbarPosition = "BottomCenter"; ApplyExtendedSettings();
+        _settings.ToolbarIconOnly = false;
+        foreach (string position in new[] { "CenterLeft", "BottomCenter" })
+        {
+            _settings.ToolbarPosition = position; ApplyExtendedSettings(); await NextLayoutAsync();
+            var (_, exitLabel) = _toolbarLabels[FullScreenButton];
+            StackPanel content = (StackPanel)FullScreenButton.Content;
+            double width = FullScreenButton.ActualWidth, height = FullScreenButton.ActualHeight, fontSize = exitLabel.FontSize;
+            Orientation orientation = content.Orientation;
+            ShowFullScreenExitHint(); await NextLayoutAsync();
+            check(exitLabel.Text == "退出全屏" && content.Orientation == orientation &&
+                    Math.Abs(exitLabel.FontSize - fontSize) < .01 && Math.Abs(FullScreenButton.ActualWidth - width) < 1 &&
+                    Math.Abs(FullScreenButton.ActualHeight - height) < 1,
+                position + " labeled fullscreen hint only changes color");
+            check(ReferenceEquals(FullScreenButton.Background, FullScreenHintBrush), position + " labeled fullscreen hint turns red");
+            double expectedRadius = Math.Min(60 - 7, Math.Min(width, height) / 2);
+            check(Math.Abs(FullScreenButton.CornerRadius.TopLeft - expectedRadius) < 1,
+                position + " labeled fullscreen hint corner follows the maximum toolbar radius without clipping");
+            await SaveVisualAsync(RootShell, Path.Combine(output, $"fullscreen-hint-labeled-{position}.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+            HideFullScreenExitHint();
+        }
+        SetFullScreen(false); _settings.ToolbarPosition = "BottomCenter"; _settings.ToolbarRadius = 14; ApplyExtendedSettings();
     }
 
     private async Task VerifyPresentationSettingsAsync(string output, Action<bool, string> check)
@@ -458,6 +504,36 @@ public sealed partial class MainWindow
             await SaveVisualAsync(RootShell, Path.Combine(output, page + "-preview.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
         }
         ShowSettingsPage("AppearanceTile");
+        await NextLayoutAsync();
+        var originalTile = FindVisuals<SubjectTileControl>(_appearancePreviews["Tile"]).Single();
+        var titleSlider = FindVisuals<Slider>(_settingsPages["AppearanceTile"].Content).Single(slider => Equals(slider.Header, "标题大小"));
+        var originalEditors = FindVisuals<RichEditBox>(_appearancePreviews["Tile"]).ToArray();
+        var originalBackground = SharedBackgroundVisual.Children.ToArray();
+        var titleTiming = System.Diagnostics.Stopwatch.StartNew();
+        for (int size = 16; size <= 72; size++) titleSlider.Value = size;
+        titleTiming.Stop();
+        await NextLayoutAsync();
+        check(ReferenceEquals(originalTile, FindVisuals<SubjectTileControl>(_appearancePreviews["Tile"]).Single()),
+            "title slider retains the preview tile and its rich text editors");
+        check(FindVisuals<TextBox>(_appearancePreviews["Tile"]).Any(text => text.Text == "这是标题~"), "tile appearance preview uses the fixed sample");
+        check(titleTiming.ElapsedMilliseconds < 1000, "57 title slider updates take less than one second: " + titleTiming.ElapsedMilliseconds + "ms");
+        check(originalEditors.SequenceEqual(FindVisuals<RichEditBox>(_appearancePreviews["Tile"])), "title slider preserves rich text editors");
+        check(originalBackground.SequenceEqual(SharedBackgroundVisual.Children), "title slider preserves window background resources");
+        check(originalEditors.Length == 2, "fixed preview contains exactly two entries");
+        originalEditors[0].Document.GetText(Microsoft.UI.Text.TextGetOptions.FormatRtf, out string sampleItalic);
+        originalEditors[1].Document.GetText(Microsoft.UI.Text.TextGetOptions.FormatRtf, out string sampleLink);
+        check(sampleItalic.Contains("\\i") && sampleItalic.Contains("Through adversity to the stars."), "sample preserves italic text");
+        var sampleColor = originalEditors[0].Document.GetRange(0, 1).CharacterFormat.ForegroundColor;
+        check(BoardTheme.IsLight ? sampleColor.R == 0 : sampleColor.R == 247, "sample text follows theme foreground color");
+        check(sampleLink.Contains("HYPERLINK") && sampleLink.Contains("https://en.wikipedia.org/wiki/Per_ardua_ad_astra"), "sample preserves hyperlink target");
+        var backdrop = FindVisuals<Image>(_appearancePreviews["Tile"]).First();
+        check(backdrop.Source is Microsoft.UI.Xaml.Media.Imaging.BitmapImage bitmap && bitmap.PixelWidth > 0, "tile preview background asset loads");
+        _settings.TileBackground.Glass = true;
+        _settings.TileBackground.Blur = 15;
+        _settings.TileBackground.Color = "";
+        _settings.TileTitleSize = 29;
+        ApplyExtendedSettings(); await NextLayoutAsync();
+        await SaveVisualAsync(_appearancePreviews["Tile"], Path.Combine(output, "tile-sample-glass.png"), 640, 300);
         _settings.TileTitleSize = 47; ApplyExtendedSettings(); await NextLayoutAsync();
         check(FindVisuals<TextBox>(_appearancePreviews["Tile"]).Any(text => Math.Abs(text.FontSize - 47) < .01), "tile preview applies title size immediately");
         _settings.TileTitleSize = 29;
@@ -469,6 +545,35 @@ public sealed partial class MainWindow
         check(FindVisuals<TextBlock>(_appearancePreviews["Clock"]).Any(text => text.Text == MainTimeText.Text), "clock preview uses the live time");
         _settings.ClockBackground.Color = "";
         ShowSettingsPage("AppearanceToolbar");
+        var positionButtons = FindVisuals<RadioButton>(_settingsPages["AppearanceToolbar"].Content)
+            .Where(button => button.GroupName == "ToolbarPosition").ToList();
+        check(positionButtons.Count == 8, "toolbar screen picker retains all eight positions");
+        foreach (RadioButton positionButton in positionButtons)
+        {
+            positionButton.IsChecked = true; await NextLayoutAsync();
+            check(_settings.ToolbarPosition == (string)positionButton.Tag && positionButtons.Count(button => button.IsChecked == true) == 1,
+                "toolbar screen picker selects " + positionButton.Tag);
+        }
+        // 极限尺寸下检查局部裁剪完整包含控制窗，而不是只检查控件属性。
+        double originalToolbarScale = _settings.ToolbarScale;
+        bool originalIconOnly = _settings.ToolbarIconOnly;
+        _settings.ToolbarScale = 2; _settings.ToolbarIconOnly = false;
+        foreach (string position in new[] { "TopLeft", "TopCenter", "TopRight", "CenterLeft", "CenterRight", "BottomLeft", "BottomCenter", "BottomRight" })
+        {
+            _settings.ToolbarPosition = position; ApplyExtendedSettings(); await NextLayoutAsync();
+            Grid scene = _appearancePreviews["Toolbar"];
+            Border preview = FindVisuals<Border>(scene).Single(border => border.Name == "ToolbarPreviewFrame");
+            Point origin = preview.TransformToVisual(scene).TransformPoint(new Point());
+            Point end = preview.TransformToVisual(scene).TransformPoint(new Point(preview.ActualWidth, preview.ActualHeight));
+            check(origin.X >= -.5 && origin.Y >= -.5 && end.X <= scene.Width + .5 && end.Y <= scene.Height + .5,
+                "zoomed toolbar fits preview at " + position);
+            scene.StartBringIntoView(); await NextLayoutAsync();
+            await SaveVisualAsync(scene, Path.Combine(output, "toolbar-crop-" + position + ".png"), 640, 300);
+        }
+        Border positionPicker = FindVisuals<Border>(_settingsPages["AppearanceToolbar"].Content).Single(border => border.Name == "ToolbarPositionPicker");
+        positionPicker.StartBringIntoView(); await NextLayoutAsync();
+        await SaveVisualAsync(positionPicker, Path.Combine(output, "toolbar-position-picker.png"), 640, 226);
+        _settings.ToolbarScale = originalToolbarScale; _settings.ToolbarIconOnly = originalIconOnly;
         _settings.ToolbarPosition = "CenterLeft"; _settings.ToolbarRadius = 37; ApplyExtendedSettings(); await NextLayoutAsync();
         var toolbarPreview = FindVisuals<Border>(_appearancePreviews["Toolbar"]).Single(border => border.Name == "ToolbarPreviewFrame");
         check(toolbarPreview.HorizontalAlignment == HorizontalAlignment.Left && toolbarPreview.CornerRadius.TopLeft == 37,

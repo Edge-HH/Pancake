@@ -29,6 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="Assets\Settings\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\Fonts\**\*" Exclude="Assets\Fonts\*.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="ApplyUpdate.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Tools\7zip\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
@@ -39,5 +40,7 @@
   </PropertyGroup>
   <ItemGroup Condition="'$(EnableUiVerification)' == 'true'">
     <Compile Include="../../tests/UiVerification.cs" Link="UiVerification.cs" />
+    <Compile Include="../../tests/MediaUiVerification.cs" Link="MediaUiVerification.cs" />
+    <Compile Include="../../tests/MediaPerformanceVerification.cs" Link="MediaPerformanceVerification.cs" />
   </ItemGroup>
 </Project>

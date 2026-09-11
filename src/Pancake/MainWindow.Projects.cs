@@ -19,12 +19,26 @@ public sealed partial class MainWindow
     private SubjectBoard? _activeInkSubject;
     private readonly InkToolSettings _inkSettings = new();
     private readonly StackPanel _inkColors = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
-    private readonly ToggleButton _inkPen = new() { Content = new FluentIcon { Symbol = "Pen" }, IsChecked = true };
-    private readonly ToggleButton _inkEraser = new() { Content = new FluentIcon { Symbol = "Eraser" } };
+    private readonly ToggleButton _inkPen = new() { IsChecked = true };
+    private readonly ToggleButton _inkEraser = new();
     private ProjectDocument? CurrentProject => _library.Projects.FirstOrDefault(p => p.Id == _library.ActiveProjectId);
+
+    private static Viewbox CreateInkToolbarIcon(string resourceKey)
+    {
+        PathIconSource source = (PathIconSource)Application.Current.Resources[resourceKey];
+        return new Viewbox
+        {
+            Width = 20,
+            Height = 20,
+            Stretch = Stretch.Uniform,
+            Child = new IconSourceElement { IconSource = source }
+        };
+    }
 
     private void InitializeProjectCommands()
     {
+        _inkPen.Content = CreateInkToolbarIcon("InkPenPathSource");
+        _inkEraser.Content = CreateInkToolbarIcon("InkEraserPathSource");
         void SelectTool(bool eraser) { _inkSettings.Eraser = eraser; _inkPen.IsChecked = !eraser; _inkEraser.IsChecked = eraser; }
         _inkPen.Checked += (_, _) => SelectTool(false);
         _inkEraser.Checked += (_, _) => SelectTool(true);

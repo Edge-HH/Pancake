@@ -52,6 +52,20 @@ public partial class App : Application
                     ? "ink"
                     : "display";
 #if PANCAKE_UI_TESTS
+        if (commandLine.Contains("--verify-media-performance", StringComparison.OrdinalIgnoreCase))
+        {
+            _window = new MainWindow(false, "verification");
+            _window.ScheduleMediaPerformanceVerification();
+            _window.Activate();
+            return;
+        }
+        if (commandLine.Contains("--verify-background-media", StringComparison.OrdinalIgnoreCase))
+        {
+            _window = new MainWindow(false, "verification");
+            _window.ScheduleBackgroundMediaVerification();
+            _window.Activate();
+            return;
+        }
         if (commandLine.Contains("--verify-fullscreen-hint", StringComparison.OrdinalIgnoreCase))
         {
             _window = new MainWindow(false, "verification");

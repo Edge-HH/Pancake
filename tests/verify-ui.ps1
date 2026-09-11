@@ -1,7 +1,9 @@
 param(
     [Parameter(Mandatory = $true)][string]$PublishDirectory,
     [Parameter(Mandatory = $true)][string]$EvidenceDirectory,
-    [switch]$FullScreenHintOnly
+    [switch]$FullScreenHintOnly,
+    [switch]$BackgroundMediaOnly,
+    [switch]$MediaPerformanceOnly
 )
 $ErrorActionPreference = 'Stop'
 $source = (Resolve-Path -LiteralPath $PublishDirectory).Path
@@ -10,11 +12,17 @@ $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('Pancake-ui-test-' + [guid]::N
 $null = New-Item -ItemType Directory -Path $testRoot
 try {
     Get-ChildItem -LiteralPath $source | Where-Object { $_.Name -notin @('data', 'verification', 'startup-ok.txt') } | Copy-Item -Destination $testRoot -Recurse
-    $verificationArgument = if ($FullScreenHintOnly) { '--verify-fullscreen-hint' } else { '--verify-ui' }
+    if ($BackgroundMediaOnly -or $MediaPerformanceOnly) {
+        # 生成可重复的视频样本，不依赖网络或用户的媒体库。
+        $duration = if ($MediaPerformanceOnly) { 8 } else { 2 }
+        & ffmpeg -hide_banner -loglevel error -f lavfi -i 'testsrc=size=1280x720:rate=60' -t $duration -c:v libx264 -pix_fmt yuv420p -y (Join-Path $testRoot 'media-test.mp4')
+        if ($LASTEXITCODE -ne 0) { throw '测试视频生成失败，需要可用的 ffmpeg。' }
+    }
+    $verificationArgument = if ($MediaPerformanceOnly) { '--verify-media-performance' } elseif ($BackgroundMediaOnly) { '--verify-background-media' } elseif ($FullScreenHintOnly) { '--verify-fullscreen-hint' } else { '--verify-ui' }
     $process = Start-Process -FilePath (Join-Path $testRoot 'Pancake.exe') -ArgumentList $verificationArgument -WorkingDirectory $testRoot -WindowStyle Hidden -PassThru
     if (-not $process.WaitForExit(60000)) { throw '隔离 UI 验证在 60 秒内未结束。' }
-    $resultName = if ($FullScreenHintOnly) { 'fullscreen-result.txt' } else { 'result.txt' }
-    $successMarker = if ($FullScreenHintOnly) { 'FULLSCREEN_HINT_VERIFICATION_OK' } else { 'UI_VERIFICATION_OK' }
+    $resultName = if ($MediaPerformanceOnly) { 'performance-result.txt' } elseif ($BackgroundMediaOnly) { 'media-result.txt' } elseif ($FullScreenHintOnly) { 'fullscreen-result.txt' } else { 'result.txt' }
+    $successMarker = if ($MediaPerformanceOnly) { 'MEDIA_PERFORMANCE_VERIFICATION_OK' } elseif ($BackgroundMediaOnly) { 'BACKGROUND_MEDIA_VERIFICATION_OK' } elseif ($FullScreenHintOnly) { 'FULLSCREEN_HINT_VERIFICATION_OK' } else { 'UI_VERIFICATION_OK' }
     $result = Join-Path $testRoot "verification/$resultName"
     $null = New-Item -ItemType Directory -Path $evidence -Force
     if (Test-Path -LiteralPath (Join-Path $testRoot 'verification')) {

@@ -37,6 +37,9 @@ public sealed class BoardSettingsState
     public double ToolbarVerticalInset { get; set; } = 24;
     public bool ToolbarGlass { get; set; }
     public double ToolbarBlur { get; set; } = 20;
+    public string ToolbarBackgroundColor { get; set; } = "";
+    public double ToolbarBackgroundOpacity { get; set; } = 0.8;
+    public bool ToolbarBackgroundColorCleared { get; set; }
     public bool ToolbarAutoHide { get; set; }
     public double ToolbarAutoHideSeconds { get; set; } = 5;
     public string ToolbarHideAnimation { get; set; } = "Fade";
@@ -87,8 +90,17 @@ public sealed class HomeworkState
 public sealed class BackgroundSettings
 {
     public string Color { get; set; } = "";
+    // 磁贴的颜色层独立于媒体和模糊；空颜色仍表示主题色，显式清除单独保存。
+    public double ColorOpacity { get; set; } = 0.8;
+    public bool ColorCleared { get; set; }
     public string ImagePath { get; set; } = "";
     public string ImageMode { get; set; } = "Zoom";
+    public bool PlaylistEnabled { get; set; }
+    public List<string> Playlist { get; set; } = [];
+    public bool Shuffle { get; set; }
+    public bool SwitchOnTimer { get; set; } = true;
+    public double SwitchIntervalSeconds { get; set; } = 60;
+    public bool SwitchOnMediaEnded { get; set; } = true;
     public bool Glass { get; set; }
     public double Blur { get; set; } = 20;
 }

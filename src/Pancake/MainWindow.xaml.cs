@@ -194,6 +194,8 @@ public sealed partial class MainWindow : Window
 
     private void ShowSettings()
     {
+        _previewScenes.Remove("Shared");
+        _previewScenes.Remove("Board");
         RecordToolbarActivity(false);
         DisplayRoot.Visibility = Visibility.Collapsed;
         SettingsRoot.Visibility = Visibility.Visible;
@@ -303,6 +305,8 @@ public sealed partial class MainWindow : Window
 
     private void BuildTiles()
     {
+        _previewScenes.Remove("Shared");
+        _previewScenes.Remove("Board");
         AlignmentCanvas.Children.Clear();
         UpdateRichTextToolbar();
         BoardCanvas.Children.Clear();
@@ -482,19 +486,21 @@ public sealed partial class MainWindow : Window
 
     private async Task AddAttachmentAsync(HomeworkEntry homework)
     {
-        FileOpenPicker picker = new();
-        foreach (string extension in new[] { ".png", ".jpg", ".jpeg", ".bmp", ".webp", ".gif" })
-        {
-            picker.FileTypeFilter.Add(extension);
-        }
-        nint windowHandle = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, windowHandle);
-        StorageFile? file = await picker.PickSingleFileAsync();
-        if (file is null || CurrentProject is null) return;
         string owned;
-        try { owned = _projectStore.CopyAttachment(CurrentProject.Id, file.Path); }
+        string name;
+        var project = CurrentProject;
+        if (project is null) return;
+        try
+        {
+            string? selected = await SelectAttachmentImageAsync();
+            if (selected is null || CurrentProject != project) return;
+            string recent = await MediaLibraryStore.ImportAsync(selected);
+            if (CurrentProject != project) return;
+            owned = _projectStore.CopyAttachment(project.Id, recent);
+            name = MediaLibrary.DisplayName(selected);
+        }
         catch (Exception ex) { await ShowMessageAsync("添加图片失败", ex.Message, "知道了"); return; }
-        homework.Attachments.Add(new AttachmentItem { Name = file.Name, Kind = "图片", Path = owned });
+        homework.Attachments.Add(new AttachmentItem { Name = name, Kind = "图片", Path = owned });
         homework.NotifyAttachmentsChanged();
         BuildTiles();
         SetTilesEditing(_isEditing);

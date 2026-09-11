@@ -1,5 +1,22 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Pancake.Services;
+
+// 旧配置补全可见颜色层；显式清除和独立透明度必须跨保存保持，不得关闭模糊。
+var legacySurface = JsonSerializer.Deserialize<BoardSettingsState>("{\"ToolbarGlass\":true,\"TileBackground\":{\"Glass\":true}}")!;
+Check(legacySurface.ToolbarBackgroundOpacity == 0.8 && legacySurface.TileBackground.ColorOpacity == 0.8,
+    "旧设置应补全控制窗和磁贴颜色层的默认透明度");
+legacySurface.ToolbarBackgroundColorCleared = true;
+legacySurface.ToolbarBackgroundOpacity = 0.25;
+legacySurface.TileBackground.ColorCleared = true;
+legacySurface.TileBackground.ColorOpacity = 0.65;
+var restoredSurface = JsonSerializer.Deserialize<BoardSettingsState>(JsonSerializer.Serialize(legacySurface))!;
+Check(restoredSurface.ToolbarBackgroundColorCleared && restoredSurface.TileBackground.ColorCleared
+    && restoredSurface.ToolbarGlass && restoredSurface.TileBackground.Glass,
+    "清除颜色后重新加载仍应保留清除状态和毛玻璃开关");
+Check(restoredSurface.ToolbarBackgroundOpacity == 0.25 && restoredSurface.TileBackground.ColorOpacity == 0.65,
+    "控制窗和磁贴透明度必须分别保存");
+Console.WriteLine("PASS: surface color defaults, independent opacity, and clearing preserves glass across serialization.");
+if (args.Contains("--surface-only")) return;
 
 static void Check(bool condition, string message)
 {
@@ -126,3 +143,64 @@ Check(ToolbarAutoHidePolicy.ExitOffset(880, 300, 100, 100, 1000, 800) == (121d, 
 Check(ToolbarAutoHidePolicy.ExitOffset(450, 20, 100, 100, 1000, 800) == (0d, -121d), "最近上边框时完整飞出窗口");
 Check(ToolbarAutoHidePolicy.ExitOffset(450, 680, 100, 100, 1000, 800) == (0d, 121d), "最近下边框时完整飞出窗口");
 Console.WriteLine("PASS: presentation settings persistence, idle boundaries, interaction guards and nearest-edge animation geometry.");
+
+string mediaRoot = Path.Combine(Path.GetTempPath(), "pancake-media-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(mediaRoot);
+try
+{
+    string a = Path.Combine(mediaRoot, "a.png"), b = Path.Combine(mediaRoot, "b.jpg"), video = Path.Combine(mediaRoot, "clip.mp4");
+    File.WriteAllText(a, "image a"); File.WriteAllText(b, "image b"); File.WriteAllText(video, "video");
+    MediaLibrary library = new(Path.Combine(mediaRoot, "data"));
+    string ownedA = await library.ImportAsync(a);
+    string ownedB = await library.ImportAsync(b);
+    Check(library.RecentImages().SequenceEqual(new[] { ownedB, ownedA }), "最近图片按选择顺序排列");
+    Check(await library.ImportAsync(ownedA) == ownedA && library.RecentImages()[0] == ownedA, "重复选择复用文件并移到首位");
+    string ownedVideo = await library.ImportAsync(video);
+    Check(library.RecentImages().Count == 2 && !library.RecentImages().Contains(ownedVideo), "视频不混入最近图片缩略图");
+    File.Delete(a);
+    Check(File.Exists(ownedA), "原图片删除不影响历史副本");
+    Check(new MediaLibrary(Path.Combine(mediaRoot, "data")).RecentImages()[0] == ownedA, "历史跨服务实例持久化");
+    Check(MediaLibrary.DisplayName(ownedA) == "a.png", "资源内部标识不会显示成媒体名称");
+    BackgroundSettings playlistSettings = new() { PlaylistEnabled = true, Playlist = [ownedA, b, video, b, Path.Combine(mediaRoot, "missing.png")],
+        Shuffle = false, SwitchOnTimer = true, SwitchIntervalSeconds = 12, SwitchOnMediaEnded = false };
+    BackgroundPlaylist playback = new();
+    Check(playback.Configure(playlistSettings) && playback.Current == ownedA, "播放列表去重并忽略缺失文件");
+    Check(playback.Advance(false) && playback.Current == b && playback.Advance(false) && playback.Current == video && playback.Advance(false) && playback.Current == ownedA, "顺序播放到末尾后回到首项");
+    playback.Advance(false);
+    playlistSettings.Color = "#112233";
+    Check(!playback.Configure(playlistSettings) && playback.Current == b, "外观变化不重置播放进度");
+    playlistSettings.Playlist = [video, b, ownedA];
+    playback.Configure(playlistSettings);
+    Check(playback.Current == b && playback.Advance(false) && playback.Current == ownedA, "排序保留当前媒体且下一项遵循新顺序");
+    for (int i = 0; i < 40; i++)
+    {
+        string previous = playback.Current;
+        Check(playback.Advance(true) && playback.Current != previous, "随机播放不连续重复同一项");
+    }
+    playback.Configure(new() { PlaylistEnabled = true, Playlist = [ownedA, b, video] });
+    Check(playback.Advance(false, true) && playback.Current == b && playback.Advance(false, true) && playback.Current == video && !playback.Advance(false, true), "全部失败后停止换曲避免死循环");
+    BackgroundSettings roundTrip = JsonSerializer.Deserialize<BackgroundSettings>(JsonSerializer.Serialize(playlistSettings))!;
+    Check(roundTrip.Playlist.SequenceEqual(playlistSettings.Playlist) && roundTrip.SwitchOnTimer && !roundTrip.SwitchOnMediaEnded && roundTrip.SwitchIntervalSeconds == 12, "队列顺序与切换开关往返保存");
+    playback.Configure(new() { ImagePath = b });
+    Check(playback.Current == b && !playback.Advance(true), "旧版单图设置兼容且单项不会随机越界");
+    Check(BackgroundPlaylist.NormalizeInterval(double.NaN) == 60 && BackgroundPlaylist.NormalizeInterval(-1) == 1 && BackgroundPlaylist.NormalizeInterval(double.MaxValue) == 86400, "异常间隔归一化");
+    for (int i = 0; i < 10; i++)
+    {
+        string image = Path.Combine(mediaRoot, $"recent-{i}.png"); File.WriteAllText(image, i.ToString());
+        await library.ImportAsync(image);
+    }
+    Check(library.RecentImages().Count == 8 && MediaLibrary.DisplayName(library.RecentImages()[0]) == "recent-9.png", "历史最多保留八张最新图片");
+    File.Delete(library.RecentImages()[0]);
+    Check(library.RecentImages().Count == 7, "删除的历史文件不显示无效入口");
+    string projectFile = Path.Combine(mediaRoot, "project.json");
+    File.WriteAllText(projectFile, JsonSerializer.Serialize(new { type = "video", file = "clip.mp4", title = "测试壁纸" }));
+    Check(WallpaperEngineLibrary.ReadProject(mediaRoot)?.Path == video, "识别 Wallpaper Engine 视频项目");
+    File.WriteAllText(projectFile, JsonSerializer.Serialize(new { type = "scene", file = "clip.mp4" }));
+    Check(WallpaperEngineLibrary.ReadProject(mediaRoot) is null, "场景壁纸不当成视频导入");
+    File.WriteAllText(projectFile, JsonSerializer.Serialize(new { type = "video", file = "../outside.mp4" }));
+    Check(WallpaperEngineLibrary.ReadProject(mediaRoot) is null, "拒绝项目目录逃逸");
+    File.WriteAllText(projectFile, "{broken");
+    Check(WallpaperEngineLibrary.ReadProject(mediaRoot) is null, "损坏项目不阻断扫描");
+    Console.WriteLine("PASS: recent image ownership/history, mixed playlists, shuffle, persistence and Wallpaper Engine import boundaries.");
+}
+finally { Directory.Delete(mediaRoot, true); }

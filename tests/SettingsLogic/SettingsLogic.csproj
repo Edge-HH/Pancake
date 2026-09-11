@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/Pancake/Services/BackgroundPlaylist.cs" Link="BackgroundPlaylist.cs" />
+    <Compile Include="../../src/Pancake/Services/MediaLibrary.cs" Link="MediaLibrary.cs" />
+    <Compile Include="../../src/Pancake/Services/WallpaperEngineLibrary.cs" Link="WallpaperEngineLibrary.cs" />
     <Compile Include="../../src/Pancake/Services/ColorPalette.cs" Link="ColorPalette.cs" />
     <Compile Include="../../src/Pancake/Services/XiaomiWeatherService.cs" Link="XiaomiWeatherService.cs" />
     <Compile Include="../../src/Pancake/Services/DefaultContentColors.cs" Link="DefaultContentColors.cs" />

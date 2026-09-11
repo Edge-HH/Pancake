@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml.Media;
 namespace Pancake.Controls;
 
 /// <summary>对后方实际内容进行高斯模糊，保留前景文字清晰度。</summary>
-public sealed class BlurBackdropBrush(double amount) : XamlCompositionBrushBase
+public sealed class BlurBackdropBrush(double amount, Windows.UI.Color? tint = null) : XamlCompositionBrushBase
 {
     private CompositionBackdropBrush? _backdrop;
     protected override void OnConnected()
@@ -19,7 +19,16 @@ public sealed class BlurBackdropBrush(double amount) : XamlCompositionBrushBase
             BorderMode = EffectBorderMode.Hard,
             Source = new CompositionEffectSourceParameter("backdrop")
         };
-        using var factory = compositor.CreateEffectFactory(effect);
+        // 颜色覆盖在模糊结果上；清除颜色时仍保留完整的模糊源。
+        using var tintEffect = new ColorSourceEffect { Color = tint ?? Microsoft.UI.Colors.Transparent };
+        using var composite = new CompositeEffect
+        {
+            Mode = Microsoft.Graphics.Canvas.CanvasComposite.SourceOver,
+            Sources = { effect, tintEffect }
+        };
+        using var factory = tint.HasValue
+            ? compositor.CreateEffectFactory(composite)
+            : compositor.CreateEffectFactory(effect);
         var brush = factory.CreateBrush();
         _backdrop = compositor.CreateBackdropBrush();
         brush.SetSourceParameter("backdrop", _backdrop);

@@ -2,6 +2,8 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $windowCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.xaml.cs'))
+$mediaCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.Media.cs'))
+$mediaLibraryCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\MediaLibrary.cs'))
 $windowXaml = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.xaml'))
 $tileCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\SubjectTileControl.cs'))
 $attachmentImageCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\AttachmentImageControl.cs'))
@@ -73,8 +75,9 @@ if ($tileCode -notmatch 'CreateThemeButton' -or $tileCode -notmatch 'AccentHex')
     $failures.Add('磁贴主题色切换尚未接入。')
 }
 
-if ($windowCode -match 'FileTypeFilter\.Add\("\*"\)' -or
-    $windowCode -notmatch '"\.png"' -or
+if (($windowCode + $mediaCode) -match 'FileTypeFilter\.Add\("\*"\)' -or
+    $mediaCode -notmatch 'MediaPicker\(false\)' -or
+    $mediaLibraryCode -notmatch 'ImageExtensions.*"\.png"' -or
     $tileCode -notmatch 'AttachmentImageControl') {
     $failures.Add('图片选择器仍允许非图片文件，或图片没有直接显示在磁贴中。')
 }

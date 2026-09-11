@@ -205,11 +205,14 @@ public sealed class SubjectTileControl : Grid
 
     public void ApplyAppearance(BoardSettingsState settings)
     {
-        _nameEditor.FontSize = settings.TileTitleSize;
+        ApplyTitleSize(settings.TileTitleSize);
         _nameEditor.MaxWidth = Math.Max(240, Width - 150);
         _frame.Background = null;
-        _backgroundVisual.Apply(settings.TileBackground, BoardTheme.SurfaceBrush);
+        _backgroundVisual.Apply(settings.TileBackground, BoardTheme.SurfaceBrush, surface: true);
     }
+
+    // 字号拖动只触发布局，不重建背景媒体和毛玻璃合成资源。
+    public void ApplyTitleSize(double size) => _nameEditor.FontSize = size;
 
     public void ApplyModelLayout()
     {
