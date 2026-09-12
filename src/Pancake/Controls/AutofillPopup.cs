@@ -28,9 +28,15 @@ public sealed class AutofillPopup
 {
     /// <summary>空标题时展示的推荐学科条数，浮层内部可滚动。</summary>
     public const int RecommendationLimit = 12;
+    /// <summary>浮层一次最多显示几行候选，多出来的在浮层内滚动。</summary>
+    public const int VisibleRowLimit = 5;
+    /// <summary>浮层宽度范围：既要能一行放下常见学科名，也不能在窄窗口里溢出。</summary>
+    public const double MinimumWidth = 240;
+    public const double MaximumWidth = 520;
 
     private readonly Popup _popup = new() { IsLightDismissEnabled = false };
     private readonly StackPanel _rows = new() { Spacing = 2 };
+    private readonly ScrollViewer _scroll;
     private readonly Border _frame;
     private readonly List<AutofillEntry> _entries = [];
     private readonly List<Border> _visuals = [];
@@ -45,14 +51,18 @@ public sealed class AutofillPopup
 
     public AutofillPopup()
     {
-        // 长候选列表在浮层内部滚动，不会顶到磁贴或窗口外。
-        ScrollViewer scroll = new()
+        // 长候选列表在浮层内部滚动，一次最多五行，滚动到窗口外也不会顶到磁贴。
+        _scroll = new ScrollViewer
         {
             Content = _rows,
             MaxHeight = 320,
+            // 透明背景让行间空隙也落在滚动容器上，触屏滑动不会在缝隙处失效。
+            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             VerticalScrollMode = ScrollMode.Enabled,
+            // 触屏拖动需要滚动容器自己处理平移，候选行因此只用 Tapped 选中，不吞掉指针按下。
+            ManipulationMode = ManipulationModes.System,
             // 候选窗不接收焦点：点击后按键仍归输入框，且关闭时不会把焦点留在浮层里。
             IsTabStop = false
         };
@@ -61,9 +71,9 @@ public sealed class AutofillPopup
             CornerRadius = new CornerRadius(8),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(4),
-            MinWidth = 180,
-            MaxWidth = 380,
-            Child = scroll,
+            MinWidth = MinimumWidth,
+            MaxWidth = MaximumWidth,
+            Child = _scroll,
             IsTabStop = false
         };
         // 浮层是代码创建的控件，不会跟随主题资源引用自动换色，构造后先按当前主题取一次色。
@@ -279,15 +289,35 @@ public sealed class AutofillPopup
                 _highlight = index;
                 ApplyHighlight();
             };
-            row.PointerPressed += (_, args) =>
+            // 用 Tapped 而不是 PointerPressed 选中：按下就选中会让触屏拖动被当成点击，
+            // 也没法把平移交给滚动容器，候选列表在触屏上就滑不动。
+            row.Tapped += (_, args) =>
             {
                 args.Handled = true;
                 Choose(entry);
             };
-            row.PointerReleased += (_, args) => args.Handled = true;
             _visuals.Add(row);
             _rows.Children.Add(row);
         }
+
+        LimitVisibleRows();
+    }
+
+    /// <summary>
+    /// 按真实行高限制浮层高度：一次最多露出 VisibleRowLimit 行，其余在浮层内部滚动。
+    /// 行高由字号和内边距决定，这里量真实行而不是写死数字，改字体或缩放后同样成立。
+    /// </summary>
+    private void LimitVisibleRows()
+    {
+        _rows.Measure(new Size(MaximumWidth, double.PositiveInfinity));
+        int count = Math.Min(VisibleRowLimit, _rows.Children.Count);
+        double height = Math.Max(0, count - 1) * _rows.Spacing;
+        for (int index = 0; index < count; index++)
+        {
+            height += _rows.Children[index].DesiredSize.Height;
+        }
+
+        _scroll.MaxHeight = Math.Max(1, height);
     }
 
     private void ApplyHighlight()
@@ -332,11 +362,13 @@ public sealed class AutofillPopup
             bounds = new Rect(caretRect.X, caretRect.Y, Math.Max(1, caretRect.Width), caretRect.Height);
         Point origin = anchor.TransformToVisual(parent).TransformPoint(new Point(bounds.X, bounds.Y));
 
-        _frame.Measure(new Size(360, double.PositiveInfinity));
-        double width = Math.Clamp(_frame.DesiredSize.Width, 180, 380);
+        _frame.Measure(new Size(MaximumWidth, double.PositiveInfinity));
+        double parentWidth = parent is FrameworkElement element ? element.ActualWidth : MaximumWidth;
+        double parentHeight = parent is FrameworkElement host ? host.ActualHeight : 0;
+        // 候选名较长时放宽到 MaxWidth；窗口比浮层还窄时再收窄到可用宽度，避免被裁掉。
+        double width = Math.Clamp(_frame.DesiredSize.Width, MinimumWidth, MaximumWidth);
+        width = Math.Min(width, Math.Max(MinimumWidth, parentWidth - 16));
         double height = Math.Max(1, _frame.DesiredSize.Height);
-        double parentWidth = parent is FrameworkElement element ? element.ActualWidth : width;
-        double parentHeight = parent is FrameworkElement host ? host.ActualHeight : height;
         double x = Math.Clamp(origin.X, 8, Math.Max(8, parentWidth - width - 8));
         double below = origin.Y + bounds.Height + 6;
         double above = origin.Y - height - 6;

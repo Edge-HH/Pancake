@@ -90,7 +90,11 @@ public sealed class AutofillService
         return changed;
     }
 
-    public IReadOnlyList<SubjectSuggestion> MatchSubjects(string? typed, int max = MaxSuggestions)
+    /// <param name="includeExact">
+    /// 输入法上屏的文字本身就是某个学科时也给该候选，便于接着用键盘套用学科颜色；
+    /// 普通输入保持“已经输入完整学科名就不再提示”的行为。
+    /// </param>
+    public IReadOnlyList<SubjectSuggestion> MatchSubjects(string? typed, int max = MaxSuggestions, bool includeExact = false)
     {
         SubjectCompletionSettings subject = Subject;
         if (!subject.Enabled) return [];
@@ -105,7 +109,7 @@ public sealed class AutofillService
         {
             int current = order++;
             if (!item.Enabled || string.IsNullOrWhiteSpace(item.Name)) continue;
-            if (item.Name.Equals(query, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!includeExact && item.Name.Equals(query, StringComparison.OrdinalIgnoreCase)) continue;
             int score = Score(item.Name, query, level);
             if (score > 0) matches.Add((score, item, current));
         }

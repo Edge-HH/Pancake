@@ -510,6 +510,237 @@ public sealed partial class MainWindow
         };
     }
 
+    /// <summary>
+    /// 输入法组合态诊断：切到中文输入法后真实投递拼音按键，逐项记录组合事件、输入框文本、
+    /// 候选浮层状态以及按键是否到达应用，用来确定组合态下应用实际能看到什么。
+    /// </summary>
+    internal void ScheduleAutofillImeDiagnostic()
+    {
+        RootShell.Loaded += async (_, _) =>
+        {
+            string output = Path.Combine(AppContext.BaseDirectory, "verification");
+            Directory.CreateDirectory(output);
+            List<string> evidence = [];
+            try
+            {
+                _settings.AutoUpdateEnabled = false;
+                _settings.Autofill.Subject.Enabled = true;
+                _settings.Autofill.Subject.MatchLevel = "Normal";
+                _settings.Autofill.Homework.Enabled = false;
+                _library = new ProjectLibrary { Settings = _settings };
+                ProjectStore.Create(_library, false).Name = "输入法探针";
+                ViewModel.ReplaceSubjects([]);
+                SubjectBoard probeSubject = ViewModel.AddSubject("语文");
+                probeSubject.X = 24;
+                probeSubject.Y = 24;
+                probeSubject.TileWidth = 420;
+                probeSubject.TileHeight = 320;
+                BuildTiles();
+                ShowBoard();
+                EnterEditing();
+                await NextLayoutAsync();
+
+                SubjectTileControl tile = BoardCanvas.Children.OfType<SubjectTileControl>().First();
+                TextBox box = FindVisuals<TextBox>(tile).First();
+                nint hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+
+                void Check(bool condition, string message)
+                {
+                    if (!condition) throw new Exception(message);
+                    evidence.Add("PASS: " + message);
+                }
+
+                int started = 0, ended = 0, changed = 0;
+                string Text() => (box.Text ?? string.Empty).Replace("\r", "|").Replace("\n", "|");
+                box.TextCompositionStarted += (_, args) => { started++; evidence.Add($"event composition started start={args.StartIndex} length={args.Length}"); };
+                box.TextCompositionChanged += (_, args) => { changed++; evidence.Add($"event composition changed start={args.StartIndex} length={args.Length} text='{Text()}'"); };
+                box.TextCompositionEnded += (_, args) => { ended++; evidence.Add($"event composition ended start={args.StartIndex} length={args.Length} text='{Text()}'"); };
+                box.AddHandler(UIElement.PreviewKeyDownEvent, new Microsoft.UI.Xaml.Input.KeyEventHandler((_, e) => evidence.Add($"box PreviewKeyDown key={e.Key}({(int)e.Key}) handled={e.Handled}")), true);
+                box.AddHandler(UIElement.KeyDownEvent, new Microsoft.UI.Xaml.Input.KeyEventHandler((_, e) => evidence.Add($"box KeyDown key={e.Key}({(int)e.Key}) handled={e.Handled}")), true);
+                RootShell.AddHandler(UIElement.KeyDownEvent, new Microsoft.UI.Xaml.Input.KeyEventHandler((_, e) => evidence.Add($"root KeyDown key={e.Key}({(int)e.Key}) handled={e.Handled}")), true);
+                box.TextChanged += (_, _) => evidence.Add($"event text changed text='{Text()}' caret={box.SelectionStart} popup={_autofillPopup.IsOpen} count={_autofillPopup.Count}");
+                void State(string label) => evidence.Add(
+                    $"{label}: text='{Text()}' caret={box.SelectionStart} popup={_autofillPopup.IsOpen} count={_autofillPopup.Count} " +
+                    $"highlight='{_autofillPopup.Highlighted?.Text}' focus={Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(RootShell.XamlRoot)?.GetType().Name} " +
+                    $"foreground={GetForegroundWindow() == hwnd} layout=0x{GetKeyboardLayout(0):X8} composition={started}/{changed}/{ended}");
+
+                // 每次投递按键前都重新置顶，避免按键落到当时的其它窗口里。
+                async Task<bool> ReadyAsync()
+                {
+                    ForceForeground(hwnd);
+                    await Task.Delay(250);
+                    if (GetForegroundWindow() != hwnd)
+                    {
+                        evidence.Add("skip: window lost foreground before sending keys");
+                        return false;
+                    }
+
+                    // 先置顶再把焦点交回输入框：Win32 层的 SetFocus 会打断 XAML 的编辑焦点。
+                    box.Focus(FocusState.Programmatic);
+                    await Task.Delay(150);
+                    return true;
+                }
+
+                // 中文输入法的组合内容是否落在窗口的 IMM 上下文里，决定应用能不能读到拼音。
+                void LogComposition(string label)
+                {
+                    var description = new System.Text.StringBuilder(260);
+                    ImmGetDescription(GetKeyboardLayout(0), description, 260);
+                    nint imc = ImmGetContext(hwnd);
+                    if (imc == nint.Zero)
+                    {
+                        evidence.Add($"{label}: no IMM context, ime='{description}'");
+                        return;
+                    }
+
+                    var composition = new System.Text.StringBuilder(260);
+                    int length = ImmGetCompositionString(imc, 0x0008 /* GCS_COMPSTR */, composition, 260 * 2);
+                    var result = new System.Text.StringBuilder(260);
+                    int resultLength = ImmGetCompositionString(imc, 0x8005 /* GCS_RESULTSTR */, result, 260 * 2);
+                    evidence.Add(
+                        $"{label}: ime='{description}' open={ImmGetOpenStatus(imc)} composing='{composition}' ({length}) result='{result}' ({resultLength})");
+                    ImmReleaseContext(hwnd, imc);
+                }
+
+                // 组合期间窗口消息里是否还有 WM_KEYDOWN / WM_IME_*，决定应用层能不能截到被输入法占用的按键。
+                nint previousProcedure = GetWindowLongPtr(hwnd, -4 /* GWLP_WNDPROC */);
+                WindowProcedure procedure = (window, message, wparam, lparam) =>
+                {
+                    if (message is 0x0100 or 0x0101 or 0x0104 or 0x0105 or 0x010D or 0x010E or 0x010F or 0x0281)
+                    {
+                        evidence.Add($"window message=0x{message:X4} wparam=0x{wparam:X} lparam=0x{lparam:X}");
+                    }
+
+                    return CallWindowProc(previousProcedure, window, message, wparam, lparam);
+                };
+                SetWindowLongPtr(hwnd, -4, System.Runtime.InteropServices.Marshal.GetFunctionPointerForDelegate(procedure));
+
+                // 先在不带输入法的状态下确认按键投递本身可用（对照组）。
+                box.Text = string.Empty;
+                if (await ReadyAsync())
+                {
+                    SendLetter('a');
+                    SendLetter('b');
+                    await Task.Delay(300);
+                    State("plain-typing");
+                }
+
+                nint original = GetKeyboardLayout(0);
+                nint chinese = LoadKeyboardLayout("00000804", 1);
+                PostMessage(hwnd, 0x0050, nint.Zero, chinese);
+                await Task.Delay(600);
+                nint context = ImmGetContext(hwnd);
+                if (context != nint.Zero)
+                {
+                    ImmGetConversionStatus(context, out uint conversion, out uint sentence);
+                    evidence.Add($"ime: layout=0x{GetKeyboardLayout(0):X8} conversion=0x{conversion:X4} sentence=0x{sentence:X4}");
+                    ImmSetConversionStatus(context, 0x0001, sentence);
+                    ImmGetConversionStatus(context, out conversion, out _);
+                    evidence.Add($"ime: native mode conversion=0x{conversion:X4}");
+                    ImmReleaseContext(hwnd, context);
+                }
+                else
+                {
+                    evidence.Add("ime: ImmGetContext returned null");
+                }
+
+                // 空白标题会列出推荐学科，先看输入法已激活但还没开始组合时按键能否到达应用。
+                box.Text = string.Empty;
+                await NextLayoutAsync();
+                if (await ReadyAsync())
+                {
+                    State("ime-idle");
+                    SendKey(Windows.System.VirtualKey.Down);
+                    await Task.Delay(400);
+                    State("ime-idle-down");
+                    SendKey(Windows.System.VirtualKey.Tab);
+                    await Task.Delay(400);
+                    State("ime-idle-tab");
+                }
+
+                box.Text = string.Empty;
+                await NextLayoutAsync();
+                if (await ReadyAsync())
+                {
+                    State("armed");
+                    foreach (char letter in "yuwen")
+                    {
+                        SendLetter(letter);
+                        await Task.Delay(300);
+                        State($"typed-{letter}");
+                    }
+
+                    LogComposition("after-typing");
+                    Check(_autofillPopup.IsOpen && _autofillPopup.Highlighted?.Text is { Length: > 0 },
+                        "输入法组合期间按拼音给出学科候选");
+                    SendKey(Windows.System.VirtualKey.Down);
+                    await Task.Delay(400);
+                    State("down");
+                    SendKey(Windows.System.VirtualKey.Tab);
+                    await Task.Delay(400);
+                    State("tab");
+
+                    string highlighted = _autofillPopup.Highlighted?.Text ?? string.Empty;
+                    if (_autofillPopup.IsOpen) _autofillPopup.ChooseHighlighted();
+                    await Task.Delay(400);
+                    State($"after-choose('{highlighted}')");
+
+                    Microsoft.UI.Xaml.Input.FocusManager.TryMoveFocus(
+                        Microsoft.UI.Xaml.Input.FocusNavigationDirection.Next,
+                        new Microsoft.UI.Xaml.Input.FindNextElementOptions { SearchRoot = RootShell });
+                    await Task.Delay(800);
+                    State("after-blur");
+                    await Task.Delay(1500);
+                    State("settled");
+                    Check(highlighted.Length > 0 && Text() == highlighted,
+                        $"输入法把组合内容上屏后仍保留采纳的候选（text='{Text()}'）");
+                }
+
+                // 输入法上屏后再用键盘采纳：空格上屏学科名后，浮层应给出同名候选，Tab 直接采纳。
+                box.Text = string.Empty;
+                await NextLayoutAsync();
+                if (await ReadyAsync())
+                {
+                    foreach (char letter in "yuwen")
+                    {
+                        SendLetter(letter);
+                        await Task.Delay(120);
+                    }
+
+                    await Task.Delay(300);
+                    SendKey(Windows.System.VirtualKey.Space);
+                    await Task.Delay(700);
+                    State("committed");
+                    bool named = _settings.Autofill.Subject.Subjects.Any(item => item.Name == Text());
+                    Check(!named || _autofillPopup.IsOpen, "输入法上屏学科名后仍然给出该候选");
+                    if (_autofillPopup.IsOpen)
+                    {
+                        SendKey(Windows.System.VirtualKey.Tab);
+                        await Task.Delay(500);
+                        State("committed-tab");
+                        Check(!_autofillPopup.IsOpen &&
+                            Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(RootShell.XamlRoot) is TextBox,
+                            "上屏后用 Tab 采纳学科候选并留在输入框里");
+                    }
+                }
+
+                PostMessage(hwnd, 0x0050, nint.Zero, original);
+                SetWindowLongPtr(hwnd, -4, previousProcedure);
+                GC.KeepAlive(procedure);
+                evidence.Add("AUTOFILL_IME_DIAGNOSTIC_OK");
+            }
+            catch (Exception ex)
+            {
+                evidence.Add("AUTOFILL_IME_DIAGNOSTIC_FAILED\n" + ex);
+            }
+            finally
+            {
+                File.WriteAllLines(Path.Combine(output, "ime-result.txt"), evidence);
+                Close();
+            }
+        };
+    }
+
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(nint window);
 
@@ -534,6 +765,50 @@ public sealed partial class MainWindow
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern uint SendInput(uint count, INPUT[] inputs, int size);
 
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern nint LoadKeyboardLayout(string layout, uint flags);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool PostMessage(nint window, uint message, nint wparam, nint lparam);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint GetKeyboardLayout(uint threadId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint MapVirtualKey(uint code, uint mapType);
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll")]
+    private static extern nint ImmGetContext(nint window);
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll")]
+    private static extern bool ImmReleaseContext(nint window, nint context);
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll")]
+    private static extern bool ImmGetConversionStatus(nint context, out uint conversion, out uint sentence);
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll")]
+    private static extern bool ImmSetConversionStatus(nint context, uint conversion, uint sentence);
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll")]
+    private static extern bool ImmGetOpenStatus(nint context);
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern int ImmGetCompositionString(nint context, int index, System.Text.StringBuilder? buffer, int length);
+
+    [System.Runtime.InteropServices.DllImport("imm32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+    private static extern uint ImmGetDescription(nint layout, System.Text.StringBuilder? buffer, uint length);
+
+    private delegate nint WindowProcedure(nint window, uint message, nint wparam, nint lparam);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+    private static extern nint GetWindowLongPtr(nint window, int index);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
+    private static extern nint SetWindowLongPtr(nint window, int index, nint value);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint CallWindowProc(nint previous, nint window, uint message, nint wparam, nint lparam);
+
     // 前台锁定会拒绝后台进程的置顶请求，先挂到当前前台线程再激活，否则按键不会进本窗口。
     private static void ForceForeground(nint window)
     {
@@ -553,6 +828,7 @@ public sealed partial class MainWindow
     {
         [System.Runtime.InteropServices.FieldOffset(0)] public uint Type;
         [System.Runtime.InteropServices.FieldOffset(8)] public ushort VirtualKey;
+        [System.Runtime.InteropServices.FieldOffset(10)] public ushort ScanCode;
         [System.Runtime.InteropServices.FieldOffset(12)] public uint Flags;
     }
 
@@ -562,6 +838,17 @@ public sealed partial class MainWindow
         Thread.Sleep(30);
         SendInput(1, [new INPUT { Type = 1, VirtualKey = (ushort)key, Flags = 2 }], 40);
         Thread.Sleep(30);
+    }
+
+    /// <summary>按真实键盘那样投递一个字母（带扫描码），输入法才会把它当成正常按键处理。</summary>
+    private static void SendLetter(char letter)
+    {
+        ushort key = (ushort)char.ToUpperInvariant(letter);
+        ushort scan = (ushort)MapVirtualKey(key, 0);
+        SendInput(1, [new INPUT { Type = 1, VirtualKey = key, ScanCode = scan }], 40);
+        Thread.Sleep(20);
+        SendInput(1, [new INPUT { Type = 1, VirtualKey = key, ScanCode = scan, Flags = 2 }], 40);
+        Thread.Sleep(20);
     }
 
     // RTF 字体表中的家族名，用于定位字体在哪一步丢失。
@@ -1610,6 +1897,26 @@ public sealed partial class MainWindow
         await NextLayoutAsync();
         check(freshTitle.Text.Length == 0 && _autofillPopup.IsOpen && _autofillPopup.Count > 1,
             "focusing the default title clears it and lists the recommended subjects");
+
+        // 候选再长也一次只露出 5 行，其余在浮层内部滚动；浮层同时放宽到能一行放下常见学科名。
+        Border? recommendationFrame = FindVisuals<Popup>(RootShell)
+            .Where(popup => popup.IsOpen)
+            .Select(popup => popup.Child)
+            .OfType<Border>()
+            .FirstOrDefault(border => border.Child is ScrollViewer);
+        ScrollViewer? recommendationScroll = recommendationFrame?.Child as ScrollViewer;
+        // 浮层内容是 Popup.Child，不挂在窗口可视树上，必须从浮层自身往下找候选行。
+        List<Border> recommendationRows = recommendationFrame is null
+            ? []
+            : FindVisuals<Border>(recommendationFrame).Where(border => border.Tag is AutofillEntry).ToList();
+        check(recommendationScroll is not null &&
+            recommendationRows.Count > AutofillPopup.VisibleRowLimit &&
+            recommendationScroll.ScrollableHeight > 0 &&
+            recommendationScroll.ActualHeight < recommendationRows.Sum(row => row.ActualHeight) &&
+            recommendationFrame!.ActualWidth >= AutofillPopup.MinimumWidth - 1,
+            $"completion popup shows at most {AutofillPopup.VisibleRowLimit} rows at once and stays wide enough " +
+            $"(rows={recommendationRows.Count}, viewport={recommendationScroll?.ActualHeight:0.#}, " +
+            $"scrollable={recommendationScroll?.ScrollableHeight:0.#}, width={recommendationFrame?.ActualWidth:0.#})");
 
         // 候选浮层是代码创建的控件，必须跟着主题换色：浅色模式曾保留深色底又把文字换成黑色，完全看不清。
         Border? AutofillFrame() => FindVisuals<Popup>(RootShell)

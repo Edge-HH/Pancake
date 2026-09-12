@@ -30,26 +30,30 @@ internal static class AutofillInputText
     }
 
     /// <summary>
-    /// 采纳候选后的守护。输入法组合态下，应用写好候选之后输入法仍可能把组合文本上屏一次：
-    /// 整段回退成拼音，或把拼音补在候选前后。只靠“写入后短时间自检”会漏掉这种情况，
-    /// 因为这次上屏往往发生在用户稍后点到别处、输入框失焦的时候。
-    /// 因此守护同时盯住定时自检、输入法组合结束和输入框失焦三个时机：
-    /// 只要整段文本里又出现了当次被替换的拼音，就把整段文本补写回采纳结果（补写不抢回焦点）。
+    /// 采纳候选后的守护。真实中文输入法下，应用写入候选会让输入法立刻结束组合，
+    /// 紧接着输入法又把这次组合的内容按“原始拼音”写回文档，覆盖刚写入的候选；
+    /// 这次上屏也可能拖到输入框失焦时发生。两种时机都不是用户的新输入，因此：
+    /// 组合结束后、或输入框失焦后，只要文本变得不是采纳结果，就把被改掉的那一段补写回候选。
+    /// 用户重新开始组合时解除守护；补写不抢回焦点。
     /// </summary>
     internal sealed class ApplyGuard
     {
         public const int IntervalMilliseconds = 150;
-        /// <summary>定时自检上限；到点后停止轮询，组合结束与失焦时仍会各核对一次。</summary>
-        public const int MaximumChecks = 40;
+        /// <summary>定时核对上限：覆盖组合结束后稍晚才上屏、以及失焦提交两种时机。</summary>
+        public const int MaximumChecks = 20;
+        /// <summary>“整体退回采纳前文本”的核对上限：沿用旧版对输入法再次上屏的观察窗口。</summary>
+        public const int RevertChecks = 10;
         /// <summary>与输入法互相覆盖时的最大补写次数，超过就交回用户处理。</summary>
-        public const int MaximumRestores = 3;
+        public const int MaximumRestores = 2;
 
         private readonly DispatcherQueueTimer _timer;
         private Func<string>? _text;
-        private Func<bool>? _composing;
+        private Func<bool>? _focused;
+        private Func<bool>? _looksReverted;
         private Action? _restore;
-        private string _typed = string.Empty;
+        private string _previous = string.Empty;
         private string _expected = string.Empty;
+        private bool _compositionEnded;
         private int _checks;
         private int _restores;
 
@@ -62,17 +66,22 @@ internal static class AutofillInputText
         }
 
         /// <param name="text">输入框的整段文本。</param>
-        /// <param name="composing">输入法是否正在组合。</param>
-        /// <param name="typed">本次采纳替换掉的那一段（拼音原文）。</param>
+        /// <param name="focused">输入框当前是否持有焦点。</param>
+        /// <param name="previous">采纳前的整段文本。</param>
         /// <param name="expected">采纳完成后应得的整段文本。</param>
-        /// <param name="restore">把整段文本补写回采纳结果，且不改变焦点。</param>
-        public void Start(Func<string> text, Func<bool> composing, string typed, string expected, Action restore)
+        /// <param name="looksReverted">
+        /// 光标附近是否又变回采纳时被替换的那一段（老版判据），用于识别整段文本之外的覆盖方式。
+        /// </param>
+        /// <param name="restore">把被输入法改掉的那一段补写回采纳结果，且不改变焦点。</param>
+        public void Start(Func<string> text, Func<bool> focused, string previous, string expected, Func<bool> looksReverted, Action restore)
         {
             _text = text;
-            _composing = composing;
-            _typed = typed;
+            _focused = focused;
+            _looksReverted = looksReverted;
+            _previous = previous;
             _expected = expected;
             _restore = restore;
+            _compositionEnded = false;
             _checks = 0;
             _restores = 0;
             _timer.Start();
@@ -82,21 +91,30 @@ internal static class AutofillInputText
         {
             _timer.Stop();
             _text = null;
-            _composing = null;
+            _focused = null;
+            _looksReverted = null;
             _restore = null;
         }
 
-        /// <summary>组合结束、输入框失焦或文本变化时主动核对一次，覆盖定时窗口之后才上屏的输入法。</summary>
+        /// <summary>文本变化、失焦或组合结束时核对一次。</summary>
         public void Verify()
         {
             if (_text is not null) Check();
+        }
+
+        /// <summary>组合结束：这次组合的内容随时可能被输入法上屏，之后按“已上屏”判断。</summary>
+        public void CompositionEnded()
+        {
+            if (_text is null) return;
+            _compositionEnded = true;
+            Check();
         }
 
         private void OnTick(DispatcherQueueTimer sender, object args)
         {
             if (++_checks > MaximumChecks)
             {
-                // 组合迟迟不结束时不再轮询，改由组合结束、失焦等事件触发核对。
+                // 到点后停止轮询，文本变化与失焦事件仍会触发核对。
                 _timer.Stop();
                 return;
             }
@@ -106,27 +124,23 @@ internal static class AutofillInputText
 
         private void Check()
         {
-            if (_text is null || _composing is null || _restore is null)
+            if (_text is null || _focused is null || _restore is null)
             {
                 Stop();
                 return;
             }
 
             string text = _text();
-            if (text == _expected)
-            {
-                // 候选已经就位：组合结束后输入法不会再上屏，可以收工。
-                if (!_composing()) Stop();
-                return;
-            }
+            if (text == _expected) return;   // 候选还在，继续守着等输入法可能的上屏
 
-            // 只有“整段文本里又出现了当次替换掉的拼音”才认定是输入法上屏覆盖；
-            // 长度超过采纳结果加一段拼音，说明用户已经继续输入，不再干预。
-            bool overwritten = _typed.Length > 0 &&
-                text.Contains(_typed, StringComparison.Ordinal) &&
-                text.Length <= _expected.Length + _typed.Length;
-            if (!overwritten)
+            // 组合结束或输入框失焦后文本发生变化，只可能是输入法把组合内容上屏。
+            // 没有组合时整体退回采纳前的文本，同样按输入法再次上屏处理（观察窗口内有效）。
+            bool committed = _compositionEnded || !_focused();
+            bool reverted = !committed && _checks <= RevertChecks &&
+                (string.Equals(text, _previous, StringComparison.Ordinal) || (_looksReverted?.Invoke() ?? false));
+            if (!committed && !reverted)
             {
+                // 组合还在进行且文本不是退回原样，说明是用户自己的输入，不再干预。
                 Stop();
                 return;
             }
@@ -138,6 +152,7 @@ internal static class AutofillInputText
             }
 
             _restore();
+            Stop();
         }
     }
 }
@@ -152,6 +167,8 @@ internal sealed class SubjectAutofillInput
     private readonly AutofillInputText.ApplyGuard _guard;
     private bool _suppress;
     private bool _composing;
+    private bool _justApplied;
+    private bool _afterComposition;
 
     public SubjectAutofillInput(AutofillService service, AutofillPopup popup, TextBox box, Action<SubjectSuggestion> applied)
     {
@@ -163,22 +180,34 @@ internal sealed class SubjectAutofillInput
         box.TextChanged += (_, _) =>
         {
             if (_suppress) return;
+            // 输入法刚刚上屏时（例如按空格确认候选）也给出同名学科候选，方便接着用键盘套色；
+            // 刚采纳过（这次组合是被我们写入结束的）就不重复弹。
+            bool allowExact = _afterComposition && !_justApplied;
+            _justApplied = false;
             _guard.Verify();
-            Refresh();
+            Refresh(allowExact: allowExact);
         };
-        // 组合态下输入法会用自己的候选窗接管上下键与 Tab，这里只记录状态：
-        // 组合期间刷新候选时保留用户已经移动过的选中项，避免选中被刷新重置。
-        box.TextCompositionStarted += (_, _) => _composing = true;
+        // 组合期间输入法用自己的候选窗接管上下键与 Tab（应用收不到这些按键），
+        // 这里只记录状态：刷新候选时保留已移动的选中项，并解除上一轮的采纳守护。
+        box.TextCompositionStarted += (_, _) =>
+        {
+            _composing = true;
+            _justApplied = false;
+            _afterComposition = false;
+            _guard.Stop();
+        };
         box.TextCompositionEnded += (_, _) =>
         {
             _composing = false;
-            // 组合结束是输入法上屏的时机，先核对采纳结果，再按上屏文字重新给候选。
-            _guard.Verify();
-            Refresh();
+            _afterComposition = true;
+            // 组合结束是输入法上屏的时机：先核对采纳结果是否被覆盖，
+            // 再按上屏文字重新给候选。刚采纳过（组合是被写入结束的）就不再重复弹同名候选。
+            _guard.CompositionEnded();
+            Refresh(allowExact: !_justApplied);
         };
         box.SelectionChanged += (_, _) =>
         {
-            if (!_suppress) Refresh();
+            if (!_suppress) Refresh(allowExact: _afterComposition && !_justApplied);
         };
         box.GotFocus += (_, _) => ClearDefaultTitle();
         // 失焦会让输入法把还没上屏的组合文本一次性提交，可能覆盖刚采纳的候选：
@@ -208,7 +237,11 @@ internal sealed class SubjectAutofillInput
         ShowRecommendations();
     }
 
-    private void Refresh()
+    /// <param name="allowExact">
+    /// 输入法上屏的文字本身就是某个学科时也给出该候选，方便接着用键盘套用学科颜色。
+    /// 只有组合结束这条路径会打开，普通输入仍然不提示已经输入完整的学科。
+    /// </param>
+    private void Refresh(bool allowExact = false)
     {
         if (_box.IsReadOnly || !_box.IsHitTestVisible)
         {
@@ -225,7 +258,7 @@ internal sealed class SubjectAutofillInput
             return;
         }
 
-        IReadOnlyList<SubjectSuggestion> matches = _service.MatchSubjects(typed);
+        IReadOnlyList<SubjectSuggestion> matches = _service.MatchSubjects(typed, includeExact: allowExact);
         if (matches.Count == 0)
         {
             Hide();
@@ -262,15 +295,21 @@ internal sealed class SubjectAutofillInput
         _applied(suggestion);
         string expected = _box.Text ?? string.Empty;
         int caretAfterApply = Math.Clamp(_box.SelectionStart, 0, expected.Length);
-        // 输入法随后可能再上屏一次拼音，组合结束或失焦时把候选补写回去，避免要再点第二下。
+        _justApplied = true;
+        // 输入法会在采纳后把这次组合的内容按原始拼音再上屏一次（也可能拖到失焦时），
+        // 组合结束或失焦后核对并把被覆盖的内容补写回候选，避免要再点第二下。
         _guard.Start(
             () => _box.Text ?? string.Empty,
-            () => _composing,
-            replaced,
+            () => _box.FocusState != FocusState.Unfocused,
+            text,
             expected,
+            () => AutofillInputText.CurrentWord(_box.Text ?? string.Empty, _box.SelectionStart) == replaced,
             () =>
             {
                 Hide();
+                // 补写属于回滚输入法上屏：不要再按“输入法刚上屏”重新弹出同名候选。
+                _afterComposition = false;
+                _justApplied = true;
                 // 标题是纯文本，整段写回采纳结果即可覆盖“整段回退”和“拼音补在候选前后”两种情况。
                 WriteText(expected, caretAfterApply);
             });
@@ -340,13 +379,18 @@ internal sealed class HomeworkAutofillInput
             _guard.Verify();
             Refresh();
         };
-        // 组合态下输入法用自己的候选窗接管上下键与 Tab，这里只记录状态并让刷新保留选中项。
-        editor.TextCompositionStarted += (_, _) => _composing = true;
+        // 组合期间输入法用自己的候选窗接管上下键与 Tab（应用收不到这些按键），
+        // 这里只记录状态：刷新候选时保留选中项，并解除上一轮的采纳守护。
+        editor.TextCompositionStarted += (_, _) =>
+        {
+            _composing = true;
+            _guard.Stop();
+        };
         editor.TextCompositionEnded += (_, _) =>
         {
             _composing = false;
-            // 组合结束是输入法上屏的时机，先核对采纳结果，再按上屏文字重新给候选。
-            _guard.Verify();
+            // 组合结束是输入法上屏的时机：先核对采纳结果是否被覆盖，再按上屏文字重新给候选。
+            _guard.CompositionEnded();
             Refresh();
         };
         // 光标移动到另一个词上时重新计算候选，避免沿用上一次的列表。
@@ -418,19 +462,22 @@ internal sealed class HomeworkAutofillInput
         if (entry.Payload is not HomeworkSuggestion suggestion) return;
         (int caret, string typed) = CurrentInput();
         if (typed.Length == 0) return;
+        string previous = DocumentText();
         WriteText(suggestion, caret, typed, focus: true);
         _service.NotifyHomeworkCompleted(suggestion);
-        string expected = _content();
-        // 输入法随后可能再上屏一次拼音，组合结束或失焦时把被覆盖的那一段补写回候选。
+        string expected = DocumentText();
+        // 输入法会在采纳后把这次组合的内容按原始拼音再上屏一次（也可能拖到失焦时），
+        // 组合结束或失焦后核对并把被覆盖的那一段补写回候选。
         _guard.Start(
-            _content,
-            () => _composing,
-            typed,
+            DocumentText,
+            () => _editor.FocusState != FocusState.Unfocused,
+            previous,
             expected,
+            () => CurrentInput().Typed == typed,
             () =>
             {
                 Hide();
-                RestoreApplied(suggestion, typed, expected);
+                RestoreApplied(expected);
             });
     }
 
@@ -449,40 +496,47 @@ internal sealed class HomeworkAutofillInput
     }
 
     /// <summary>
-    /// 输入法把组合文本上屏时会覆盖刚采纳的候选，这里只改被覆盖的那一段：
-    /// 正在输入的那段拼音还在就按词替换，被补在候选前后就直接删掉，
-    /// 其余文字与富文本格式保持不动。
+    /// 输入法把组合内容上屏、覆盖了刚采纳的候选时，只重写与采纳结果不一致的那一段：
+    /// 取两者的公共前后缀，中间不一致的部分按采纳结果恢复，其余文字与富文本格式保持不动。
     /// </summary>
-    private void RestoreApplied(HomeworkSuggestion suggestion, string typed, string expected)
+    private void RestoreApplied(string expected)
     {
-        (int caret, string word) = CurrentInput();
-        if (word == typed)
+        string text = DocumentText();
+        if (string.Equals(text, expected, StringComparison.Ordinal)) return;
+
+        int limit = Math.Min(text.Length, expected.Length);
+        int prefix = 0;
+        while (prefix < limit && text[prefix] == expected[prefix]) prefix++;
+        int suffix = 0;
+        while (suffix < limit - prefix && text[text.Length - 1 - suffix] == expected[expected.Length - 1 - suffix]) suffix++;
+
+        // 区间必须非空：RichEdit 不接受对空区间的写入，纯插入时向前借一个字符一起重写。
+        int start = Math.Max(0, Math.Min(prefix, text.Length - suffix - 1));
+        int end = Math.Max(start, text.Length - suffix);
+        _suppress = true;
+        if (end > start)
         {
-            WriteText(suggestion, caret, typed, focus: false);
-            return;
+            _editor.Document.GetRange(start, end).Text = expected[start..Math.Max(start, expected.Length - suffix)];
         }
-
-        string text = _content();
-        int index = text.IndexOf(typed, StringComparison.Ordinal);
-        while (index >= 0)
+        else
         {
-            // 替换或删除这一处后正好回到采纳结果，才认定它是输入法补进来的拼音。
-            if (text.Remove(index, typed.Length).Insert(index, suggestion.Text) == expected)
-            {
-                WriteText(suggestion, index + typed.Length, typed, focus: false);
-                return;
-            }
-
-            if (text.Remove(index, typed.Length) == expected)
-            {
-                _suppress = true;
-                _editor.Document.GetRange(index, index + typed.Length).Text = string.Empty;
-                _suppress = false;
-                return;
-            }
-
-            index = text.IndexOf(typed, index + 1, StringComparison.Ordinal);
+            // 整条作业被输入法清空时只能整段写回。
+            _editor.Document.SetText(TextSetOptions.None, expected);
         }
+        _suppress = false;
+    }
+
+    /// <summary>
+    /// 读取作业正文的纯文本。RichEdit 文档的最后一个字符是控件维护的段落标记，不属于内容，
+    /// 这里与保存时一样把它排除掉（旧数据可能多出若干换行，一并收尾），
+    /// 保证下标能直接当作文档区间位置使用。
+    /// </summary>
+    private string DocumentText()
+    {
+        ITextRange range = _editor.Document.GetRange(0, int.MaxValue);
+        if (range.EndPosition > 0) range.EndPosition -= 1;
+        range.GetText(TextGetOptions.None, out string text);
+        return text.TrimEnd('\r', '\n');
     }
 
     private (int Caret, string Typed) CurrentInput()
