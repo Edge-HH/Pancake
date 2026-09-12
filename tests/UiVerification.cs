@@ -1044,6 +1044,14 @@ public sealed partial class MainWindow
         check(zoom.Right <= RootShell.ActualWidth + .5 && zoom.Bottom <= RootShell.ActualHeight + .5,
             $"short window keeps the zoom island inside the window (zoom {zoom.X:0.#},{zoom.Y:0.#} {zoom.Width:0.#}x{zoom.Height:0.#}" +
             $" / root {RootShell.ActualWidth:0.#}x{RootShell.ActualHeight:0.#})");
+        // 画笔模式同样：竖排放不下就整块退回左右，不能把画笔栏换到控制窗下方、把缩放岛顶掉。
+        GlobalPenButton.IsChecked = true; ApplyExtendedSettings(); await NextLayoutAsync();
+        penIsland = Bounds(GlobalInkToolbar); toolbar = Bounds(FloatingToolbar); zoom = Bounds(ZoomIsland);
+        check((penIsland.Bottom <= toolbar.Top + .5 && zoom.Top >= toolbar.Bottom - .5)
+                || penIsland.Right <= toolbar.Left + .5 || penIsland.Left >= toolbar.Right + .5,
+            $"short window keeps the pen toolbar above or beside the control window (pen {penIsland.X:0.#},{penIsland.Y:0.#} {penIsland.Width:0.#}x{penIsland.Height:0.#}" +
+            $" / toolbar {toolbar.X:0.#},{toolbar.Y:0.#} {toolbar.Width:0.#}x{toolbar.Height:0.#} / zoom {zoom.X:0.#},{zoom.Y:0.#} {zoom.Width:0.#}x{zoom.Height:0.#})");
+        GlobalPenButton.IsChecked = false; ApplyExtendedSettings(); await NextLayoutAsync();
         _appWindow.Resize(new Windows.Graphics.SizeInt32(workArea.WorkArea.Width, workArea.WorkArea.Height));
         ApplyExtendedSettings(); await NextLayoutAsync();
 

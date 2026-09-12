@@ -520,8 +520,9 @@ public sealed partial class MainWindow
         Size zoomSize = zoomVisible ? MeasureIsland(ZoomIsland) : default;
 
         double editSpan = editIsland is null ? 0 : (vertical ? editSize.Height : editSize.Width) + gap;
-        // 编辑岛默认占控制窗之前（左/上）一侧；该侧放不下而另一侧更宽松时换到另一侧。
-        bool editBefore = editIsland is not null && !(editSpan > beforeSlack && afterSlack > beforeSlack);
+        // 编辑岛默认占控制窗之前（左/上）一侧；横版时该侧放不下而另一侧更宽松就换到另一侧。
+        // 竖版固定“编辑工具在上、缩放在下”，不换边：换边会把编辑工具挤到控制窗下方，并顶掉下方的缩放岛。
+        bool editBefore = editIsland is not null && (vertical || !(editSpan > beforeSlack && afterSlack > beforeSlack));
         // 缩放岛固定占控制窗之后的一侧，不随空间换边。
         bool zoomBefore = false;
 
