@@ -881,8 +881,7 @@ public sealed partial class MainWindow
         _settings.LayoutMode = "Split"; _settings.ToolbarPosition = "BottomCenter";
         _settings.ToolbarScale = 1; _settings.ToolbarIconOnly = true; _settings.ToolbarRadius = 14;
         // 悬浮岛按教室大屏尺寸验收：窗口太小时浮层会按设计收窄并在岛内滚动，判据要与真实使用场景一致。
-        DisplayArea islandWorkArea = DisplayArea.GetFromWindowId(_appWindow!.Id, DisplayAreaFallback.Primary);
-        _appWindow.Resize(new Windows.Graphics.SizeInt32(islandWorkArea.WorkArea.Width, islandWorkArea.WorkArea.Height));
+        _appWindow!.Resize(VerificationWindowSize());
         ShowBoard(); EnterEditing(); ApplyExtendedSettings(); await NextLayoutAsync();
         await FocusEditorAsync();
         Rect toolbar = Bounds(FloatingToolbar);
@@ -984,8 +983,7 @@ public sealed partial class MainWindow
 
         // 竖版控制窗：浮岛改到控制窗上方、缩放岛改到下方，宽度与控制窗一致。
         // 屏幕高度不足时按设计退回左右，此时只要求浮岛同样贴边、尺寸与控制窗对齐。
-        DisplayArea workArea = DisplayArea.GetFromWindowId(_appWindow!.Id, DisplayAreaFallback.Primary);
-        _appWindow.Resize(new Windows.Graphics.SizeInt32(workArea.WorkArea.Width, workArea.WorkArea.Height));
+        _appWindow.Resize(VerificationWindowSize());
         await NextLayoutAsync();
         _settings.LayoutMode = "Split"; _settings.ToolbarPosition = "CenterLeft";
         ApplyExtendedSettings(); await NextLayoutAsync(); await FocusEditorAsync();
@@ -1052,7 +1050,7 @@ public sealed partial class MainWindow
             $"short window keeps the pen toolbar above or beside the control window (pen {penIsland.X:0.#},{penIsland.Y:0.#} {penIsland.Width:0.#}x{penIsland.Height:0.#}" +
             $" / toolbar {toolbar.X:0.#},{toolbar.Y:0.#} {toolbar.Width:0.#}x{toolbar.Height:0.#} / zoom {zoom.X:0.#},{zoom.Y:0.#} {zoom.Width:0.#}x{zoom.Height:0.#})");
         GlobalPenButton.IsChecked = false; ApplyExtendedSettings(); await NextLayoutAsync();
-        _appWindow.Resize(new Windows.Graphics.SizeInt32(workArea.WorkArea.Width, workArea.WorkArea.Height));
+        _appWindow.Resize(VerificationWindowSize());
         ApplyExtendedSettings(); await NextLayoutAsync();
 
         SetBoardZoom(1);
@@ -1500,8 +1498,8 @@ public sealed partial class MainWindow
         FinishEditing(); SetFullScreen(false); ShowSettings();
         // 退出全屏后窗口可能落在另一块缩放比例不同的屏幕上；先按当前屏幕工作区把窗口放到最大，
         // 让设置页有足够宽度，磁贴预览的右侧固定区才会生效（窄窗口按设计回退到页内预览）。
-        DisplayArea area = DisplayArea.GetFromWindowId(_appWindow!.Id, DisplayAreaFallback.Primary);
-        _appWindow.Resize(new Windows.Graphics.SizeInt32(area.WorkArea.Width, area.WorkArea.Height));
+        // 小屏幕（例如 1024x768）的工作区本身不够宽，这里按固定区所需宽度兜底，窗口允许超出屏幕。
+        _appWindow!.Resize(VerificationWindowSize());
         await Task.Delay(300);
         SettingsRoot.SelectedItem = AboutNavigationGroup;
         await NextLayoutAsync();
@@ -1513,11 +1511,15 @@ public sealed partial class MainWindow
         {
             ShowSettingsPage(page); await NextLayoutAsync();
             // 磁贴预览在宽窗口里固定在设置页右侧，向下滚动编辑选项时始终可见；其余预览仍在可滚动内容中。
+            // 环境给不了宽窗口时（例如 1024x768 的屏幕）应用按设计回退到页内预览，此时同样要求预览真实渲染出来。
+            bool stickyTilePreview = SettingsPreviewHost.Visibility == Visibility.Visible;
             var previews = page == "AppearanceTile"
-                ? FindVisuals<Border>(SettingsPreviewHost).Where(border => border.Name == "TileStickyAppearancePreview").ToList()
+                ? stickyTilePreview
+                    ? FindVisuals<Border>(SettingsPreviewHost).Where(border => border.Name == "TileStickyAppearancePreview").ToList()
+                    : FindVisuals<Border>(_settingsPages[page].Content).Where(border => border.Name == "TileAppearancePreview").ToList()
                 : FindVisuals<Border>(_settingsPages[page].Content).Where(border => border.Name.EndsWith("AppearancePreview")).ToList();
             // 失败时给出窗口与预览区的实际尺寸，便于判断是固定区还是页内回退没有生效。
-            check(SettingsPreviewHost.Visibility == (page == "AppearanceTile" ? Visibility.Visible : Visibility.Collapsed) &&
+            check((page == "AppearanceTile" || SettingsPreviewHost.Visibility == Visibility.Collapsed) &&
                 previews.Count == (page == "AppearanceBackground" ? 3 : 1) &&
                 previews.All(preview => preview.ActualWidth > 0 && preview.ActualHeight > 0),
                 page + " has all requested live previews [" + SettingsPreviewHost.Visibility + " host=" + SettingsContentHost.ActualWidth +
@@ -1537,7 +1539,7 @@ public sealed partial class MainWindow
                 border.Name == "TileAppearancePreview" && border.ActualWidth > 0 && border.ActualHeight > 0),
             "narrow settings page falls back to the inline tile preview");
         await SaveVisualAsync(RootShell, Path.Combine(output, "tile-preview-inline.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
-        _appWindow.Resize(new Windows.Graphics.SizeInt32(area.WorkArea.Width, area.WorkArea.Height));
+        _appWindow.Resize(VerificationWindowSize());
         await Task.Delay(200);
         await NextLayoutAsync();
         ShowSettingsPage("Layout");
@@ -2002,6 +2004,20 @@ public sealed partial class MainWindow
         _settings.Autofill.Subject.Enabled = false;
         _settings.Autofill.Homework.Enabled = false;
         FinishEditing();
+    }
+
+    /// <summary>
+    /// 真实窗口验收用的窗口尺寸（物理像素）：优先按屏幕工作区最大化，
+    /// 小屏（例如 1024x768 的 CI 或投影）按布局验收所需的最小尺寸兜底，窗口允许超出屏幕；
+    /// 系统不接受超出屏幕的尺寸时仍按工作区运行，窄窗口行为由专门的检查覆盖。
+    /// </summary>
+    private Windows.Graphics.SizeInt32 VerificationWindowSize(double minimumWidth = 1600, double minimumHeight = 1000)
+    {
+        DisplayArea area = DisplayArea.GetFromWindowId(_appWindow!.Id, DisplayAreaFallback.Primary);
+        double scale = Math.Max(1, RootShell.XamlRoot?.RasterizationScale ?? 1);
+        return new Windows.Graphics.SizeInt32(
+            Math.Max(area.WorkArea.Width, (int)(minimumWidth * scale)),
+            Math.Max(area.WorkArea.Height, (int)(minimumHeight * scale)));
     }
 
     private async Task NextLayoutAsync()
