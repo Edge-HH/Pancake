@@ -30,6 +30,11 @@ public sealed partial class MainWindow
         { _settings.GridSize = value; _renderedGridWidth = 0; }));
         layout.Children.Add(Note("分屏模式可拖动分隔条调整比例，拖至两端切换为单区；进入编辑模式后可拖动时钟或组件的任意位置，悬停时使用右下角灰色小框缩放。"));
         LayoutSettingsPanel.Children.Clear();
+        layout.Children.Add(Heading("自动布局"));
+        layout.Children.Add(Range("自动排版磁贴间隔", 0, 120, _settings.AutoLayoutGap, value => _settings.AutoLayoutGap = value));
+        layout.Children.Add(Toggle("自动对齐", _settings.AutoLayoutAlign, value => _settings.AutoLayoutAlign = value));
+        layout.Children.Add(Toggle("自动调整磁贴大小", _settings.AutoLayoutResize, value => _settings.AutoLayoutResize = value));
+        layout.Children.Add(Note("点击自动排列时按文字、图片和笔迹收紧磁贴；自动对齐会尽量统一相近尺寸并对齐行列。看板与图片导出共用这些设置，优先从左上角排列。"));
         RegisterSettingsPage("Layout", LayoutSettingsPanel, layout, "布局", "调整布局模式、无限作业板与网格。");
 
         StackPanel tile = SettingsStack();

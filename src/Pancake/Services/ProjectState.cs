@@ -17,6 +17,9 @@ public sealed class BoardSettingsState
     public HashSet<string> CustomizedDockedWidgets { get; set; } = [];
     public bool InfiniteBoard { get; set; }
     public double GridSize { get; set; } = 48;
+    public double AutoLayoutGap { get; set; } = 0;
+    public bool AutoLayoutAlign { get; set; } = true;
+    public bool AutoLayoutResize { get; set; } = true;
     public string GridStyle { get; set; } = "Grid";
     public string GridColor { get; set; } = "#6956565C";
     public double GridLineThickness { get; set; } = 1.6;

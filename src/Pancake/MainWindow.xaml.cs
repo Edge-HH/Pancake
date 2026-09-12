@@ -391,37 +391,47 @@ public sealed partial class MainWindow : Window
         double height = BoardScroller.ActualHeight > 1 ? BoardScroller.ActualHeight : 780;
         try
         {
+            var sizes = ViewModel.Subjects.Select(subject => _settings.AutoLayoutResize
+                ? FindTile(subject)!.MeasureContentSize() : (subject.TileWidth, subject.TileHeight)).ToList();
+            bool aligned = _settings.AutoLayoutResize && _settings.AutoLayoutAlign;
+            var fitted = aligned ? BoardLayout.AlignSizes(sizes) : sizes;
+            double grid = IsGridSnappingEnabled && _settings.AutoLayoutAlign ? GridSize : 0;
+            if (_settings.AutoLayoutResize && grid > 0)
+                fitted = fitted.Select(s => (Math.Ceiling(s.Item1 / grid) * grid, Math.Ceiling(s.Item2 / grid) * grid)).ToList();
             if (_settings.InfiniteBoard)
             {
-                width = Math.Max(width, ViewModel.Subjects.Max(s => s.TileWidth));
-                height = Math.Max(height, ViewModel.Subjects.Sum(s => s.TileHeight + GridSize));
+                width = Math.Max(width, fitted.Max(s => s.Item1));
+                height = Math.Max(height, fitted.Sum(s => s.Item2 + _settings.AutoLayoutGap + grid));
             }
-            if (IsGridSnappingEnabled)
+            List<LayoutRect>? TryArrange(IReadOnlyList<(double Width, double Height)> values)
             {
-                var gridPlacements = BoardLayout.ArrangeGrid(ViewModel.Subjects.Select(s => (s.TileWidth, s.TileHeight)).ToList(), width, height, GridSize);
-                for (int index = 0; index < gridPlacements.Count; index++)
+                try
                 {
-                    var subject = ViewModel.Subjects[index];
-                    var placement = gridPlacements[index];
-                    subject.X = placement.X; subject.Y = placement.Y;
-                    subject.TileWidth = placement.Width; subject.TileHeight = placement.Height;
+                    return BoardLayout.Arrange(values, width, height, _settings.AutoLayoutGap, _settings.AutoLayoutAlign, grid);
                 }
-                BuildTiles();
-                ScheduleSave();
-                return;
+                catch (InvalidOperationException) { return null; }
             }
-            var placements = ExportLayout.Arrange(ViewModel.Subjects.Select(subject => (subject.TileWidth, subject.TileHeight)).ToList(), width, height, 0);
-            double scale = Math.Min(1, placements.Min(placement => placement.Scale));
-            if (ViewModel.Subjects.Any(subject => subject.TileWidth * scale < 280 || subject.TileHeight * scale < SubjectTileControl.MinimumTileHeight))
+            List<LayoutRect>? placements = TryArrange(fitted);
+            // 对齐和网格留白都可能让尺寸变大，空间紧张时退回精确内容尺寸而不是裁剪内容。
+            if (placements is null && aligned) placements = TryArrange(sizes);
+            if (placements is null && _settings.AutoLayoutResize)
+            {
+                // 内容尺寸仍放不下时等比缩小，保留旧版“总能排好”的行为；磁贴内文字可滚动，不会因此丢失。
+                for (double scale = .9; scale >= .4 && placements is null; scale -= .1)
+                {
+                    var scaled = sizes.Select(s => (Math.Max(SubjectTileControl.MinimumTileWidth, s.Item1 * scale),
+                        Math.Max(SubjectTileControl.MinimumTileHeight, s.Item2 * scale))).ToList();
+                    placements = TryArrange(scaled);
+                }
+            }
+            if (placements is null)
                 throw new InvalidOperationException("当前作业板空间不足，无法在不低于最小磁贴尺寸的情况下自动排列。");
             for (int index = 0; index < placements.Count; index++)
             {
-                SubjectBoard subject = ViewModel.Subjects[index];
-                ExportTilePlacement placement = placements[index];
-                subject.X = placement.X;
-                subject.Y = placement.Y;
-                subject.TileWidth *= scale;
-                subject.TileHeight *= scale;
+                var subject = ViewModel.Subjects[index];
+                var placement = placements[index];
+                subject.X = placement.X; subject.Y = placement.Y;
+                subject.TileWidth = placement.Width; subject.TileHeight = placement.Height;
             }
             BuildTiles();
             ScheduleSave();

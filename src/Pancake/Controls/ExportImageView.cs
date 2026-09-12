@@ -17,6 +17,17 @@ namespace Pancake.Controls;
 public sealed class ExportImageView : Grid
 {
     private readonly ProjectDocument _project;
+    private readonly BoardSettingsState _settings;
+    private readonly MediaLibrary _media;
+    private readonly BackgroundSettings _tileStyle;
+    private readonly Image _backgroundImage = new() { Stretch = Stretch.Fill, IsHitTestVisible = false };
+    private ImageSource? _blurredBackground, _tileImage;
+    private string _backgroundPath = "", _backgroundMode = "Zoom";
+    private int _appearanceRevision;
+    private Task _appearanceTask = Task.CompletedTask;
+    private bool _appearanceReady;
+    private readonly NumberBox _titleSize = new() { Header = "标题字号", Minimum = 12, Maximum = 200, Value = 48 };
+    private readonly AutoSuggestBox _titleFont = new() { Header = "标题字体", Text = FontService.FamilyName };
     private readonly Window _window;
     private readonly Action _close;
     private readonly Canvas _canvas = new();
@@ -46,11 +57,18 @@ public sealed class ExportImageView : Grid
     private double _startX, _startY;
     private readonly TaskCompletionSource _loaded = new();
 
-    public ExportImageView(ProjectDocument project, Window window, Action close)
+    public ExportImageView(ProjectDocument project, Window window, Action close, BoardSettingsState? settings = null, MediaLibrary? media = null)
     {
         _project = project; _window = window; _close = close;
+        _settings = ProjectStore.Clone(settings ?? new BoardSettingsState());
+        _tileStyle = _settings.TileBackground;
+        _media = media ?? new MediaLibrary(new AppDataStore().DataDirectory);
         _background = BoardTheme.IsLight ? Microsoft.UI.Colors.White : Color.FromArgb(255, 31, 31, 31);
-        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(280) });
+        var boardStyle = _settings.SharedBackgroundEnabled && _settings.LayoutMode == "Split" ? _settings.SharedBackground : _settings.BoardBackground;
+        if (MediaLibrary.IsImage(boardStyle.ImagePath) && File.Exists(boardStyle.ImagePath)) _backgroundPath = boardStyle.ImagePath;
+        _backgroundMode = boardStyle.ImageMode;
+        _background = GridAppearance.ParseColor(boardStyle.Color, _background);
+        ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(300) });
         ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         StackPanel options = new() { Padding = new Thickness(20), Spacing = 12 };
         ScrollViewer optionsScroll = new() { Content = options, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -60,13 +78,52 @@ public sealed class ExportImageView : Grid
         options.Children.Add(_ratio); options.Children.Add(_width); options.Children.Add(_height);
         _titleInput.Text = $"{project.CreatedAt:M月d日}作业";
         options.Children.Add(_showTitle); options.Children.Add(_titleInput); options.Children.Add(_alignment);
+        options.Children.Add(_titleSize); options.Children.Add(_titleFont);
+        _titleFont.ItemsSource = FontService.AvailableFamilies;
+        _titleFont.TextChanged += (_, e) =>
+        {
+            if (e.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+                _titleFont.ItemsSource = FontService.AvailableFamilies.Where(f => f.Contains(_titleFont.Text, StringComparison.CurrentCultureIgnoreCase)).ToArray();
+        };
+        void ApplyTitleFont(string family)
+        {
+            if (!FontService.AvailableFamilies.Contains(family, StringComparer.CurrentCultureIgnoreCase)) return;
+            _title.FontFamily = family == FontService.FamilyName ? FontService.DefaultFamily : new FontFamily(family);
+            UpdateTitleAndArrange();
+        }
+        _titleFont.SuggestionChosen += (_, e) => { _titleFont.Text = (string)e.SelectedItem; ApplyTitleFont(_titleFont.Text); };
+        _titleFont.QuerySubmitted += (_, e) => ApplyTitleFont(e.ChosenSuggestion as string ?? e.QueryText);
+        _titleSize.ValueChanged += (_, _) => { if (double.IsFinite(_titleSize.Value)) UpdateTitleAndArrange(); };
         _palette.SelectedIndex = project.Palette == "Macaron" ? 1 : 0;
         options.Children.Add(_palette);
         Button backgroundButton = new() { Content = "背景颜色", HorizontalAlignment = HorizontalAlignment.Stretch };
         ColorPicker picker = new() { Color = _background, IsAlphaEnabled = false, IsColorChannelTextInputVisible = true };
         backgroundButton.Flyout = new Flyout { Content = picker };
         picker.ColorChanged += (_, args) => { _background = args.NewColor; RefreshAppearance(); };
-        options.Children.Add(backgroundButton); options.Children.Add(_scale);
+        options.Children.Add(backgroundButton);
+        Button chooseImage = new() { Content = "选择背景图片", HorizontalAlignment = HorizontalAlignment.Stretch };
+        chooseImage.Click += async (_, _) =>
+        {
+            try
+            {
+                FileOpenPicker imagePicker = new();
+                foreach (string extension in MediaLibrary.ImageExtensions) imagePicker.FileTypeFilter.Add(extension);
+                WinRT.Interop.InitializeWithWindow.Initialize(imagePicker, WinRT.Interop.WindowNative.GetWindowHandle(_window));
+                StorageFile? file = await imagePicker.PickSingleFileAsync();
+                if (file is not null) await SelectBackgroundAsync(file.Path);
+            }
+            catch (Exception ex) { _status.Text = "无法读取背景图片：" + ex.Message; }
+        };
+        options.Children.Add(chooseImage);
+        options.Children.Add(new RecentImagesView(_media, SelectBackgroundAsync));
+        Button clearImage = new() { Content = "移除背景图片", HorizontalAlignment = HorizontalAlignment.Stretch };
+        clearImage.Click += (_, _) => { _backgroundPath = ""; RefreshAppearance(); }; options.Children.Add(clearImage);
+        Slider opacity = new() { Header = "磁贴背景透明度（%）", Minimum = 0, Maximum = 100, Value = (1 - _tileStyle.ColorOpacity) * 100 };
+        opacity.ValueChanged += (_, _) => { _tileStyle.ColorOpacity = 1 - opacity.Value / 100; _tileStyle.ColorCleared = false; UpdateSurfaces(); };
+        options.Children.Add(opacity);
+        Slider blur = new() { Header = "磁贴背景模糊", Minimum = 0, Maximum = 100, Value = _tileStyle.Glass ? _tileStyle.Blur : 0 };
+        blur.ValueChanged += (_, _) => { _tileStyle.Blur = blur.Value; _tileStyle.Glass = blur.Value > 0; RefreshAppearance(); };
+        options.Children.Add(blur); options.Children.Add(_scale);
         Button arrange = new() { Content = "自动排列磁贴", HorizontalAlignment = HorizontalAlignment.Stretch };
         arrange.Click += (_, _) => AutoArrange(); options.Children.Add(arrange);
         options.Children.Add(_status); options.Children.Add(_save);
@@ -78,6 +135,7 @@ public sealed class ExportImageView : Grid
         Viewbox preview = new() { Child = _stage, Stretch = Stretch.Uniform, Margin = new Thickness(24), HorizontalAlignment = HorizontalAlignment.Stretch, VerticalAlignment = VerticalAlignment.Stretch };
         Grid.SetColumn(preview, 1); Children.Add(preview);
         Grid.SetColumn(_renderHost, 1); Children.Add(_renderHost);
+        _canvas.Children.Add(_backgroundImage);
         _canvas.Children.Add(_title);
         _title.FontFamily = FontService.DefaultFamily;
         _title.FontWeight = Microsoft.UI.Text.FontWeights.SemiBold;
@@ -104,13 +162,21 @@ public sealed class ExportImageView : Grid
             var subjects = AppDataStore.RestoreSubjects(_project.Subjects.OrderBy(s => s.Y).ThenBy(s => s.X));
             foreach (var subject in subjects)
             {
-                ExportTileVisual tile = new(subject, _background, _project.Palette);
+                ExportTileVisual tile = new(subject, _background, _project.Palette, _settings.TileTitleSize);
                 _tiles.Add(tile); _canvas.Children.Add(tile);
             }
             foreach (ExportTileVisual tile in _tiles) await tile.PrepareAsync();
+            if (MediaLibrary.IsImage(_tileStyle.ImagePath) && File.Exists(_tileStyle.ImagePath))
+            {
+                BitmapImage image = new();
+                var file = await StorageFile.GetFileFromPathAsync(_tileStyle.ImagePath);
+                using var stream = await file.OpenReadAsync();
+                await image.SetSourceAsync(stream); _tileImage = image;
+            }
             _ready = true;
             RefreshAppearance();
             AutoArrange();
+            await _appearanceTask;
         }
         catch (Exception ex) { _status.Text = "无法生成预览：" + ex.Message; _save.IsEnabled = false; }
     }
@@ -152,19 +218,21 @@ public sealed class ExportImageView : Grid
         _canvas.Height = _handles.Height = _stage.Height = _height.Value;
         _canvas.Clip = new RectangleGeometry { Rect = new Rect(0, 0, _width.Value, _height.Value) };
         _canvas.Background = new SolidColorBrush(_background);
+        _backgroundImage.Width = _width.Value; _backgroundImage.Height = _height.Value;
         MeasureTitle();
+        if (_ready) RefreshAppearance();
     }
 
     private void MeasureTitle()
     {
-        double margin = Math.Min(_width.Value, _height.Value) * .025;
+        double margin = 0;
         _title.Text = _titleInput.Text;
-        _title.FontSize = Math.Max(12, Math.Min(_width.Value, _height.Value) * .045);
+        _title.FontSize = double.IsFinite(_titleSize.Value) ? _titleSize.Value : 48;
         _title.Width = _width.Value - 2 * margin;
         _title.TextAlignment = _alignment.SelectedIndex switch { 1 => TextAlignment.Center, 2 => TextAlignment.Right, _ => TextAlignment.Left };
         _title.Visibility = _showTitle.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         _title.Measure(new Size(_title.Width, double.PositiveInfinity));
-        _titleHeight = _showTitle.IsChecked == true ? _title.DesiredSize.Height + margin : 0;
+        _titleHeight = _showTitle.IsChecked == true ? _title.DesiredSize.Height + Math.Max(8, _settings.AutoLayoutGap) : 0;
         Canvas.SetLeft(_title, margin); Canvas.SetTop(_title, margin);
     }
 
@@ -176,6 +244,37 @@ public sealed class ExportImageView : Grid
         _title.Foreground = new SolidColorBrush(light ? Microsoft.UI.Colors.Black : Microsoft.UI.Colors.White);
         if (!_ready) return;
         foreach (ExportTileVisual tile in _tiles) tile.SetAppearance(_background, _palette.SelectedIndex == 1 ? "Macaron" : "Vivid");
+        _appearanceTask = RefreshBackdropAsync(++_appearanceRevision);
+    }
+
+    private async Task SelectBackgroundAsync(string path)
+    {
+        try { _backgroundPath = await _media.ImportAsync(path); RefreshAppearance(); await _appearanceTask; }
+        catch (Exception ex) { _status.Text = "无法读取背景图片：" + ex.Message; }
+    }
+
+    private async Task RefreshBackdropAsync(int revision)
+    {
+        _appearanceReady = false;
+        _save.IsEnabled = false;
+        try
+        {
+            await Task.Delay(100);
+            if (revision != _appearanceRevision) return;
+            var images = await ExportBackdrop.RenderAsync(_backgroundPath, _background, (int)_width.Value, (int)_height.Value,
+                _tileStyle.Glass ? _tileStyle.Blur : 0, _backgroundMode);
+            if (revision != _appearanceRevision) return;
+            _backgroundImage.Source = images.Image; _blurredBackground = images.Blurred;
+            _appearanceReady = true;
+            UpdateSurfaces(); UpdatePlacements();
+        }
+        catch (Exception ex) { if (revision == _appearanceRevision) { _status.Text = "无法生成背景：" + ex.Message; _save.IsEnabled = false; } }
+    }
+
+    private void UpdateSurfaces()
+    {
+        for (int i = 0; i < _placements.Count; i++)
+            _tiles[i].SetSurface(_blurredBackground, _width.Value, _height.Value, _placements[i], _tileStyle, _tileImage);
     }
 
     private void AutoArrange()
@@ -183,7 +282,14 @@ public sealed class ExportImageView : Grid
         if (!_ready) return;
         try
         {
-            _placements = ExportLayout.Arrange(_tiles.Select(t => (t.Width, t.Height)).ToList(), _width.Value, _height.Value, _titleHeight);
+            foreach (var tile in _tiles) tile.FitContent(_settings.AutoLayoutResize);
+            if (_settings.AutoLayoutResize && _settings.AutoLayoutAlign)
+            {
+                var sizes = BoardLayout.AlignSizes(_tiles.Select(t => (t.Width, t.Height)).ToList());
+                for (int i = 0; i < sizes.Count; i++) _tiles[i].SetSize(sizes[i].Width, sizes[i].Height);
+            }
+            _placements = ExportLayout.Arrange(_tiles.Select(t => (t.Width, t.Height)).ToList(), _width.Value, _height.Value,
+                _titleHeight, _settings.AutoLayoutGap, _settings.AutoLayoutAlign);
             _selected = -1; _scale.IsEnabled = false;
             RebuildHandles();
             UpdatePlacements();
@@ -250,7 +356,8 @@ public sealed class ExportImageView : Grid
 
     private void UpdatePlacements()
     {
-        bool invalid = false;
+        UpdateSurfaces();
+        bool invalid = _placements.Count != _tiles.Count;
         for (int i = 0; i < _placements.Count; i++)
         {
             ExportTilePlacement p = _placements[i];
@@ -264,7 +371,7 @@ public sealed class ExportImageView : Grid
             invalid |= overlap || outside;
             handle.BorderBrush = new SolidColorBrush(overlap || outside ? Microsoft.UI.Colors.Red : i == _selected ? Microsoft.UI.Colors.DodgerBlue : Microsoft.UI.Colors.Transparent);
         }
-        _save.IsEnabled = _ready && !invalid && !_saving && _tiles.Count > 0;
+        _save.IsEnabled = _ready && _appearanceReady && !invalid && !_saving && _tiles.Count > 0;
         _status.Text = _tiles.Count == 0 ? "没有可导出的科目磁贴。" : invalid ? "磁贴存在重叠或越界，请调整或点击自动排列。" :
             _placements.Any(p => p.Scale * 20 < 12) ? "内容较多，导出文字可能偏小；可增大输出像素尺寸。" : "预览已就绪，标题区域已预留。";
     }
@@ -285,11 +392,19 @@ public sealed class ExportImageView : Grid
             _status.Text = $"已导出 {width} × {height} PNG：{file.Path}";
         }
         catch (Exception ex) { _status.Text = "导出失败：" + ex.Message; }
-        finally { _saving = false; _handles.IsHitTestVisible = true; _save.IsEnabled = _ready && _tiles.Count > 0; }
+        finally
+        {
+            _saving = false; _handles.IsHitTestVisible = true;
+            string status = _status.Text;
+            UpdatePlacements();
+            _status.Text = status;
+        }
     }
     internal async Task RenderToFileAsync(string path)
     {
         if (!_ready || _tiles.Count == 0) throw new InvalidOperationException("导出画布尚未就绪。");
+        await _appearanceTask;
+        if (!_appearanceReady) throw new InvalidOperationException("背景尚未生成，请重新选择背景后再导出。");
         // 暂时移出 Viewbox，避免把预览阶段已经栅格化的小字号再次放大。
         // 同一画布仍连接主窗口视觉树，超出窗口的部分也可被 RenderTargetBitmap 捕获。
         _stage.Children.Remove(_canvas);
@@ -323,6 +438,8 @@ public sealed class ExportImageView : Grid
     }
 
 #if PANCAKE_UI_TESTS
+    internal IReadOnlyList<ExportTilePlacement> VerificationPlacements => _placements;
+    internal Task VerificationBackgroundAsync(string path) => SelectBackgroundAsync(path);
     internal string VerificationStatus => _status.Text;
     internal void VerificationSetCanvas(int ratio, int titleAlignment)
     {

@@ -16,6 +16,8 @@ public static class FontService
     private static readonly Lazy<string[]> Fonts = new(EnumerateFonts);
     private static readonly ConditionalWeakTable<RichEditBox, List<(ITextRange Range, string Family)>> Fallbacks = new();
 
+    public static IReadOnlyList<string> AvailableFamilies => Fonts.Value;
+
     public static string NormalizeRtf(string rtf) => rtf.Replace(ResourceName, FamilyName, StringComparison.OrdinalIgnoreCase);
 
     public static void RebindBundledFont(RichEditBox editor, IReadOnlyList<FontFallbackState>? savedFallbacks = null)

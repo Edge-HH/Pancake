@@ -82,16 +82,36 @@ try
         Check(!layout.SelectMany((p, i) => layout.Skip(i + 1).Select(q => ExportLayout.Overlap(p, q))).Any(v => v), "自动排版重叠");
     }
     Check(ExportLayout.Arrange([], 1000, 1000, 100).Count == 0, "空导出错误");
-    var packed = BoardLayout.ArrangeGrid([(430, 326), (430, 326), (430, 326)], 1100, 780);
-    Check(packed.All(p => p.X % 48 == 0 && p.Y % 48 == 0 && p.Width % 48 == 0 && p.Height % 48 == 0), "网格自动排列必须对齐位置及尺寸");
+    var defaults = JsonSerializer.Deserialize<BoardSettingsState>("{}")!;
+    Check(defaults.AutoLayoutAlign && defaults.AutoLayoutResize && defaults.AutoLayoutGap == 0, "旧设置应启用自动对齐和内容裁切");
+    foreach (bool align in new[] { false, true })
+    foreach (double gap in new[] { 0d, 17d, 60d })
+    {
+        var layout = BoardLayout.Arrange([(300, 160), (280, 96), (420, 240), (300, 140)], 1100, 900, gap, align);
+        Check(layout.Any(p => p.X == 0 && p.Y == 0), "自动布局应从左上角开始");
+        Check(layout[0].Width == 300 && layout[0].Height == 160, "排版不能自行缩小磁贴");
+        Check(!layout.SelectMany((p, i) => layout.Skip(i + 1).Select(q =>
+            p.X < q.X + q.Width + gap - .001 && p.X + p.Width + gap > q.X + .001 &&
+            p.Y < q.Y + q.Height + gap - .001 && p.Y + p.Height + gap > q.Y + .001)).Any(v => v), "所有磁贴必须保留最小间隔");
+    }
+    var alignedSizes = BoardLayout.AlignSizes([(300, 100), (310, 112), (500, 300)]);
+    Check(alignedSizes[0] == (310, 112) && alignedSizes[1] == (310, 112) && alignedSizes[2] == (500, 300), "相近尺寸只向上对齐且不扩张无关尺寸");
+    Reject(() => BoardLayout.Arrange([(500, 400)], 300, 200), "不能为自动排列裁掉内容");
+    var exportPacked = ExportLayout.Arrange([(300, 100), (300, 100)], 1000, 500, 80, 20);
+    Check(exportPacked[0].X == 0 && exportPacked[0].Y == 80 && exportPacked[1].X == 320 && exportPacked[1].Scale == 1, "导出继承间隔并向左上排紧");
+    var packed = BoardLayout.Arrange([(432, 336), (432, 336), (432, 336)], 1100, 780, 0, true, 48);
+    Check(packed.All(p => p.X % 48 == 0 && p.Y % 48 == 0), "网格自动排列必须对齐位置");
+    Check(packed.All(p => p.Width == 432 && p.Height == 336), "自动排列必须保留传入尺寸");
     Check(packed[1].X == packed[0].X + packed[0].Width && packed[2].Y == packed[0].Height, "网格排列不应留下无意义间隔");
     for (int count = 1; count <= 12; count++)
     {
-        var compact = BoardLayout.ArrangeGrid(Enumerable.Range(0, count).Select(i => (400d + i * 8, 180d + i * 6)).ToList(), 1200, 780);
-        Check(compact.All(p => p.X >= 0 && p.Y >= 0 && p.X + p.Width <= 1200 && p.Y + p.Height <= 780 && p.Width >= 280 && p.Height >= 96), "紧密排列不得越界或低于最小尺寸");
+        var sizes = Enumerable.Range(0, count).Select(i => (400d + i * 8, 180d + i * 6)).ToList();
+        var compact = BoardLayout.Arrange(sizes, 1200, 1600);
+        Check(compact.Select((p, i) => p.Width == sizes[i].Item1 && p.Height == sizes[i].Item2).All(v => v), "紧密排列必须保留磁贴尺寸");
+        Check(compact.All(p => p.X >= 0 && p.Y >= 0 && p.X + p.Width <= 1200 && p.Y + p.Height <= 1600), "紧密排列不得越界");
         Check(!compact.SelectMany((p, i) => compact.Skip(i + 1).Select(q => p.X < q.X + q.Width && p.X + p.Width > q.X && p.Y < q.Y + q.Height && p.Y + p.Height > q.Y)).Any(v => v), "紧密排列不得重叠");
     }
-    Reject(() => BoardLayout.ArrangeGrid([(400, 300)], 250, 90), "空间不足应明确报错");
+    Reject(() => BoardLayout.Arrange([(400, 300)], 250, 90), "空间不足应明确报错");
     var centered = BoardLayout.Snap(new(347, 249, 300, 200), [], 1000, 700);
     Check(centered.X == 350 && centered.Y == 250 && centered.GuideX == 500 && centered.GuideY == 350, "看板中心吸附错误");
     var adjacent = BoardLayout.Snap(new(397, 104, 300, 200), [new(100, 100, 300, 200)], 1200, 800);

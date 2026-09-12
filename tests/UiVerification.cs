@@ -52,6 +52,13 @@ public sealed partial class MainWindow
             {
                 void Check(bool condition, string message) { if (!condition) throw new Exception(message); evidence.Add("PASS: " + message); }
                 evidence.Add("Started " + DateTime.Now.ToString("O"));
+                if (Environment.GetCommandLineArgs().Contains("--auto-layout-only"))
+                {
+                    await NextLayoutAsync();
+                    await VerifyAutoLayoutExportAsync(output, Check);
+                    evidence.Add("UI_VERIFICATION_OK");
+                    return;
+                }
                 List<Exception> backdropExceptions = [];
                 EventHandler<FirstChanceExceptionEventArgs> backdropExceptionHandler = (_, args) =>
                 {
@@ -255,6 +262,7 @@ public sealed partial class MainWindow
                 await SaveVisualAsync(RootShell, Path.Combine(output, "about.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
                 await VerifyExtendedSettingsAsync(output, Check);
                 await VerifyPresentationSettingsAsync(output, Check);
+                await VerifyAutoLayoutExportAsync(output, Check);
                 evidence.Add("UI_VERIFICATION_OK");
             }
             catch (Exception ex) { evidence.Add("UI_VERIFICATION_FAILED\n" + ex); }
@@ -264,6 +272,69 @@ public sealed partial class MainWindow
                 Close();
             }
         };
+    }
+
+    private async Task VerifyAutoLayoutExportAsync(string output, Action<bool, string> check)
+    {
+        if (CurrentProject is null) ProjectStore.Create(_library, false);
+        ShowBoard(); EnterEditing();
+        _settings.InfiniteBoard = true; _settings.AutoLayoutGap = 20;
+        _settings.AutoLayoutAlign = true; _settings.AutoLayoutResize = true;
+        _settings.GridSnappingEnabled = false;
+        ViewModel.ReplaceSubjects([]);
+        var subject = ViewModel.AddSubject("自动布局");
+        subject.TileWidth = 600; subject.TileHeight = 500;
+        subject.Entries.Add(new HomeworkEntry { Content = "完整显示这行文字" });
+        var ink = new InkStrokeData { Color = Microsoft.UI.Colors.Red, Thickness = 6 };
+        ink.Points.AddRange([new Point(100, 180), new Point(290, 180)]); subject.InkStrokes.Add(ink);
+        BuildTiles(); await NextLayoutAsync();
+        AutoArrangeButton_Click(AutoArrangeButton, new RoutedEventArgs()); await NextLayoutAsync();
+        check(subject.X == 0 && subject.Y == 0 && subject.TileHeight >= 183 && subject.TileHeight < 500,
+            $"auto layout trims empty height while preserving ink and starts at top left ({subject.X},{subject.Y}; {subject.TileWidth} x {subject.TileHeight})");
+        check(subject.TileWidth >= 293 && subject.TileWidth < 600, $"auto layout trims empty width while preserving text and ink ({subject.TileWidth} x {subject.TileHeight})");
+        double w = subject.TileWidth, h = subject.TileHeight;
+        _settings.AutoLayoutResize = false;
+        AutoArrangeButton_Click(AutoArrangeButton, new RoutedEventArgs()); await NextLayoutAsync();
+        check(subject.TileWidth == w && subject.TileHeight == h, "disabled auto resize preserves board dimensions");
+
+        ProjectDocument fixture = new() { Name = "导出验证", Subjects =
+        [new SubjectState { Name = "裁切笔迹", Width = 300, Height = 220,
+            Entries = [new HomeworkState { Content = "文字清晰，不随背景透明" }],
+            InkStrokes = [new InkStrokeState { Color = "#FFFF0000", Thickness = 6,
+                Points = [new PointState { X = 220, Y = 160 }, new PointState { X = 480, Y = 160 }] }] },
+         new SubjectState { Name = "相邻磁贴", Width = 300, Height = 220, Entries = [new HomeworkState { Content = "最小间隔 20" }] }] };
+        BoardSettingsState settings = new() { AutoLayoutResize = false, AutoLayoutGap = 20, TileTitleSize = 35,
+            TileBackground = new() { ColorOpacity = .4, Glass = true, Blur = 12 } };
+        ExportImageView export = new(fixture, this, () => { }, settings, MediaLibraryStore);
+        ExportOverlay.Children.Clear(); ExportOverlay.Children.Add(export); ExportOverlay.Visibility = Visibility.Visible;
+        await export.InitializeAsync(); await NextLayoutAsync();
+        var placements = export.VerificationPlacements;
+        check(placements[0].X == 0 && placements[1].X == 320 && placements.All(p => p.Width == 300 && p.Height == 220),
+            "export inherits gap and keeps original sizes when resize is disabled");
+        var visual = FindVisuals<ExportTileVisual>(export).First();
+        check(((RectangleGeometry)visual.Clip).Rect.Width == 300, "export clips overflowing ink at tile boundary");
+        var opacity = FindVisuals<Slider>(export).Single(s => s.Header?.ToString() == "磁贴背景透明度（%）");
+        check(Math.Abs(opacity.Value - 60) < .01, "export inherits current tile transparency");
+        var blur = FindVisuals<Slider>(export).Single(s => s.Header?.ToString() == "磁贴背景模糊");
+        check(Math.Abs(blur.Value - 12) < .01, "export inherits current tile blur");
+        opacity.Value = 80;
+        var titleSize = FindVisuals<NumberBox>(export).Single(n => n.Header?.ToString() == "标题字号");
+        titleSize.Value = 60;
+        // 生成一张独立于主流程的背景图，保证只跑专项验证时也能覆盖最近图片历史。
+        string backgroundPath = Path.Combine(output, "export-background-source.png");
+        Grid backgroundSource = new() { Width = 320, Height = 240, Background = new SolidColorBrush(Microsoft.UI.Colors.OrangeRed) };
+        ExportOverlay.Children.Clear(); ExportOverlay.Children.Add(backgroundSource);
+        await NextLayoutAsync();
+        await SaveVisualAsync(backgroundSource, backgroundPath, 320, 240);
+        ExportOverlay.Children.Clear(); ExportOverlay.Children.Add(export);
+        await NextLayoutAsync();
+        await export.VerificationBackgroundAsync(backgroundPath);
+        await NextLayoutAsync();
+        check(MediaLibraryStore.RecentImages().Count > 0 && FindVisuals<RecentImagesView>(export).Any(), "export background shares recent image history");
+        await export.RenderToFileAsync(Path.Combine(output, "export-background-blur.png"));
+        await SaveVisualAsync(RootShell, Path.Combine(output, "export-settings.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+        check(settings.TileBackground.ColorOpacity == .4 && fixture.Subjects[0].Width == 300, "export adjustments do not mutate original settings or project");
+        ExportOverlay.Children.Clear(); ExportOverlay.Visibility = Visibility.Collapsed;
     }
 
     private async Task VerifyExtendedSettingsAsync(string output, Action<bool, string> check)
@@ -503,6 +574,12 @@ public sealed partial class MainWindow
                 page + " has all requested live previews");
             await SaveVisualAsync(RootShell, Path.Combine(output, page + "-preview.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
         }
+        ShowSettingsPage("Layout");
+        await NextLayoutAsync();
+        check(FindVisuals<Slider>(_settingsPages["Layout"].Content).Any(slider => Equals(slider.Header, "自动排版磁贴间隔")) &&
+            FindVisuals<ToggleSwitch>(_settingsPages["Layout"].Content).Any(toggle => Equals(toggle.Header, "自动对齐") && toggle.IsOn) &&
+            FindVisuals<ToggleSwitch>(_settingsPages["Layout"].Content).Any(toggle => Equals(toggle.Header, "自动调整磁贴大小") && toggle.IsOn),
+            "layout page exposes auto layout gap, alignment and resize defaults");
         ShowSettingsPage("AppearanceTile");
         await NextLayoutAsync();
         var originalTile = FindVisuals<SubjectTileControl>(_appearancePreviews["Tile"]).Single();

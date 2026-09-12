@@ -19,7 +19,7 @@ namespace Pancake.Controls;
 /// </summary>
 public sealed class SubjectTileControl : Grid
 {
-    private const double MinimumTileWidth = 280;
+    internal const double MinimumTileWidth = 280;
     internal const double MinimumTileHeight = 96;
     private const double MaximumTileWidth = 900;
     private const double MaximumTileHeight = 680;
@@ -202,6 +202,35 @@ public sealed class SubjectTileControl : Grid
     }
 
     public bool IsMoving { get; private set; }
+
+    internal (double Width, double Height) MeasureContentSize()
+    {
+        // 用实际富文本和附件控件测量，保留换行、字体和图片高度；不把滚动视口当成内容高度。
+        _entriesPanel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        _nameEditor.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        double contentWidth = _nameEditor.DesiredSize.Width + 110;
+        foreach (var child in _entriesPanel.Children)
+        {
+            if (child is Grid row && row.Children.OfType<RichEditBox>().FirstOrDefault() is { } editor)
+                contentWidth = Math.Max(contentWidth, RichTextContentMetrics.Width(editor) + 134);
+            else if (child is FrameworkElement attachment)
+                contentWidth = Math.Max(contentWidth, attachment.DesiredSize.Width + 34);
+        }
+        double width = Math.Max(MinimumTileWidth, Math.Min(Width, contentWidth));
+        double inkRight = 0, inkBottom = 0;
+        foreach (var stroke in _subject.InkStrokes)
+        foreach (var point in stroke.Points)
+        {
+            inkRight = Math.Max(inkRight, point.X + stroke.Thickness * stroke.TipScaleX / 2);
+            inkBottom = Math.Max(inkBottom, point.Y + stroke.Thickness * stroke.TipScaleY / 2);
+        }
+        width = Math.Max(width, inkRight);
+        _entriesPanel.Measure(new Size(Math.Max(1, width - 34), double.PositiveInfinity));
+        double height = Math.Max(MinimumTileHeight, Math.Max(inkBottom,
+            _entriesPanel.DesiredSize.Height + _nameEditor.DesiredSize.Height + 38));
+        InvalidateMeasure();
+        return (width, height);
+    }
 
     public void ApplyAppearance(BoardSettingsState settings)
     {

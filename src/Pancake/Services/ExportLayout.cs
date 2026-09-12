@@ -12,33 +12,26 @@ public sealed class ExportTilePlacement
 /// <summary>独立于窗口和 DPI 的导出排版；网格留白和标题区域以画布逻辑坐标计算。</summary>
 public static class ExportLayout
 {
-    public static List<ExportTilePlacement> Arrange(IReadOnlyList<(double Width, double Height)> tiles, double width, double height, double titleHeight)
+    public static List<ExportTilePlacement> Arrange(IReadOnlyList<(double Width, double Height)> tiles,
+        double width, double height, double titleHeight, double gap = 0, bool align = true)
     {
         if (tiles.Count == 0) return [];
-        double margin = Math.Min(width, height) * .025;
-        double gap = margin * .6;
-        double availableWidth = width - 2 * margin;
-        double availableHeight = height - 2 * margin - titleHeight;
+        double availableHeight = height - titleHeight;
         if (availableHeight <= 0) throw new InvalidOperationException("标题过高，画布没有足够的磁贴空间。");
-        List<ExportTilePlacement> best = [];
-        double bestScale = 0;
-        for (int columns = 1; columns <= tiles.Count; columns++)
+        // 先按原尺寸靠左上排列；仅在导出画布不足时等比缩放整个磁贴，文字和笔迹一起缩放。
+        for (int percent = 100; percent >= 1; percent--)
         {
-            int rows = (tiles.Count + columns - 1) / columns;
-            double cellWidth = (availableWidth - (columns - 1) * gap) / columns;
-            double cellHeight = (availableHeight - (rows - 1) * gap) / rows;
-            double scale = tiles.Min(t => Math.Min(cellWidth / t.Width, cellHeight / t.Height));
-            if (scale <= bestScale) continue;
-            bestScale = scale;
-            best = tiles.Select((t, i) => new ExportTilePlacement
+            double scale = percent / 100d;
+            try
             {
-                X = margin + i % columns * (cellWidth + gap),
-                Y = margin + titleHeight + i / columns * (cellHeight + gap),
-                Width = t.Width * scale, Height = t.Height * scale, Scale = scale
-            }).ToList();
+                var layout = BoardLayout.Arrange(tiles.Select(t => (t.Width * scale, t.Height * scale)).ToList(),
+                    width, availableHeight, gap, align);
+                return layout.Select(p => new ExportTilePlacement
+                { X = p.X, Y = p.Y + titleHeight, Width = p.Width, Height = p.Height, Scale = scale }).ToList();
+            }
+            catch (InvalidOperationException) { }
         }
-        if (best.Count == 0) throw new InvalidOperationException("画布无法容纳这些磁贴。");
-        return best;
+        throw new InvalidOperationException("画布无法容纳这些磁贴，请增大画布或减小间隔。");
     }
 
     public static bool Overlap(ExportTilePlacement a, ExportTilePlacement b) =>

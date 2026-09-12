@@ -356,7 +356,7 @@ public sealed partial class MainWindow
         PersistProjects();
         var snapshot = ProjectStore.Clone(project);
         snapshot.Theme = _settings.Theme; snapshot.Palette = _settings.Palette;
-        ExportImageView view = new(snapshot, this, () => { ExportOverlay.Children.Clear(); ExportOverlay.Visibility = Visibility.Collapsed; });
+        ExportImageView view = new(snapshot, this, () => { ExportOverlay.Children.Clear(); ExportOverlay.Visibility = Visibility.Collapsed; }, _settings, MediaLibraryStore);
         ExportOverlay.Children.Clear(); ExportOverlay.Children.Add(view); ExportOverlay.Visibility = Visibility.Visible;
         await view.InitializeAsync();
     });
