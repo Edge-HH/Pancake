@@ -73,6 +73,13 @@ public partial class App : Application
             _window.Activate();
             return;
         }
+        if (commandLine.Contains("--verify-font-audit", StringComparison.OrdinalIgnoreCase))
+        {
+            _window = new MainWindow(false, "verification");
+            _window.ScheduleFontAuditVerification();
+            _window.Activate();
+            return;
+        }
         if (commandLine.Contains("--verify-ui", StringComparison.OrdinalIgnoreCase))
         {
             _window = new MainWindow(false, "verification");

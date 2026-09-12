@@ -203,7 +203,7 @@ public sealed class SubjectTileControl : Grid
 
     public bool IsMoving { get; private set; }
 
-    internal (double Width, double Height) MeasureContentSize()
+    internal (double Width, double Height) MeasureContentSize(double maxWidth = double.PositiveInfinity)
     {
         // 用实际富文本和附件控件测量，保留换行、字体和图片高度；不把滚动视口当成内容高度。
         _entriesPanel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -216,7 +216,9 @@ public sealed class SubjectTileControl : Grid
             else if (child is FrameworkElement attachment)
                 contentWidth = Math.Max(contentWidth, attachment.DesiredSize.Width + 34);
         }
-        double width = Math.Max(MinimumTileWidth, Math.Min(Width, contentWidth));
+        // maxWidth 由自动排列的列宽决定：需要一行多放时收窄磁贴，让文字换行而不是溢出。
+        double limit = Math.Min(Width, Math.Max(MinimumTileWidth, maxWidth));
+        double width = Math.Max(MinimumTileWidth, Math.Min(limit, contentWidth));
         double inkRight = 0, inkBottom = 0;
         foreach (var stroke in _subject.InkStrokes)
         foreach (var point in stroke.Points)
@@ -226,6 +228,7 @@ public sealed class SubjectTileControl : Grid
         }
         width = Math.Max(width, inkRight);
         _entriesPanel.Measure(new Size(Math.Max(1, width - 34), double.PositiveInfinity));
+        _nameEditor.Measure(new Size(Math.Max(1, width - 110), double.PositiveInfinity));
         double height = Math.Max(MinimumTileHeight, Math.Max(inkBottom,
             _entriesPanel.DesiredSize.Height + _nameEditor.DesiredSize.Height + 38));
         InvalidateMeasure();

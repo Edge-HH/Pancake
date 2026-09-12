@@ -20,7 +20,8 @@ namespace Pancake;
 
 public sealed partial class MainWindow : Window
 {
-    private double GridSize => Math.Clamp(_settings.GridSize, 16, 160);
+    // 网格大小只取整数：旧配置里的小数值（例如拖动过旧版滑块留下的 48.37）在这里统一收敛。
+    private double GridSize => Math.Clamp(Math.Round(_settings.GridSize), 16, 160);
     private static readonly Brush FullScreenHintBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 220, 38, 38));
     private static readonly Brush ToolbarButtonBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0));
     private readonly DispatcherTimer _clockTimer = new() { Interval = TimeSpan.FromSeconds(1) };
@@ -51,6 +52,7 @@ public sealed partial class MainWindow : Window
     private double _renderedGridHeight;
     private string _renderedGridAppearance = string.Empty;
     private bool IsGridSnappingEnabled = true;
+    private bool _dialogOpen;
     private uint? _globalGesturePointerId;
     private Point _globalGestureStart;
 
@@ -186,6 +188,8 @@ public sealed partial class MainWindow : Window
         UpdateEditButtonPosition();
         DisplayRoot.Visibility = Visibility.Visible;
         SettingsRoot.Visibility = Visibility.Collapsed;
+        // 设置页里调整过网格大小或吸附后，回到看板时一次性应用磁贴位置与网格。
+        ApplyPendingBoardLayout();
         UpdateProjectCommands();
         BackToBoardButton.Visibility = Visibility.Collapsed;
         EditBoardButton.Visibility = Visibility.Visible;
@@ -387,59 +391,76 @@ public sealed partial class MainWindow : Window
     private async void AutoArrangeButton_Click(object sender, RoutedEventArgs e)
     {
         if (!_isEditing || ViewModel.Subjects.Count == 0) return;
-        double width = BoardScroller.ActualWidth > 1 ? BoardScroller.ActualWidth : 1100;
-        double height = BoardScroller.ActualHeight > 1 ? BoardScroller.ActualHeight : 780;
         try
         {
-            var sizes = ViewModel.Subjects.Select(subject => _settings.AutoLayoutResize
-                ? FindTile(subject)!.MeasureContentSize() : (subject.TileWidth, subject.TileHeight)).ToList();
-            bool aligned = _settings.AutoLayoutResize && _settings.AutoLayoutAlign;
-            var fitted = aligned ? BoardLayout.AlignSizes(sizes) : sizes;
-            double grid = IsGridSnappingEnabled && _settings.AutoLayoutAlign ? GridSize : 0;
-            if (_settings.AutoLayoutResize && grid > 0)
-                fitted = fitted.Select(s => (Math.Ceiling(s.Item1 / grid) * grid, Math.Ceiling(s.Item2 / grid) * grid)).ToList();
-            if (_settings.InfiniteBoard)
-            {
-                width = Math.Max(width, fitted.Max(s => s.Item1));
-                height = Math.Max(height, fitted.Sum(s => s.Item2 + _settings.AutoLayoutGap + grid));
-            }
-            List<LayoutRect>? TryArrange(IReadOnlyList<(double Width, double Height)> values)
-            {
-                try
-                {
-                    return BoardLayout.Arrange(values, width, height, _settings.AutoLayoutGap, _settings.AutoLayoutAlign, grid);
-                }
-                catch (InvalidOperationException) { return null; }
-            }
-            List<LayoutRect>? placements = TryArrange(fitted);
-            // 对齐和网格留白都可能让尺寸变大，空间紧张时退回精确内容尺寸而不是裁剪内容。
-            if (placements is null && aligned) placements = TryArrange(sizes);
-            if (placements is null && _settings.AutoLayoutResize)
-            {
-                // 内容尺寸仍放不下时等比缩小，保留旧版“总能排好”的行为；磁贴内文字可滚动，不会因此丢失。
-                for (double scale = .9; scale >= .4 && placements is null; scale -= .1)
-                {
-                    var scaled = sizes.Select(s => (Math.Max(SubjectTileControl.MinimumTileWidth, s.Item1 * scale),
-                        Math.Max(SubjectTileControl.MinimumTileHeight, s.Item2 * scale))).ToList();
-                    placements = TryArrange(scaled);
-                }
-            }
-            if (placements is null)
-                throw new InvalidOperationException("当前作业板空间不足，无法在不低于最小磁贴尺寸的情况下自动排列。");
-            for (int index = 0; index < placements.Count; index++)
-            {
-                var subject = ViewModel.Subjects[index];
-                var placement = placements[index];
-                subject.X = placement.X; subject.Y = placement.Y;
-                subject.TileWidth = placement.Width; subject.TileHeight = placement.Height;
-            }
-            BuildTiles();
-            ScheduleSave();
+            ArrangeTiles(BoardScroller.ActualWidth > 1 ? BoardScroller.ActualWidth : 1100,
+                BoardScroller.ActualHeight > 1 ? BoardScroller.ActualHeight : 780);
         }
         catch (Exception exception)
         {
             await ShowMessageAsync("无法自动排列", exception.Message, "知道了");
         }
+    }
+
+    /// <summary>按给定作业板尺寸自动排列磁贴；空间不足时抛出异常，由调用方决定如何提示。</summary>
+    private void ArrangeTiles(double width, double height)
+    {
+        bool aligned = _settings.AutoLayoutResize && _settings.AutoLayoutAlign;
+        double grid = IsGridSnappingEnabled && _settings.AutoLayoutAlign ? GridSize : 0;
+        double gap = _settings.AutoLayoutGap;
+        List<SubjectTileControl> tiles = ViewModel.Subjects.Select(subject => FindTile(subject)!).ToList();
+        List<LayoutRect>? TryArrange(IReadOnlyList<(double Width, double Height)> values, double rowWidth, double rowHeight)
+        {
+            try { return BoardLayout.Arrange(values, rowWidth, rowHeight, gap, _settings.AutoLayoutAlign, grid); }
+            catch (InvalidOperationException) { return null; }
+        }
+        List<(double Width, double Height)> AlignAndSnap(List<(double Width, double Height)> sizes)
+        {
+            var fitted = aligned ? BoardLayout.AlignSizes(sizes) : sizes;
+            return grid > 0
+                ? fitted.Select(s => (Math.Ceiling(s.Item1 / grid) * grid, Math.Ceiling(s.Item2 / grid) * grid)).ToList()
+                : fitted;
+        }
+        List<LayoutRect>? placements;
+        if (_settings.AutoLayoutResize)
+        {
+            // 先横排满一行再换行：从最多列开始试，必要时收窄磁贴让文字换行；放不下才减少列数。
+            int maxColumns = Math.Min(tiles.Count,
+                Math.Max(1, (int)Math.Floor((width + gap) / (SubjectTileControl.MinimumTileWidth + gap))));
+            placements = null;
+            List<(double Width, double Height)> content = [];
+            for (int columns = maxColumns; columns >= 1 && placements is null; columns--)
+            {
+                double cap = columns <= 1 ? width : (width - gap * (columns - 1)) / columns;
+                content = tiles.Select(tile => tile.MeasureContentSize(cap)).ToList();
+                var sizes = AlignAndSnap(content);
+                double rowWidth = _settings.InfiniteBoard ? Math.Max(width, sizes.Max(size => size.Item1)) : width;
+                double rowHeight = _settings.InfiniteBoard ? Math.Max(height, sizes.Sum(size => size.Item2 + gap + grid)) : height;
+                placements = TryArrange(sizes, rowWidth, rowHeight);
+            }
+            if (placements is null)
+            {
+                // 内容尺寸仍放不下时等比缩小，保留旧版“总能排好”的行为；磁贴内文字可滚动，不会因此丢失。
+                for (double scale = .9; scale >= .4 && placements is null; scale -= .1)
+                {
+                    var scaled = content.Select(size => (Math.Max(SubjectTileControl.MinimumTileWidth, size.Width * scale),
+                        Math.Max(SubjectTileControl.MinimumTileHeight, size.Height * scale))).ToList();
+                    placements = TryArrange(scaled, width, height);
+                }
+            }
+        }
+        else placements = TryArrange(ViewModel.Subjects.Select(subject => (subject.TileWidth, subject.TileHeight)).ToList(), width, height);
+        if (placements is null)
+            throw new InvalidOperationException("当前作业板空间不足，无法在不低于最小磁贴尺寸的情况下自动排列。");
+        for (int index = 0; index < placements.Count; index++)
+        {
+            var subject = ViewModel.Subjects[index];
+            var placement = placements[index];
+            subject.X = placement.X; subject.Y = placement.Y;
+            subject.TileWidth = placement.Width; subject.TileHeight = placement.Height;
+        }
+        BuildTiles();
+        ScheduleSave();
     }
 
     private async void DeleteSubject(SubjectBoard subject)
@@ -588,13 +609,15 @@ public sealed partial class MainWindow : Window
         DrawGrid(GridCanvas, style, left, top, right, bottom);
     }
 
-    private void DrawGrid(Canvas canvas, string style, double left, double top, double right, double bottom)
+    /// <param name="viewScale">预览等缩小显示的倍率：线宽与点直径按倍率反向放大，缩放后仍与看板观感一致。</param>
+    private void DrawGrid(Canvas canvas, string style, double left, double top, double right, double bottom, double viewScale = 1)
     {
         canvas.Children.Clear();
         if (style == "None") return;
+        double inverseScale = viewScale > 0 ? 1 / viewScale : 1;
         if (style == "Dots")
         {
-            double diameter = Math.Clamp(_settings.GridDotDiameter, 1, 12);
+            double diameter = Math.Clamp(_settings.GridDotDiameter, 1, 12) * inverseScale;
             SolidColorBrush fill = new(GridAppearance.ParseColor(_settings.GridDotColor, Windows.UI.Color.FromArgb(143, 86, 86, 92)));
             for (double y = top; y <= bottom; y += GridSize)
             for (double x = left; x <= right; x += GridSize)
@@ -606,7 +629,7 @@ public sealed partial class MainWindow : Window
             return;
         }
         SolidColorBrush stroke = new(GridAppearance.ParseColor(_settings.GridColor, Windows.UI.Color.FromArgb(105, 86, 86, 92)));
-        double thickness = Math.Clamp(_settings.GridLineThickness, .5, 5);
+        double thickness = Math.Clamp(_settings.GridLineThickness, .5, 5) * inverseScale;
         for (double x = left; x <= right; x += GridSize)
         {
             canvas.Children.Add(new Line
@@ -630,14 +653,19 @@ public sealed partial class MainWindow : Window
     private void GridSnapToggleButton_Checked(object sender, RoutedEventArgs e)
     {
         IsGridSnappingEnabled = true;
+        // 设置页的“吸附到网格”是同一个开关，这里同步它的显示状态。
+        if (_gridSnapToggle is not null) _gridSnapToggle.IsOn = true;
         UpdateGridSnapHint();
+        UpdateAutoLayoutGapStep();
         ScheduleSave();
     }
 
     private void GridSnapToggleButton_Unchecked(object sender, RoutedEventArgs e)
     {
         IsGridSnappingEnabled = false;
+        if (_gridSnapToggle is not null) _gridSnapToggle.IsOn = false;
         UpdateGridSnapHint();
+        UpdateAutoLayoutGapStep();
         ScheduleSave();
     }
 
@@ -1129,12 +1157,19 @@ public sealed partial class MainWindow : Window
             XamlRoot = RootShell.XamlRoot, Title = title, Content = message,
             PrimaryButtonText = "确定", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close
         };
-        return await dialog.ShowAsync();
+        // WinUI 同一时间只能显示一个 ContentDialog；重复触发按“取消”处理，避免异步点击直接崩溃。
+        if (_dialogOpen) return ContentDialogResult.None;
+        _dialogOpen = true;
+        try { return await dialog.ShowAsync(); }
+        finally { _dialogOpen = false; }
     }
 
     private async Task ShowMessageAsync(string title, string message, string closeText)
     {
+        if (_dialogOpen) return;
+        _dialogOpen = true;
         ContentDialog dialog = new() { XamlRoot = RootShell.XamlRoot, Title = title, Content = message, CloseButtonText = closeText };
-        await dialog.ShowAsync();
+        try { await dialog.ShowAsync(); }
+        finally { _dialogOpen = false; }
     }
 }

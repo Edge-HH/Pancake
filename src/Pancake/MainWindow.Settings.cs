@@ -15,6 +15,9 @@ public sealed partial class MainWindow
     private readonly Dictionary<ButtonBase, (UIElement Icon, TextBlock Label)> _toolbarLabels = [];
     private readonly Dictionary<string, SettingsPage> _settingsPages = [];
     private ComboBox? _layoutChoice;
+    private Slider? _gridSizeSlider;
+    private Slider? _autoLayoutGapSlider;
+    private ToggleSwitch? _gridSnapToggle;
 
     private sealed record SettingsPage(StackPanel Container, UIElement Content, string Title, string Description);
 
@@ -26,15 +29,28 @@ public sealed partial class MainWindow
         layout.Children.Add(_layoutChoice);
         layout.Children.Add(Toggle("无限作业板", _settings.InfiniteBoard, value => _settings.InfiniteBoard = value));
         layout.Children.Add(Note("开启后可滚动、触摸平移、Ctrl + 滚轮缩放；编辑磁贴时可用滚动条平移。"));
-        layout.Children.Add(Range("网格大小", 16, 160, _settings.GridSize, value =>
-        { _settings.GridSize = value; _renderedGridWidth = 0; }));
+        // 网格大小与自动布局共用同一张预览，改任一项都能立刻看到结果。
+        layout.Children.Add(CreateAppearancePreview("Layout"));
+        _gridSizeSlider = Range("网格大小", 16, 160, Math.Round(_settings.GridSize), value =>
+        { _settings.GridSize = Math.Round(value); _renderedGridWidth = 0; }, GridSizeChanged);
+        // 网格大小按整数调节，避免出现 48.37 px 这类没有意义的取值。
+        _gridSizeSlider.StepFrequency = 1;
+        _gridSizeSlider.SmallChange = 1;
+        _gridSizeSlider.LargeChange = 8;
+        layout.Children.Add(_gridSizeSlider);
         layout.Children.Add(Note("分屏模式可拖动分隔条调整比例，拖至两端切换为单区；进入编辑模式后可拖动时钟或组件的任意位置，悬停时使用右下角灰色小框缩放。"));
         LayoutSettingsPanel.Children.Clear();
         layout.Children.Add(Heading("自动布局"));
-        layout.Children.Add(Range("自动排版磁贴间隔", 0, 120, _settings.AutoLayoutGap, value => _settings.AutoLayoutGap = value));
+        // 与编辑工具栏的吸附按钮是同一个设置，两边状态实时同步。
+        _gridSnapToggle = Toggle("吸附到网格", _settings.GridSnappingEnabled, SetGridSnapping);
+        layout.Children.Add(_gridSnapToggle);
+        _autoLayoutGapSlider = Range("自动排版磁贴间隔", 0, 120, _settings.AutoLayoutGap,
+            value => _settings.AutoLayoutGap = value, AutoLayoutGapChanged);
+        layout.Children.Add(_autoLayoutGapSlider);
         layout.Children.Add(Toggle("自动对齐", _settings.AutoLayoutAlign, value => _settings.AutoLayoutAlign = value));
         layout.Children.Add(Toggle("自动调整磁贴大小", _settings.AutoLayoutResize, value => _settings.AutoLayoutResize = value));
         layout.Children.Add(Note("点击自动排列时按文字、图片和笔迹收紧磁贴；自动对齐会尽量统一相近尺寸并对齐行列。看板与图片导出共用这些设置，优先从左上角排列。"));
+        _refreshSettingAvailability.Add(UpdateAutoLayoutGapStep);
         RegisterSettingsPage("Layout", LayoutSettingsPanel, layout, "布局", "调整布局模式、无限作业板与网格。");
 
         StackPanel tile = SettingsStack();
@@ -223,6 +239,45 @@ public sealed partial class MainWindow
         ScheduleSave();
     }
 
+    /// <summary>
+    /// 拖动网格大小只处理数据与预览：磁贴重新吸附到新网格，看板网格等回到看板时再重画。
+    /// 设置页打开时看板是折叠的，这里避开整窗重刷和不可见的看板重绘，拖动才不会卡。
+    /// </summary>
+    private void GridSizeChanged()
+    {
+        SnapTilesToGrid();
+        UpdateAutoLayoutGapStep();
+        RefreshAppearancePreviews();
+        ScheduleSave();
+    }
+
+    /// <summary>自动排版间隔只影响自动排列与预览，拖动时同样不重刷整个界面。</summary>
+    private void AutoLayoutGapChanged()
+    {
+        RefreshAppearancePreviews();
+        ScheduleSave();
+    }
+
+    /// <summary>间隔滑块跟随网格吸附：关闭吸附按 10px 步进，开启吸附按半格步进。</summary>
+    private void UpdateAutoLayoutGapStep()
+    {
+        if (_autoLayoutGapSlider is null) return;
+        double step = IsGridSnappingEnabled ? Math.Max(1, GridSize) / 2 : 10;
+        _autoLayoutGapSlider.StepFrequency = step;
+        _autoLayoutGapSlider.SmallChange = step;
+        _autoLayoutGapSlider.LargeChange = step * 2;
+    }
+
+    /// <summary>自动布局里的“吸附到网格”和编辑工具栏的吸附按钮共用同一份设置。</summary>
+    private void SetGridSnapping(bool enabled)
+    {
+        IsGridSnappingEnabled = enabled;
+        _settings.GridSnappingEnabled = enabled;
+        if (GridSnapToggleButton.IsChecked != enabled) GridSnapToggleButton.IsChecked = enabled;
+        UpdateGridSnapHint();
+        UpdateAutoLayoutGapStep();
+    }
+
     private Slider Range(string label, double min, double max, double value, Action<double> update, Action? changed = null)
     {
         Slider slider = new() { Header = label, Minimum = min, Maximum = max, Value = Math.Clamp(double.IsFinite(value) ? value : min, min, max), StepFrequency = .01 };
@@ -388,10 +443,13 @@ public sealed partial class MainWindow
         bool vertical = position.StartsWith("Center");
         ToolbarItems.Orientation = GlobalInkTools.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
         _inkColors.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
+        _inkWidths.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
         MainToolbarScroll.HorizontalScrollBarVisibility = InkToolbarScroll.HorizontalScrollBarVisibility = vertical ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
         MainToolbarScroll.VerticalScrollBarVisibility = InkToolbarScroll.VerticalScrollBarVisibility = vertical ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled;
         double scale = Math.Clamp(_settings.ToolbarScale, .6, 2);
         double toolbarPadding = 7 * scale;
+        // 画笔栏按钮比主控制窗小一号，窗口内边距更大；圆角计算与绘制都引用同一份数值。
+        double inkToolbarPadding = 12 * scale;
         foreach (var (button, pair) in _toolbarLabels)
         {
             bool showFullScreenHint = ReferenceEquals(button, FullScreenButton) && _showFullScreenExitHint;
@@ -433,21 +491,24 @@ public sealed partial class MainWindow
         FullScreenIcon.FontSize = 18 * scale;
         foreach (var button in GlobalInkTools.Children.OfType<ButtonBase>())
         {
-            button.Width = button.Height = 40 * scale;
+            double iconButtonSize = 40 * scale;
+            button.Width = button.Height = iconButtonSize;
+            // 系统按钮默认内边距（11,5,11,6）比 20 DIP 图标的内容区还宽，会把图标挤出内容区并整体偏右；
+            // 图标按钮改为零内边距加居中，保证图标四周留白一致且完整可见。
+            button.Padding = new Thickness(0);
+            button.HorizontalContentAlignment = HorizontalAlignment.Center;
+            button.VerticalContentAlignment = VerticalAlignment.Center;
+            // 与主控制窗按钮同一规则：圆角随控制窗圆角并扣除画笔栏内边距，保持与外框同心。
+            button.CornerRadius = MatchToolbarButtonRadius(_settings.ToolbarRadius, inkToolbarPadding, iconButtonSize, iconButtonSize);
             if (button.Content is FluentIcon glyph) glyph.FontSize = 20 * scale;
             if (button.Content is Viewbox { Child: IconSourceElement } vectorIcon)
                 vectorIcon.Width = vectorIcon.Height = 20 * scale;
         }
         foreach (var swatch in _inkColors.Children.OfType<ColorSwatchButton>()) swatch.Width = swatch.Height = 32 * scale;
-        foreach (var slider in GlobalInkTools.Children.OfType<Slider>())
-        {
-            slider.Orientation = vertical ? Orientation.Vertical : Orientation.Horizontal;
-            slider.Width = (vertical ? 40 : 110) * scale;
-            slider.Height = (vertical ? 110 : 40) * scale;
-        }
+        foreach (var preset in _inkWidths.Children.OfType<InkWidthPresetButton>()) preset.ApplyScale(scale);
         FloatingToolbar.CornerRadius = GlobalInkToolbar.CornerRadius = new CornerRadius(_settings.ToolbarRadius);
         FloatingToolbar.Padding = new Thickness(toolbarPadding);
-        GlobalInkToolbar.Padding = new Thickness(12 * scale);
+        GlobalInkToolbar.Padding = new Thickness(inkToolbarPadding);
         FloatingToolbar.Background = CreateToolbarBackground();
         GlobalInkToolbar.Background = CreateToolbarBackground();
         FloatingToolbar.HorizontalAlignment = GlobalInkToolbar.HorizontalAlignment = position.EndsWith("Left") ? HorizontalAlignment.Left : position.EndsWith("Right") ? HorizontalAlignment.Right : HorizontalAlignment.Center;

@@ -41,6 +41,46 @@ public sealed partial class MainWindow
         };
     }
 
+    /// <summary>遍历系统字体，找出经 RTF 保存往返后名字被改写、会被误判为缺失字体的家族。</summary>
+    internal void ScheduleFontAuditVerification()
+    {
+        RootShell.Loaded += async (_, _) =>
+        {
+            string output = Path.Combine(AppContext.BaseDirectory, "verification");
+            Directory.CreateDirectory(output);
+            List<string> evidence = [];
+            try
+            {
+                await NextLayoutAsync();
+                ExportOverlay.Visibility = Visibility.Visible;
+                RichEditBox probe = new() { FontFamily = FontService.DefaultFamily };
+                ExportOverlay.Children.Add(probe);
+                await NextLayoutAsync();
+                List<string> broken = [];
+                foreach (string family in FontService.AvailableFamilies)
+                {
+                    probe.Document.SetText(TextSetOptions.None, "字体审计 0123456789");
+                    probe.Document.GetRange(0, 4).CharacterFormat.Name = family;
+                    probe.Document.GetRange(0, int.MaxValue).GetText(TextGetOptions.FormatRtf, out string rtf);
+                    probe.Document.SetText(TextSetOptions.FormatRtf, FontService.NormalizeRtf(rtf.TrimEnd('\0')));
+                    string back = probe.Document.GetRange(0, 1).CharacterFormat.Name;
+                    if (!FontService.IsInstalledFamily(back))
+                        broken.Add($"{family} => {back}");
+                }
+                evidence.Add($"AvailableFamilies: {FontService.AvailableFamilies.Count}");
+                evidence.Add($"Treated as missing after RTF round trip: {broken.Count}");
+                evidence.AddRange(broken.Select(item => "REPLACED " + item));
+                evidence.Add("FONT_AUDIT_OK");
+            }
+            catch (Exception ex) { evidence.Add("FONT_AUDIT_FAILED\n" + ex); }
+            finally
+            {
+                File.WriteAllLines(Path.Combine(output, "font-audit-result.txt"), evidence);
+                Close();
+            }
+        };
+    }
+
     internal void ScheduleUiVerification()
     {
         RootShell.Loaded += async (_, _) =>
@@ -152,6 +192,53 @@ public sealed partial class MainWindow
                 string beforeFont = editor.Document.GetRange(2, 3).CharacterFormat.Name;
                 editor.Document.Selection.CharacterFormat.Name = "Times New Roman";
                 Check(editor.Document.GetRange(2, 3).CharacterFormat.Name == beforeFont, "collapsed font selection preserves preceding text");
+                // 字体保存往返：工具栏选择字体后保存，重建的磁贴必须保留同一字体。
+                // 格式工具栏由编辑器的聚焦事件创建，聚焦后需要等它真正挂到宿主上。
+                AutoSuggestBox? fontPicker = null;
+                for (int attempt = 0; attempt < 10 && fontPicker is null; attempt++)
+                {
+                    editor.Focus(FocusState.Programmatic);
+                    editor.Document.Selection.SetRange(0, 2);
+                    await NextLayoutAsync();
+                    fontPicker = FindVisuals<AutoSuggestBox>(RichTextToolbarHost).FirstOrDefault();
+                }
+                Check(fontPicker is not null, "font picker is hosted next to the focused homework editor");
+                fontPicker!.Focus(FocusState.Programmatic);
+                await NextLayoutAsync();
+                evidence.Add("font picker selection: " + editor.Document.Selection.StartPosition + ".." + editor.Document.Selection.EndPosition);
+                ((Action<string>)fontPicker.Tag)("Arial");
+                await NextLayoutAsync();
+                evidence.Add("font after apply: " + editor.Document.GetRange(0, 2).CharacterFormat.Name);
+                evidence.Add("captured rtf fonts: " + string.Join(" | ", english.Entries.Concat(chinese.Entries).Select(entry => RtfFonts(entry.RtfContent))));
+                FinishEditing();
+                await NextLayoutAsync();
+                RichEditBox reloaded = FindVisuals<RichEditBox>(BoardCanvas).Last();
+                evidence.Add("font after save reload: " + reloaded.Document.GetRange(0, 2).CharacterFormat.Name);
+                Check(reloaded.Document.GetRange(0, 2).CharacterFormat.Name == "Arial", "chosen font survives save and tile rebuild");
+                EnterEditing();
+                await NextLayoutAsync();
+                // 中文字体保存进 RTF 后会写成英文别名（微软雅黑 → Microsoft YaHei），别名不能被当成缺失字体。
+                foreach (string localized in new[] { "微软雅黑", "宋体" })
+                {
+                    if (!FontService.AvailableFamilies.Contains(localized, StringComparer.CurrentCultureIgnoreCase))
+                    {
+                        evidence.Add("Skipped font alias check, not installed: " + localized);
+                        continue;
+                    }
+                    RichEditBox aliasProbe = new() { FontFamily = FontService.DefaultFamily };
+                    ExportOverlay.Visibility = Visibility.Visible;
+                    ExportOverlay.Children.Add(aliasProbe);
+                    await NextLayoutAsync();
+                    aliasProbe.Document.SetText(TextSetOptions.None, "字体别名检查");
+                    aliasProbe.Document.GetRange(0, 2).CharacterFormat.Name = localized;
+                    aliasProbe.Document.GetRange(0, int.MaxValue).GetText(TextGetOptions.FormatRtf, out string aliasRtf);
+                    aliasProbe.Document.SetText(TextSetOptions.FormatRtf, FontService.NormalizeRtf(aliasRtf.TrimEnd('\0')));
+                    string aliasName = aliasProbe.Document.GetRange(0, 1).CharacterFormat.Name;
+                    Check(!aliasName.Contains("HarmonyOS", StringComparison.OrdinalIgnoreCase), localized + " 保存后不应被替换成内置字体：" + aliasName);
+                    Check(FontService.IsInstalledFamily(aliasName), localized + " 保存后的字体名仍应识别为已安装字体：" + aliasName);
+                    ExportOverlay.Children.Clear();
+                    ExportOverlay.Visibility = Visibility.Collapsed;
+                }
                 var tile = BoardCanvas.Children.OfType<SubjectTileControl>().First();
                 Point before = chinese.InkStrokes[0].Points[1];
                 chinese.TileWidth = 300; chinese.TileHeight = 180; tile.ApplyModelLayout(); await NextLayoutAsync();
@@ -274,6 +361,10 @@ public sealed partial class MainWindow
         };
     }
 
+    // RTF 字体表中的家族名，用于定位字体在哪一步丢失。
+    private static string RtfFonts(string rtf) =>
+        string.Join(",", System.Text.RegularExpressions.Regex.Matches(rtf, @"\\f\d+\\fnil\s*([^;]+);").Select(m => m.Groups[1].Value.Trim()));
+
     private async Task VerifyAutoLayoutExportAsync(string output, Action<bool, string> check)
     {
         if (CurrentProject is null) ProjectStore.Create(_library, false);
@@ -288,13 +379,13 @@ public sealed partial class MainWindow
         var ink = new InkStrokeData { Color = Microsoft.UI.Colors.Red, Thickness = 6 };
         ink.Points.AddRange([new Point(100, 180), new Point(290, 180)]); subject.InkStrokes.Add(ink);
         BuildTiles(); await NextLayoutAsync();
-        AutoArrangeButton_Click(AutoArrangeButton, new RoutedEventArgs()); await NextLayoutAsync();
+        ArrangeTiles(1100, 780); await NextLayoutAsync();
         check(subject.X == 0 && subject.Y == 0 && subject.TileHeight >= 183 && subject.TileHeight < 500,
             $"auto layout trims empty height while preserving ink and starts at top left ({subject.X},{subject.Y}; {subject.TileWidth} x {subject.TileHeight})");
         check(subject.TileWidth >= 293 && subject.TileWidth < 600, $"auto layout trims empty width while preserving text and ink ({subject.TileWidth} x {subject.TileHeight})");
         double w = subject.TileWidth, h = subject.TileHeight;
         _settings.AutoLayoutResize = false;
-        AutoArrangeButton_Click(AutoArrangeButton, new RoutedEventArgs()); await NextLayoutAsync();
+        ArrangeTiles(1100, 780); await NextLayoutAsync();
         check(subject.TileWidth == w && subject.TileHeight == h, "disabled auto resize preserves board dimensions");
 
         ProjectDocument fixture = new() { Name = "导出验证", Subjects =
@@ -335,6 +426,36 @@ public sealed partial class MainWindow
         await SaveVisualAsync(RootShell, Path.Combine(output, "export-settings.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
         check(settings.TileBackground.ColorOpacity == .4 && fixture.Subjects[0].Width == 300, "export adjustments do not mutate original settings or project");
         ExportOverlay.Children.Clear(); ExportOverlay.Visibility = Visibility.Collapsed;
+
+        // 自动排列必须先把一行横排满再换行，而不是竖着排一列。
+        _settings.LayoutMode = "Split"; _settings.InfiniteBoard = false;
+        ApplyExtendedSettings(); ShowBoard(); await NextLayoutAsync();
+        ViewModel.ReplaceSubjects([]);
+        for (int i = 0; i < 4; i++)
+        {
+            SubjectBoard created = ViewModel.AddSubject($"科目{i + 1}");
+            created.TileWidth = 430; created.TileHeight = 320;
+            created.Entries.Add(new HomeworkEntry { Content = "完成 P30 练习题\n复习二次函数公式" });
+        }
+        _settings.AutoLayoutResize = true; _settings.AutoLayoutAlign = true; _settings.AutoLayoutGap = 0;
+        _settings.GridSnappingEnabled = false; IsGridSnappingEnabled = false;
+        BuildTiles(); EnterEditing(); await NextLayoutAsync();
+        ArrangeTiles(1100, 780);
+        await NextLayoutAsync();
+        check(ViewModel.Subjects.GroupBy(subject => subject.Y).Any(row => row.Count() >= 2),
+            "auto arrange fills a row horizontally before wrapping: " + string.Join(" | ", ViewModel.Subjects.Select(s => $"{s.X:0},{s.Y:0} {s.TileWidth:0}x{s.TileHeight:0}")));
+        check(ViewModel.Subjects.All(subject => subject.X >= 0 && subject.Y >= 0 &&
+            subject.TileWidth >= SubjectTileControl.MinimumTileWidth && subject.TileHeight >= SubjectTileControl.MinimumTileHeight),
+            "auto arrange keeps rows inside the board above the minimum tile size");
+
+        // 自动排版间隔的步进跟随网格吸附：关闭按 10px，开启按半格。
+        GridSnapToggleButton.IsChecked = false;
+        await NextLayoutAsync();
+        check(Math.Abs(_autoLayoutGapSlider!.StepFrequency - 10) < .01, "gap slider steps by 10px while grid snapping is off");
+        GridSnapToggleButton.IsChecked = true;
+        await NextLayoutAsync();
+        check(Math.Abs(_autoLayoutGapSlider.StepFrequency - GridSize / 2) < .01,
+            $"gap slider steps by half a grid cell while snapping is on ({_autoLayoutGapSlider.StepFrequency})");
     }
 
     private async Task VerifyExtendedSettingsAsync(string output, Action<bool, string> check)
@@ -417,24 +538,81 @@ public sealed partial class MainWindow
         check(_inkSettings.Eraser && _inkPen.IsChecked == false, "eraser icon selects erasing exclusively");
         _inkPen.IsChecked = true;
         check(!_inkSettings.Eraser && _inkEraser.IsChecked == false, "pen icon returns to drawing exclusively");
-        Slider thicknessSlider = GlobalInkTools.Children.OfType<Slider>().Single();
+        List<InkWidthPresetButton> thicknessPresets = [.. _inkWidths.Children.OfType<InkWidthPresetButton>()];
+        check(thicknessPresets.Select(preset => preset.Thickness).SequenceEqual(new[] { 2d, 5d, 12d }),
+            "ink thickness offers thin/medium/thick presets only");
+        check(!GlobalInkTools.Children.OfType<Slider>().Any(),
+            "ink toolbar no longer exposes a thickness slider");
+        check(thicknessPresets.Count(preset => preset.IsSelected) == 1 &&
+            Math.Abs(thicknessPresets.Single(preset => preset.IsSelected).Thickness - _inkSettings.Thickness) < .01,
+            "ink thickness preset highlights the active thickness");
+        check(thicknessPresets[0].Content is Microsoft.UI.Xaml.Shapes.Ellipse thin &&
+            thicknessPresets[1].Content is Microsoft.UI.Xaml.Shapes.Ellipse medium &&
+            thicknessPresets[2].Content is Microsoft.UI.Xaml.Shapes.Ellipse thick &&
+            thin.Width < medium.Width && medium.Width < thick.Width,
+            "ink thickness presets grow from thin to thick");
         foreach (ToggleButton button in new[] { _inkPen, _inkEraser })
         {
+            Rect vectorBounds = button.Content is Viewbox { Child: IconSourceElement { IconSource: PathIconSource path } } ? path.Data.Bounds : default;
             bool usesInsetVector = button.Content is Viewbox { Child: IconSourceElement { IconSource: PathIconSource source } } viewbox &&
                 viewbox.Width >= 20 && viewbox.Height >= 20 &&
                 source.Data.Bounds.Left > 0 && source.Data.Bounds.Top > 0 &&
                 source.Data.Bounds.Right < 20 && source.Data.Bounds.Bottom < 20;
             check(usesInsetVector, "ink tool vector stays inside its unclipped 20 DIP viewport");
+            check(true, $"ink tool vector bounds {vectorBounds}, inset left {vectorBounds.Left:0.##} right {20 - vectorBounds.Right:0.##}");
         }
+        // 画笔与橡皮按钮：图标必须在按钮内水平、垂直居中且完整可见，圆角必须跟随控制窗圆角。
+        double originalScale = _settings.ToolbarScale, originalRadius = _settings.ToolbarRadius;
+        foreach (double scale in new[] { .6, 1, 2 })
+        {
+            _settings.ToolbarScale = scale; ApplyToolbarSettings(); await NextLayoutAsync();
+            foreach (ToggleButton button in new[] { _inkPen, _inkEraser })
+            {
+                Viewbox icon = (Viewbox)button.Content;
+                Rect iconBounds = icon.TransformToVisual(button).TransformBounds(new Rect(0, 0, icon.ActualWidth, icon.ActualHeight));
+                double horizontalGap = Math.Abs(iconBounds.Left - (button.ActualWidth - iconBounds.Right));
+                double verticalGap = Math.Abs(iconBounds.Top - (button.ActualHeight - iconBounds.Bottom));
+                check(horizontalGap <= .5 && verticalGap <= .5,
+                    $"ink icon is centered in its button at scale {scale} (offset {horizontalGap:0.##}/{verticalGap:0.##})");
+                check(iconBounds.Left >= 8 * scale && button.ActualWidth - iconBounds.Right >= 8 * scale,
+                    $"ink icon keeps an even inset inside its button at scale {scale} ({iconBounds.Left:0.##})");
+            }
+            check(true, $"ink toolbar geometry at scale {scale}: padding {GlobalInkToolbar.Padding.Left:0.##}, " +
+                $"button {_inkPen.ActualWidth:0.##}, corner {_inkPen.CornerRadius.TopLeft:0.##}");
+        }
+        foreach (double radius in new[] { 0d, 6d, 14d, 30d, 60d })
+        {
+            _settings.ToolbarScale = 1;
+            _settings.ToolbarRadius = radius; ApplyToolbarSettings(); await NextLayoutAsync();
+            double expected = Math.Clamp(radius - GlobalInkToolbar.Padding.Left, 0, 20);
+            check(new[] { _inkPen, _inkEraser }.All(button => Math.Abs(button.CornerRadius.TopLeft - expected) < .01),
+                $"ink icon button corners follow the control window radius {radius} ({_inkPen.CornerRadius.TopLeft:0.##})");
+        }
+        _settings.ToolbarRadius = 30; ApplyToolbarSettings(); await NextLayoutAsync();
+        check(_inkPen.CornerRadius.TopLeft == _inkEraser.CornerRadius.TopLeft && _inkPen.CornerRadius.TopLeft > 4,
+            "pen and eraser share one window-following corner instead of the stock button corner");
+        _settings.ToolbarScale = originalScale; _settings.ToolbarRadius = originalRadius;
+        ApplyToolbarSettings(); await NextLayoutAsync();
+        await SaveVisualAsync(GlobalInkToolbar, Path.Combine(output, "ink-toolbar.png"),
+            (int)GlobalInkToolbar.ActualWidth, (int)GlobalInkToolbar.ActualHeight);
         foreach (string position in new[] { "BottomLeft", "BottomCenter", "BottomRight", "TopCenter", "TopLeft", "TopRight", "CenterLeft", "CenterRight" })
         {
             _settings.ToolbarPosition = position; ApplyExtendedSettings(); await NextLayoutAsync();
             bool verticalToolbar = position.StartsWith("Center");
             check(ToolbarItems.Orientation == (verticalToolbar ? Orientation.Vertical : Orientation.Horizontal), position + " toolbar orientation");
-            check(thicknessSlider.Orientation == (verticalToolbar ? Orientation.Vertical : Orientation.Horizontal), position + " ink thickness orientation");
-            check(verticalToolbar ? thicknessSlider.ActualHeight > thicknessSlider.ActualWidth : thicknessSlider.ActualWidth > thicknessSlider.ActualHeight,
-                position + " ink thickness track follows the toolbar axis");
+            check(_inkWidths.Orientation == (verticalToolbar ? Orientation.Vertical : Orientation.Horizontal), position + " ink thickness preset orientation");
+            check(verticalToolbar ? _inkWidths.ActualHeight > _inkWidths.ActualWidth : _inkWidths.ActualWidth > _inkWidths.ActualHeight,
+                position + " ink thickness presets follow the toolbar axis");
             check(_toolbarLabels[EditBoardButton].Label.Visibility == Visibility.Visible, position + " button names visible");
+            // 竖置时画笔栏可能出现滚动条，按钮不能被挤压，图标仍须居中且完整。
+            foreach (ToggleButton button in new[] { _inkPen, _inkEraser })
+            {
+                Viewbox icon = (Viewbox)button.Content;
+                Rect iconBounds = icon.TransformToVisual(button).TransformBounds(new Rect(0, 0, icon.ActualWidth, icon.ActualHeight));
+                check(Math.Abs(iconBounds.Left - (button.ActualWidth - iconBounds.Right)) <= .5 &&
+                    Math.Abs(iconBounds.Top - (button.ActualHeight - iconBounds.Bottom)) <= .5,
+                    position + " ink icon stays centered in its button");
+            }
             if (verticalToolbar)
             {
                 foreach (var labeledButton in new[] { BackToBoardButton, FullScreenButton, EditBoardButton })
@@ -580,6 +758,73 @@ public sealed partial class MainWindow
             FindVisuals<ToggleSwitch>(_settingsPages["Layout"].Content).Any(toggle => Equals(toggle.Header, "自动对齐") && toggle.IsOn) &&
             FindVisuals<ToggleSwitch>(_settingsPages["Layout"].Content).Any(toggle => Equals(toggle.Header, "自动调整磁贴大小") && toggle.IsOn),
             "layout page exposes auto layout gap, alignment and resize defaults");
+        check(FindVisuals<Border>(_settingsPages["Layout"].Content).Any(border => border.Name == "LayoutAppearancePreview" &&
+                border.ActualWidth > 0 && border.ActualHeight > 0) &&
+            FindVisuals<TextBlock>(_appearancePreviews["Layout"]).Any(text => text.Text.StartsWith("网格 ")) &&
+            FindVisuals<TextBlock>(_appearancePreviews["Layout"]).Any(text => text.Text.StartsWith("自动排列")),
+            "layout page previews grid size and auto arrangement in one scene");
+        // 预览必须是真实磁贴控件排在看板同款网格上，而不是画出来的示意图。
+        var layoutTiles = FindVisuals<SubjectTileControl>(_appearancePreviews["Layout"]).ToList();
+        check(layoutTiles.Count == 4 && layoutTiles.All(tile => tile.ActualWidth > 0 && tile.ActualHeight > 0),
+            "layout preview uses real subject tiles");
+        check(FindVisuals<Microsoft.UI.Xaml.Shapes.Line>(_appearancePreviews["Layout"]).Any() &&
+            layoutTiles.Select(tile => Canvas.GetTop(tile)).Distinct().Count() >= 2,
+            "layout preview arranges the real tiles on the board grid");
+        // 网格大小变化必须重画预览网格，且磁贴与网格是同一套缩放，数量随大小单调变化。
+        string originalGridStyle = _settings.GridStyle;
+        _settings.GridStyle = "Grid";
+        int GridLineCount() => FindVisuals<Microsoft.UI.Xaml.Shapes.Line>(_appearancePreviews["Layout"]).Count();
+        double layoutPreviewGrid = _settings.GridSize;
+        _settings.GridSize = 16; ApplyExtendedSettings(); await NextLayoutAsync();
+        int denseLines = GridLineCount();
+        _settings.GridSize = 160; ApplyExtendedSettings(); await NextLayoutAsync();
+        int sparseLines = GridLineCount();
+        check(denseLines > sparseLines && sparseLines > 0, "layout preview redraws the grid for the configured grid size");
+        _settings.GridSize = layoutPreviewGrid; _settings.GridStyle = originalGridStyle;
+        ApplyExtendedSettings(); await NextLayoutAsync();
+        // 网格大小按整数调节；改变网格大小后已有磁贴必须重新吸附到新网格。
+        Slider gridSizeSlider = FindVisuals<Slider>(_settingsPages["Layout"].Content).Single(slider => Equals(slider.Header, "网格大小"));
+        Slider gapSlider = FindVisuals<Slider>(_settingsPages["Layout"].Content).Single(slider => Equals(slider.Header, "自动排版磁贴间隔"));
+        check(Math.Abs(gridSizeSlider.StepFrequency - 1) < .01, "grid size slider steps in whole pixels");
+        bool originalSnapping = IsGridSnappingEnabled;
+        _settings.GridSnappingEnabled = IsGridSnappingEnabled = true;
+        gridSizeSlider.Value = 64; await NextLayoutAsync();
+        check(ViewModel.Subjects.Count > 0 && ViewModel.Subjects.All(subject => subject.X % 64 == 0 && subject.Y % 64 == 0) &&
+            ViewModel.Subjects.All(subject => subject.TileWidth % 64 == 0),
+            "changing grid size re-snaps tiles to the new grid: " +
+            string.Join(" | ", ViewModel.Subjects.Select(s => $"{s.X:0.#},{s.Y:0.#} {s.TileWidth:0.#}x{s.TileHeight:0.#}")));
+        // 拖动自动排版间隔不能改变网格大小，也不能让预览里的网格跟着缩放。
+        int gridLinesBeforeGapDrag = GridLineCount();
+        gapSlider.Value = 48; await NextLayoutAsync();
+        check(Math.Abs(_settings.GridSize - 64) < .01 && GridLineCount() == gridLinesBeforeGapDrag,
+            "dragging the auto layout gap leaves grid size and preview grid unchanged");
+        // 两个滑块都必须跟手：拖动过程不能触发整窗重刷。
+        var gridDrag = System.Diagnostics.Stopwatch.StartNew();
+        for (int size = 16; size <= 64; size++) gridSizeSlider.Value = size;
+        gridDrag.Stop();
+        var gapDrag = System.Diagnostics.Stopwatch.StartNew();
+        for (int value = 0; value <= 48; value++) gapSlider.Value = value;
+        gapDrag.Stop();
+        check(gridDrag.ElapsedMilliseconds < 1500, "dragging grid size stays responsive: " + gridDrag.ElapsedMilliseconds + "ms/49 updates");
+        check(gapDrag.ElapsedMilliseconds < 600, "dragging auto layout gap stays responsive: " + gapDrag.ElapsedMilliseconds + "ms/49 updates");
+        _settings.GridSnappingEnabled = IsGridSnappingEnabled = originalSnapping;
+        gridSizeSlider.Value = layoutPreviewGrid; gapSlider.Value = 0;
+        ApplyExtendedSettings(); await NextLayoutAsync();
+        // 自动布局里的“吸附到网格”与编辑工具栏的吸附按钮共用同一份设置，双向同步。
+        ToggleSwitch snapToggle = FindVisuals<ToggleSwitch>(_settingsPages["Layout"].Content)
+            .Single(toggle => Equals(toggle.Header, "吸附到网格"));
+        snapToggle.IsOn = false; await NextLayoutAsync();
+        check(!IsGridSnappingEnabled && GridSnapToggleButton.IsChecked == false && !_settings.GridSnappingEnabled,
+            "auto layout snap switch turns grid snapping off for the whole app");
+        snapToggle.IsOn = true; await NextLayoutAsync();
+        check(IsGridSnappingEnabled && GridSnapToggleButton.IsChecked == true && _settings.GridSnappingEnabled &&
+            Math.Abs(gapSlider.StepFrequency - Math.Max(1, GridSize) / 2) < .01,
+            "auto layout snap switch enables snapping and half cell gap steps");
+        GridSnapToggleButton.IsChecked = false; await NextLayoutAsync();
+        check(!snapToggle.IsOn && Math.Abs(gapSlider.StepFrequency - 10) < .01, "board snap button turns the auto layout snap switch off");
+        GridSnapToggleButton.IsChecked = true; await NextLayoutAsync();
+        check(snapToggle.IsOn, "board snap button turns the auto layout snap switch back on");
+        await SaveVisualAsync(_appearancePreviews["Layout"], Path.Combine(output, "layout-preview.png"), 640, 300);
         ShowSettingsPage("AppearanceTile");
         await NextLayoutAsync();
         var originalTile = FindVisuals<SubjectTileControl>(_appearancePreviews["Tile"]).Single();

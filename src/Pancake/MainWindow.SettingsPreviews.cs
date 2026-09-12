@@ -38,7 +38,7 @@ public sealed partial class MainWindow
         string[] kinds = _selectedSettingsPage switch
         {
             "AppearanceTile" => ["Tile"], "AppearanceBackground" => ["Shared", "Clock", "Board"],
-            "AppearanceGrid" => ["Grid"], "AppearanceToolbar" => ["Toolbar"], _ => []
+            "AppearanceGrid" => ["Grid"], "AppearanceToolbar" => ["Toolbar"], "Layout" => ["Layout"], _ => []
         };
         foreach (string kind in kinds)
         {
@@ -52,6 +52,7 @@ public sealed partial class MainWindow
             string key = kind == "Toolbar"
                 ? $"{BoardTheme.IsLight}|{RootShell.ActualWidth}|{RootShell.ActualHeight}|{_settings.ToolbarPosition}|{_settings.ToolbarScale}|{_settings.ToolbarIconOnly}|{_settings.ToolbarRadius}|{_settings.ToolbarGlass}|{_settings.ToolbarBlur}|{_settings.ToolbarHorizontalInset}|{_settings.ToolbarVerticalInset}"
                 : $"{BoardTheme.IsLight}|{_settings.LayoutMode}";
+            // 只有网格页每次重建；布局页缓存真实磁贴控件，拖动时只走刷新器，不重建控件与背景。
             if (kind != "Grid" && _previewScenes.TryGetValue(kind, out var cached) && cached.Key == key)
             {
                 scene.Background = BoardTheme.SurfaceBrush;
@@ -121,6 +122,12 @@ public sealed partial class MainWindow
                 case "Toolbar":
                     scene.Children.Add(PreviewToolbar());
                     break;
+                case "Layout":
+                    // 底图沿用作业板区域背景（分屏时跟随跨区背景），预览与看板实际观感一致。
+                    AddPreviewBackground(scene, () => UseSharedBackground ? _settings.SharedBackground : new());
+                    AddPreviewBackground(scene, () => _settings.LayoutMode == "Free" ? new() : _settings.BoardBackground, () => UseSharedBackground);
+                    scene.Children.Add(PreviewBoardLayout());
+                    break;
             }
             _buildingPreviewRefreshers = null;
         }
@@ -141,6 +148,8 @@ public sealed partial class MainWindow
         SubjectBoard subject = source?.Clone() ?? new SubjectBoard { Name = "语文", TileWidth = 430, TileHeight = 220 };
         if (source is null) subject.Entries.Add(new HomeworkEntry { Content = "阅读课文，完成课后练习。" });
         SubjectTileControl tile = new(subject, _ => { }, _ => { }, _ => { }, _ => { }, _ => Task.CompletedTask, () => { });
+        // 和看板磁贴一样带上数据上下文，预览可以取回控件内部的模型副本来排布。
+        tile.DataContext = subject;
         tile.IsHitTestVisible = false;
         tile.Loaded += (_, _) => DisablePreviewTabStops(tile);
         tile.ApplyAppearance(_settings);
@@ -206,6 +215,144 @@ public sealed partial class MainWindow
         content.Children.Add(components);
         return new Viewbox { Margin = new Thickness(24), Stretch = Stretch.Uniform, Child = content };
     }
+
+    /// <summary>
+    /// 布局预览：真实磁贴控件按当前自动布局设置排在看板同款网格上，尺寸、位置和网格都走真实逻辑。
+    /// 缩放只由看板视口决定，拖动自动排版间隔不会改变网格观感；网格与内容测量都会缓存，避免拖动时卡顿。
+    /// </summary>
+    private UIElement PreviewBoardLayout()
+    {
+        // 固定示例只属于设置预览，不读取也不修改项目作业。
+        (string Name, string Accent, double Width, double Height, string[] Lines)[] samples =
+        [
+            ("语文", "#818CF8", 430, 320, ["背诵《赤壁赋》第二段", "完成课堂练习，整理作文素材。"]),
+            ("数学", "#4ADE80", 430, 312, ["完成 P30 练习题", "复习二次函数公式", "订正昨天的错题。"]),
+            ("英语", "#FBBF24", 300, 310, ["朗读课文三遍", "默写 Unit 5 单词。"]),
+            ("物理", "#F87171", 300, 308, ["整理浮力实验报告", "预习下一节内容。"])
+        ];
+        List<SubjectTileControl> tiles = [];
+        foreach (var sample in samples)
+        {
+            SubjectBoard subject = new()
+            {
+                Name = sample.Name, TileWidth = sample.Width, TileHeight = sample.Height,
+                AccentBrush = ViewModels.MainViewModel.BrushFromHex(ColorPalette.ResolveAccent(sample.Accent, false, ColorPalette.IsMacaron))
+            };
+            foreach (string line in sample.Lines) subject.Entries.Add(new HomeworkEntry { Content = line });
+            tiles.Add(PreviewTile(subject));
+        }
+        Canvas grid = new(), layer = new();
+        foreach (SubjectTileControl tile in tiles) layer.Children.Add(tile);
+        // 图层顺序与看板一致：网格在底，磁贴覆盖其上。
+        Grid board = new();
+        board.Children.Add(grid);
+        board.Children.Add(layer);
+        // 预览内框尺寸：画布按这个比例裁切看板，缩放固定，网格铺满整张预览。
+        const double previewWidth = 640, previewHeight = 300;
+        const double previewLeft = 10, previewTop = 36, previewRight = 10, previewBottom = 10;
+        const double frameWidth = previewWidth - previewLeft - previewRight, frameHeight = previewHeight - previewTop - previewBottom;
+        TextBlock gridLabel = new() { FontSize = 13, Foreground = BoardTheme.TextBrush };
+        TextBlock gapLabel = new() { FontSize = 13, Foreground = BoardTheme.TextBrush };
+        List<(double Width, double Height)> measured = [];
+        string measuredKey = string.Empty, gridKey = string.Empty;
+        void Refresh()
+        {
+            double gap = Math.Max(0, _settings.AutoLayoutGap);
+            double gridSize = GridSize;
+            // 与自动排列一致：只有开启网格吸附和自动对齐时，位置和尺寸才落在网格线上。
+            double rounding = _settings.GridSnappingEnabled && _settings.AutoLayoutAlign ? gridSize : 0;
+            // 内容尺寸只在影响测量的外观变化时重算；拖动滑动条不再逐帧测量富文本。
+            string sizeKey = $"{_settings.AutoLayoutResize}|{_settings.TileTitleSize}|{BoardTheme.IsLight}";
+            if (sizeKey != measuredKey)
+            {
+                measuredKey = sizeKey;
+                measured.Clear();
+                for (int index = 0; index < tiles.Count; index++)
+                {
+                    // 每次都从示例基准尺寸重新测量，连续刷新不会让磁贴越缩越小。
+                    SubjectTileControl tile = tiles[index];
+                    SubjectBoard subject = (SubjectBoard)tile.DataContext;
+                    subject.TileWidth = samples[index].Width; subject.TileHeight = samples[index].Height;
+                    tile.ApplyModelLayout();
+                    measured.Add(tile.MeasureContentSize());
+                }
+            }
+            // 关闭自动调整时使用示例原始尺寸，避免上一次测量结果残留。
+            List<(double Width, double Height)> sizes = _settings.AutoLayoutResize
+                ? [.. measured]
+                : [.. samples.Select(sample => (sample.Width, sample.Height))];
+            // 先统一相近尺寸、再按网格向上取整，和看板自动排列对尺寸的处理顺序一致。
+            if (_settings.AutoLayoutResize && _settings.AutoLayoutAlign) sizes = BoardLayout.AlignSizes(sizes);
+            if (_settings.AutoLayoutResize && rounding > 0)
+                sizes = sizes.Select(size => (Math.Ceiling(size.Width / rounding) * rounding, Math.Ceiling(size.Height / rounding) * rounding)).ToList();
+            // 与自动排列的兜底画布一致；无限作业板按内容继续扩展。
+            double boardWidth = 1100, boardHeight = 780;
+            if (_settings.InfiniteBoard)
+            {
+                boardWidth = Math.Max(boardWidth, sizes.Max(size => size.Width));
+                boardHeight = Math.Max(boardHeight, sizes.Sum(size => size.Height + gap + rounding));
+            }
+            List<LayoutRect>? placements = null;
+            // 网格和间隔偏大时按实际画布可能放不下；逐步放大虚拟画布兜底，保证预览始终有结果。
+            for (double expansion = 1; placements is null && expansion <= 8; expansion *= 2)
+            {
+                try { placements = BoardLayout.Arrange(sizes, boardWidth * expansion, boardHeight * expansion, gap, _settings.AutoLayoutAlign, rounding); }
+                catch (InvalidOperationException) { }
+            }
+            double stacked = 0;
+            placements ??= sizes.Select(size => { LayoutRect rect = new(0, stacked, size.Width, size.Height); stacked += size.Height + gap; return rect; }).ToList();
+            // 缩放只看看板视口：网格观感固定，拖动间隔不会让它变大变小；看板水平居中，内容仍从左上角开始排。
+            double scale = Math.Min(frameWidth / boardWidth, frameHeight / boardHeight);
+            double canvasWidth = Math.Max(1, frameWidth / scale), canvasHeight = Math.Max(1, frameHeight / scale);
+            double originX = (canvasWidth - boardWidth) / 2, originY = (canvasHeight - boardHeight) / 2;
+            for (int index = 0; index < tiles.Count; index++)
+            {
+                SubjectBoard subject = (SubjectBoard)tiles[index].DataContext;
+                subject.TileWidth = placements[index].Width; subject.TileHeight = placements[index].Height;
+                tiles[index].ApplyModelLayout();
+                Canvas.SetLeft(tiles[index], originX + placements[index].X); Canvas.SetTop(tiles[index], originY + placements[index].Y);
+            }
+            // 网格只在尺寸或外观变化时重画：拖动间隔时网格保持原样，也不会逐帧创建大量图形。
+            string appearance = $"{GridAppearance.EffectiveStyle(_settings.GridStyle, _isEditing, _settings.ShowGridWhileEditing)}|" +
+                $"{gridSize}|{_settings.GridColor}|{_settings.GridLineThickness}|{_settings.GridDotColor}|{_settings.GridDotDiameter}";
+            string nextGridKey = $"{appearance}|{canvasWidth:0.##}x{canvasHeight:0.##}|{originX:0.##}|{originY:0.##}";
+            if (nextGridKey != gridKey)
+            {
+                gridKey = nextGridKey;
+                board.Width = canvasWidth; board.Height = canvasHeight;
+                grid.Width = layer.Width = canvasWidth; grid.Height = layer.Height = canvasHeight;
+                // 网格和磁贴层各自持有独立的裁剪几何：同一个 Geometry 实例不能同时作为两个元素的 Clip。
+                Windows.Foundation.Rect bounds = new(0, 0, canvasWidth, canvasHeight);
+                grid.Clip = new RectangleGeometry { Rect = bounds };
+                layer.Clip = new RectangleGeometry { Rect = bounds };
+                // 网格从看板原点向两侧补齐，磁贴的吸附位置因此和看板完全一致。
+                DrawGrid(grid, GridAppearance.EffectiveStyle(_settings.GridStyle, _isEditing, _settings.ShowGridWhileEditing),
+                    originX - Math.Floor(originX / gridSize) * gridSize,
+                    originY - Math.Floor(originY / gridSize) * gridSize,
+                    canvasWidth, canvasHeight, scale);
+            }
+            gridLabel.Text = $"网格 {gridSize:0.#} px";
+            gapLabel.Text = $"自动排列 · 间隔 {gap:0.#} px";
+        }
+        Refresh();
+        _buildingPreviewRefreshers?.Add(Refresh);
+        // 标签不参与缩放：贴在预览内侧，始终使用真实字号。
+        Grid preview = new() { Width = previewWidth, Height = previewHeight, IsHitTestVisible = false };
+        preview.Children.Add(new Viewbox { Margin = new Thickness(previewLeft, previewTop, previewRight, previewBottom), Stretch = Stretch.Uniform, Child = board });
+        preview.Children.Add(PreviewLayoutChip(gridLabel, HorizontalAlignment.Left));
+        preview.Children.Add(PreviewLayoutChip(gapLabel, HorizontalAlignment.Right));
+        return preview;
+    }
+
+    private static Border PreviewLayoutChip(TextBlock label, HorizontalAlignment alignment) => new()
+    {
+        HorizontalAlignment = alignment, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(12, 12, 12, 0),
+        Padding = new Thickness(10, 4, 10, 4), CornerRadius = new CornerRadius(6),
+        BorderThickness = new Thickness(1), BorderBrush = BoardTheme.LineBrush,
+        Background = new SolidColorBrush(BoardTheme.IsLight
+            ? Windows.UI.Color.FromArgb(255, 240, 240, 246) : Windows.UI.Color.FromArgb(255, 38, 38, 50)),
+        Child = label
+    };
 
     private UIElement CreateToolbarPositionPicker()
     {

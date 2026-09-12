@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.CompilerServices;
+using System.Collections.Concurrent;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -18,6 +19,37 @@ public static class FontService
 
     public static IReadOnlyList<string> AvailableFamilies => Fonts.Value;
 
+    private static readonly ConcurrentDictionary<string, bool> InstalledCache = new(StringComparer.CurrentCultureIgnoreCase);
+
+    /// <summary>
+    /// 家族名是否为系统已安装字体。RTF 保存会把本地化名写成英文名（如“微软雅黑”写成“Microsoft YaHei”），
+    /// 所以除了比对枚举结果，还要用 GDI 字体映射把别名解析回已安装家族，避免把真实字体误判为缺失。
+    /// </summary>
+    public static bool IsInstalledFamily(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        if (Fonts.Value.Contains(name, StringComparer.CurrentCultureIgnoreCase)) return true;
+        return InstalledCache.GetOrAdd(name, key => ResolveFamilyName(key) is { Length: > 0 } resolved &&
+            Fonts.Value.Contains(resolved, StringComparer.CurrentCultureIgnoreCase));
+    }
+
+    /// <summary>GDI 字体映射返回的家族名。不存在的名字也会被映射到替身字体，因此不能单独用来判断存在性。</summary>
+    internal static string? ResolveFamilyName(string name)
+    {
+        nint dc = CreateCompatibleDC(0);
+        if (dc == 0) return null;
+        try
+        {
+            LogFont request = new() { CharSet = 1, FaceName = name };
+            string? matched = null;
+            FontCallback callback = (font, _, _, _) => { matched ??= Marshal.PtrToStringUni(font + 28); return 0; };
+            EnumFontFamiliesEx(dc, ref request, callback, 0, 0);
+            GC.KeepAlive(callback);
+            return matched;
+        }
+        finally { DeleteDC(dc); }
+    }
+
     public static string NormalizeRtf(string rtf) => rtf.Replace(ResourceName, FamilyName, StringComparison.OrdinalIgnoreCase);
 
     public static void RebindBundledFont(RichEditBox editor, IReadOnlyList<FontFallbackState>? savedFallbacks = null)
@@ -31,7 +63,7 @@ public static class FontService
         {
             if (saved.Start < 0 || saved.Length <= 0 || saved.Start >= end - 1) continue;
             ITextRange range = editor.Document.GetRange(saved.Start, Math.Min(end - 1, saved.Start + saved.Length));
-            if (Fonts.Value.Contains(saved.Family, StringComparer.CurrentCultureIgnoreCase)) range.CharacterFormat.Name = saved.Family;
+            if (IsInstalledFamily(saved.Family)) range.CharacterFormat.Name = saved.Family;
             else { range.CharacterFormat.Name = ResourceName; fallbacks.Add((range, saved.Family)); }
         }
         int position = 0;
@@ -43,7 +75,7 @@ public static class FontService
             string name = run.CharacterFormat.Name;
             if (name.Contains("HarmonyOS", StringComparison.OrdinalIgnoreCase))
                 run.CharacterFormat.Name = ResourceName;
-            else if (!string.IsNullOrWhiteSpace(name) && !Fonts.Value.Contains(name, StringComparer.CurrentCultureIgnoreCase))
+            else if (!string.IsNullOrWhiteSpace(name) && !IsInstalledFamily(name))
             {
                 fallbacks.Add((editor.Document.GetRange(run.StartPosition, run.EndPosition), name));
                 run.CharacterFormat.Name = ResourceName;
@@ -87,7 +119,7 @@ public static class FontService
         };
         void Apply(string name)
         {
-            if (!Fonts.Value.Contains(name, StringComparer.CurrentCultureIgnoreCase)) return;
+            if (!IsInstalledFamily(name)) return;
             editor.Focus(FocusState.Programmatic);
             editor.Document.Selection.SetRange(start, end);
             ForgetFallbacks(editor, start, end);
@@ -97,6 +129,10 @@ public static class FontService
         }
         input.QuerySubmitted += (_, args) => Apply(args.ChosenSuggestion as string ?? args.QueryText);
         input.SuggestionChosen += (_, args) => { input.Text = (string)args.SelectedItem; Apply(input.Text); };
+#if PANCAKE_UI_TESTS
+        // 真实点击不好在自动化里稳定触发，暴露同一段 Apply 供回归检查调用。
+        input.Tag = (Action<string>)Apply;
+#endif
         return input;
     }
 

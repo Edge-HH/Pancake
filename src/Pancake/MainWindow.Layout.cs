@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media;
 using Pancake.Controls;
+using Pancake.Models;
 using Pancake.Services;
 
 namespace Pancake;
@@ -18,6 +19,46 @@ public sealed partial class MainWindow
     private double _splitDragRatio;
     private Dictionary<string, RegionPlacement>? _widgetEditSnapshot;
     private HashSet<string>? _dockedCustomizationEditSnapshot;
+    private bool _boardLayoutPending;
+
+    /// <summary>
+    /// 网格大小变化时把已有磁贴重新吸附到新网格：位置和尺寸始终落在网格线上，不会停在旧网格。
+    /// 设置页打开时看板是折叠的，这里只改数据；回到看板时再统一应用，拖动滑块因此不会卡顿。
+    /// </summary>
+    private void SnapTilesToGrid()
+    {
+        if (!IsGridSnappingEnabled) return;
+        double grid = GridSize;
+        double width = Math.Floor(BoardCanvas.Width / grid) * grid;
+        double height = Math.Floor(BoardCanvas.Height / grid) * grid;
+        double minWidth = Math.Ceiling(280 / grid) * grid;
+        // 画板还放不下一个最小磁贴时保持原样，等画板尺寸可用后再吸附。
+        if (width < minWidth || height < SubjectTileControl.MinimumTileHeight) return;
+        foreach (SubjectBoard subject in ViewModel.Subjects)
+        {
+            subject.TileWidth = Math.Clamp(SnapToGrid(subject.TileWidth), minWidth, width);
+            subject.TileHeight = Math.Clamp(SnapToGrid(subject.TileHeight), SubjectTileControl.MinimumTileHeight, height);
+            subject.X = Math.Clamp(SnapToGrid(subject.X), 0, width - subject.TileWidth);
+            subject.Y = Math.Clamp(SnapToGrid(subject.Y), 0, height - subject.TileHeight);
+        }
+        _boardLayoutPending = true;
+    }
+
+    /// <summary>设置页里改过网格大小后，回到看板时一次性应用坐标、尺寸与网格重画。</summary>
+    private void ApplyPendingBoardLayout()
+    {
+        if (!_boardLayoutPending) return;
+        _boardLayoutPending = false;
+        _renderedGridWidth = 0;
+        foreach (SubjectBoard subject in ViewModel.Subjects)
+        {
+            if (FindTile(subject) is not { } tile) continue;
+            tile.ApplyModelLayout();
+            Canvas.SetLeft(tile, subject.X);
+            Canvas.SetTop(tile, subject.Y);
+        }
+        UpdateBoardBounds();
+    }
 
     private void ApplyDisplayLayout()
     {

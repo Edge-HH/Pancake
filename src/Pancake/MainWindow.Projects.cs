@@ -19,9 +19,14 @@ public sealed partial class MainWindow
     private SubjectBoard? _activeInkSubject;
     private readonly InkToolSettings _inkSettings = new();
     private readonly StackPanel _inkColors = new() { Orientation = Orientation.Horizontal, Spacing = 6 };
+    private readonly StackPanel _inkWidths = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
     private readonly ToggleButton _inkPen = new() { IsChecked = true };
     private readonly ToggleButton _inkEraser = new();
     private ProjectDocument? CurrentProject => _library.Projects.FirstOrDefault(p => p.Id == _library.ActiveProjectId);
+
+    /// <summary>细、中、粗三档笔迹粗细预设；圆点直径按同一顺序递增，值仍直接作为笔迹线宽。</summary>
+    private static readonly (double Thickness, double DotDiameter, string Name)[] InkWidthPresets =
+        [(2d, 8d, "细"), (5d, 13d, "中"), (12d, 19d, "粗")];
 
     private static Viewbox CreateInkToolbarIcon(string resourceKey)
     {
@@ -50,15 +55,28 @@ public sealed partial class MainWindow
         GlobalInkTools.Children.Add(_inkPen); GlobalInkTools.Children.Add(_inkEraser);
         GlobalInkTools.Children.Add(_inkColors);
         RefreshInkPalette();
-        Slider thickness = new() { Minimum = 2, Maximum = 18, StepFrequency = 1, Value = 5, Width = 110, Header = "粗细" };
-        thickness.ValueChanged += (_, args) => _inkSettings.Thickness = args.NewValue;
-        GlobalInkTools.Children.Add(thickness);
+        GlobalInkTools.Children.Add(_inkWidths);
+        foreach ((double thickness, double dotDiameter, string name) in InkWidthPresets)
+        {
+            InkWidthPresetButton preset = new(thickness, dotDiameter, name);
+            ToolTipService.SetToolTip(preset, $"笔迹粗细：{name}");
+            preset.Click += (_, _) => { _inkSettings.Thickness = preset.Thickness; RefreshInkWidthSelection(); };
+            _inkWidths.Children.Add(preset);
+        }
+        RefreshInkWidthSelection();
         Button clear = new() { Content = new FluentIcon { Symbol = "Delete", Foreground = new SolidColorBrush(Microsoft.UI.Colors.Red) } };
         ToolTipService.SetToolTip(clear, "清空笔迹");
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(clear, "清空笔迹");
         clear.Click += ClearInk_Click;
         GlobalInkTools.Children.Add(clear);
         UpdateProjectCommands();
+    }
+
+    /// <summary>把当前笔迹粗细同步到预设按钮的选中态；数值不属于任何预设时三档均不选中。</summary>
+    private void RefreshInkWidthSelection()
+    {
+        foreach (InkWidthPresetButton preset in _inkWidths.Children)
+            preset.SetSelected(preset.Thickness == _inkSettings.Thickness);
     }
 
     private void RefreshInkPalette()
@@ -81,6 +99,7 @@ public sealed partial class MainWindow
             };
             _inkColors.Children.Add(swatch);
         }
+        foreach (InkWidthPresetButton preset in _inkWidths.Children) preset.RefreshTheme();
     }
 
     private void CaptureCurrentProject()
