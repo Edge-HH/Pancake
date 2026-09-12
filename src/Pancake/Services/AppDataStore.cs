@@ -55,16 +55,32 @@ public sealed class AppDataStore
                     });
                 subject.Entries.Add(homework);
             }
-            foreach (InkStrokeState item in saved.InkStrokes)
-            {
-                InkStrokeData stroke = new() { Color = ParseColor(item.Color), Thickness = item.Thickness, TipScaleX = item.TipScaleX, TipScaleY = item.TipScaleY };
-                stroke.Points.AddRange(item.Points.Select(point => new Point(point.X, point.Y)));
-                subject.InkStrokes.Add(stroke);
-            }
+            foreach (InkStrokeData stroke in RestoreInk(saved.InkStrokes)) subject.InkStrokes.Add(stroke);
             result.Add(subject);
         }
         return result;
     }
+
+    /// <summary>把保存用的笔迹还原成可编辑笔迹；磁贴与仅时钟整屏笔迹共用同一套坐标。</summary>
+    public static List<InkStrokeData> RestoreInk(IEnumerable<InkStrokeState> source)
+    {
+        List<InkStrokeData> result = [];
+        foreach (InkStrokeState item in source)
+        {
+            InkStrokeData stroke = new() { Color = ParseColor(item.Color), Thickness = item.Thickness, TipScaleX = item.TipScaleX, TipScaleY = item.TipScaleY };
+            stroke.Points.AddRange(item.Points.Select(point => new Point(point.X, point.Y)));
+            result.Add(stroke);
+        }
+        return result;
+    }
+
+    /// <summary>把可编辑笔迹转成保存结构，颜色统一写成带透明度的十六进制。</summary>
+    public static List<InkStrokeState> CaptureInk(IEnumerable<InkStrokeData> source) => source.Select(stroke => new InkStrokeState
+    {
+        Color = $"#{stroke.Color.A:X2}{stroke.Color.R:X2}{stroke.Color.G:X2}{stroke.Color.B:X2}",
+        Thickness = stroke.Thickness, TipScaleX = stroke.TipScaleX, TipScaleY = stroke.TipScaleY,
+        Points = stroke.Points.Select(point => new PointState { X = point.X, Y = point.Y }).ToList()
+    }).ToList();
 
     public static List<SubjectState> CaptureSubjects(IEnumerable<SubjectBoard> source) => source.Select(subject => new SubjectState
     {
@@ -85,12 +101,7 @@ public sealed class AppDataStore
                 FrameWidth = a.FrameWidth, AspectRatio = a.AspectRatio, Rotation = a.Rotation, PositionX = a.PositionX, PositionY = a.PositionY
             }).ToList()
         }).ToList(),
-        InkStrokes = subject.InkStrokes.Select(stroke => new InkStrokeState
-        {
-            Color = $"#{stroke.Color.A:X2}{stroke.Color.R:X2}{stroke.Color.G:X2}{stroke.Color.B:X2}",
-            Thickness = stroke.Thickness, TipScaleX = stroke.TipScaleX, TipScaleY = stroke.TipScaleY,
-            Points = stroke.Points.Select(point => new PointState { X = point.X, Y = point.Y }).ToList()
-        }).ToList()
+        InkStrokes = CaptureInk(subject.InkStrokes)
     }).ToList();
 
     private static Windows.UI.Color ParseColor(string value)

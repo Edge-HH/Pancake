@@ -56,9 +56,6 @@
             </StackPanel>
             <Grid Grid.Column="2" Margin="0,0,140,0">
                 <Grid x:Name="DragRegion" Background="Transparent" />
-                <ScrollViewer x:Name="RichTextToolbar" VerticalAlignment="Center" HorizontalAlignment="Right" HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" Visibility="Collapsed">
-                    <ContentControl x:Name="RichTextToolbarHost" HorizontalContentAlignment="Right" />
-                </ScrollViewer>
             </Grid>
         </Grid>
 
@@ -73,10 +70,13 @@
                         <Canvas x:Name="ClockLayoutCanvas">
                             <Viewbox x:Name="ClockContentView" Stretch="Uniform">
                                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="18" SizeChanged="ClockContent_SizeChanged">
-                                    <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="7">
-                                        <TextBlock x:Name="MainTimeText" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="112" FontWeight="Light" Foreground="{ThemeResource BoardTextBrush}" Text="11:20" />
-                                        <TextBlock x:Name="SecondsText" Margin="0,17,0,0" VerticalAlignment="Top" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="28" Foreground="{ThemeResource BoardTextBrush}" Text="10" />
-                                    </StackPanel>
+                                    <!-- 秒数右侧占位会在左侧补一块等宽空白，时间数字因此和日期、组件栏共用同一条中轴线。 -->
+                                    <Grid HorizontalAlignment="Center" ColumnSpacing="7">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" Width="{Binding ActualWidth, ElementName=SecondsText}" />
+                                        <TextBlock Grid.Column="1" x:Name="MainTimeText" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="112" FontWeight="Light" Foreground="{ThemeResource BoardTextBrush}" Text="11:20" />
+                                        <TextBlock Grid.Column="2" x:Name="SecondsText" Margin="0,17,0,0" VerticalAlignment="Top" FontFamily="{StaticResource BoardTextFontFamily}" FontSize="28" Foreground="{ThemeResource BoardTextBrush}" Text="10" />
+                                    </Grid>
                                     <TextBlock x:Name="ClockDateText" HorizontalAlignment="Center" FontSize="20" Foreground="{ThemeResource BoardTextBrush}" />
                                 </StackPanel>
                             </Viewbox>
@@ -91,6 +91,8 @@
                                 </StackPanel>
                             </Viewbox>
                         </Canvas>
+                        <!-- 仅时钟模式的全屏笔迹层：覆盖整块时钟区域，画笔打开时可以把笔迹写在任何位置。 -->
+                        <icons:ClockInkLayer x:Name="ClockInkLayer" Visibility="Collapsed" />
                     </Grid>
                 </Border>
 
@@ -130,11 +132,23 @@
                         <NavigationViewItem Content="噪音检测" Tag="ComponentsNoise"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Microphone" /></NavigationViewItem.Icon></NavigationViewItem>
                     </NavigationViewItem.MenuItems>
                 </NavigationViewItem>
+                <NavigationViewItem x:Name="AutofillNavigationGroup" Content="自动填充" SelectsOnInvoked="False">
+                    <NavigationViewItem.Icon><icons:FluentIcon Symbol="TextGrammarWand" /></NavigationViewItem.Icon>
+                    <NavigationViewItem.MenuItems>
+                        <NavigationViewItem Content="学科补全" Tag="AutofillSubject"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Board" /></NavigationViewItem.Icon></NavigationViewItem>
+                        <NavigationViewItem Content="作业补全" Tag="AutofillHomework"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Document" /></NavigationViewItem.Icon></NavigationViewItem>
+                    </NavigationViewItem.MenuItems>
+                </NavigationViewItem>
                 <NavigationViewItem x:Name="AboutNavigationGroup" Content="关于" Tag="About">
                     <NavigationViewItem.Icon><icons:FluentIcon Symbol="Info" /></NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.MenuItems>
-            <ScrollViewer x:Name="SettingsContentScrollViewer" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
+            <Grid x:Name="SettingsContentHost" SizeChanged="SettingsContentHost_SizeChanged">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="0" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+            <ScrollViewer x:Name="SettingsContentScrollViewer" Grid.Column="0" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
             <StackPanel Padding="32,28,32,100" Spacing="28">
                 <StackPanel Spacing="8">
                     <TextBlock x:Name="SettingsPageTitle" FontSize="36" Foreground="{ThemeResource BoardTextBrush}" Text="磁贴" />
@@ -246,8 +260,12 @@
                         </StackPanel>
                     </Border>
                 </StackPanel>
+                <StackPanel x:Name="AutofillSettingsPanel" Spacing="22" Visibility="Collapsed" />
             </StackPanel>
             </ScrollViewer>
+                <!-- 磁贴设置页的固定预览区：向下滚动编辑选项时，预览图始终可见。 -->
+                <Grid x:Name="SettingsPreviewHost" Grid.Column="1" Margin="0,28,32,32" Visibility="Collapsed" />
+            </Grid>
         </NavigationView>
 
         <StackPanel x:Name="EmptyProjectPanel" Grid.Row="1" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="16" Visibility="Collapsed">
@@ -260,6 +278,48 @@
             <ScrollViewer x:Name="InkToolbarScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"><StackPanel x:Name="GlobalInkTools" Orientation="Horizontal" Spacing="10" /></ScrollViewer>
         </Border>
         <Grid x:Name="ExportOverlay" Grid.RowSpan="2" Canvas.ZIndex="200" Background="{ThemeResource BoardBackgroundBrush}" Visibility="Collapsed" />
+
+        <!--
+            富文本悬浮岛：编辑模式下承载当前作业的富文本工具条，贴在控制窗左侧（竖版控制窗时贴在其上方）。
+            位置由 ApplyIslandPlacement 按控制窗实际占位计算，尺寸、圆角与背景全部跟随控制窗设置。
+        -->
+        <Border
+            x:Name="RichTextIsland"
+            Grid.RowSpan="2"
+            Padding="7"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Background="{ThemeResource BoardSurfaceBrush}"
+            BorderBrush="{ThemeResource BoardLineBrush}"
+            BorderThickness="1"
+            Canvas.ZIndex="101"
+            CornerRadius="14"
+            Visibility="Collapsed">
+            <ScrollViewer x:Name="RichTextToolbar" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <ContentControl x:Name="RichTextToolbarHost" HorizontalContentAlignment="Left" VerticalContentAlignment="Center" />
+            </ScrollViewer>
+        </Border>
+
+        <!--
+            作业板缩放岛：只在编辑模式出现，分屏、仅作业与自由布局下固定在控制窗右侧（竖版控制窗时在其下方）。
+            查看模式保留缩放结果与平移能力，但不再显示这块浮岛。
+        -->
+        <Border
+            x:Name="ZoomIsland"
+            Grid.RowSpan="2"
+            Padding="7"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Background="{ThemeResource BoardSurfaceBrush}"
+            BorderBrush="{ThemeResource BoardLineBrush}"
+            BorderThickness="1"
+            Canvas.ZIndex="101"
+            CornerRadius="14"
+            Visibility="Collapsed">
+            <ScrollViewer x:Name="ZoomIslandScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <StackPanel x:Name="ZoomIslandItems" Orientation="Horizontal" Spacing="4" />
+            </ScrollViewer>
+        </Border>
 
         <!-- 主操作集中在屏幕下方，触屏时不需要跨越整块大屏。 -->
         <Border

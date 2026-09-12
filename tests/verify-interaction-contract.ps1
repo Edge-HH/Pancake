@@ -11,6 +11,12 @@ $dataCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\S
 $weatherCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\XiaomiWeatherService.cs'))
 $weatherCatalogCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\WeatherCityCatalog.cs'))
 $updateCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\GitHubUpdateService.cs'))
+$autofillServiceCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\AutofillService.cs'))
+$autofillPopupCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\AutofillPopup.cs'))
+$autofillInputCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Controls\AutofillInputs.cs'))
+$projectCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.Projects.cs'))
+$settingsCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.Settings.cs'))
+$stateCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\ProjectState.cs'))
 $failures = [System.Collections.Generic.List[string]]::new()
 
 if ($windowXaml -match 'x:Name="BoardScrollViewer"' -and
@@ -123,6 +129,75 @@ if ($weatherCatalogCode -match 'city\.Code\.Contains' -or
 
 if ($updateCode -notmatch 'api\.github\.com/repos' -or $windowCode -notmatch 'CheckForUpdatesAsync') {
     $failures.Add('GitHub Release 自动更新尚未接入。')
+}
+
+if ($autofillPopupCode -notmatch 'public void AttachTo\(Panel host\)' -or
+    $windowCode -notmatch '_autofillPopup\.AttachTo\(RootShell\)' -or
+    $tileCode -match '_autofillPopup\.Parent') {
+    $failures.Add('补全候选浮层没有挂在窗口根面板上，会被磁贴裁剪或缩放影响。')
+}
+
+if ($windowCode -notmatch 'RootShell_PreviewKeyDown' -or
+    $windowCode -notmatch 'UIElement\.PreviewKeyDownEvent' -or
+    $windowCode -notmatch '_autofillPopup\.HandleKey' -or
+    $autofillPopupCode -notmatch 'VirtualKey\.Up' -or
+    $autofillPopupCode -notmatch 'VirtualKey\.Tab' -or
+    $autofillPopupCode -notmatch 'VirtualKey\.Escape' -or
+    $autofillInputCode -notmatch 'WriteWatch') {
+    $failures.Add('补全候选缺少窗口级上下键切换、Tab 采纳、Esc 关闭或输入法覆盖后的补写处理。')
+}
+
+# 同一个按键处理器同时挂 PreviewKeyDown 与 KeyDown 时，一次按键会被处理两遍，上下键先加一又减一，看起来完全切不动。
+if (([regex]::Matches($windowCode, 'RootShell_PreviewKeyDown\)').Count) -ne 1 -or
+    $windowCode -match 'AddHandler\(UIElement\.KeyDownEvent,\s*new KeyEventHandler\(RootShell_PreviewKeyDown\)') {
+    $failures.Add('补全按键处理器被挂到多个按键事件上，一次按键会被处理多次。')
+}
+
+# 浮层是代码创建的控件，不会随主题资源引用自动换色：必须显式按主题字典取色，否则浅色模式会保留深色背景。
+if ($autofillPopupCode -notmatch 'ApplyTheme\(' -or
+    $autofillPopupCode -notmatch 'ThemeDictionaries' -or
+    $autofillPopupCode -notmatch '_rowTextBrush') {
+    $failures.Add('补全浮层没有按当前主题重新取色，浅色模式下会深底配黑字。')
+}
+
+if ($autofillInputCode -notmatch 'public void Flush\(\)' -or
+    $tileCode -notmatch 'foreach \(HomeworkAutofillInput input in _entryAutofills\) input\.Flush\(\)' -or
+    $autofillInputCode -notmatch 'string\.Equals\(content, _counted') {
+    $failures.Add('作业名称统计没有在编辑结束时结算，或没有按文本变化去重。')
+}
+
+if ($autofillInputCode -notmatch 'DefaultSubjectTitle' -or
+    $autofillServiceCode -notmatch 'RecommendSubjects' -or
+    $settingsCode -notmatch 'AskHomeworkRenameAsync' -or
+    ([regex]::Matches($settingsCode, '刷新列表')).Count -lt 2) {
+    $failures.Add('默认标题清空推荐、作业名称编辑/屏蔽或两个列表的刷新入口尚未接入。')
+}
+
+if ($projectCode -match 'RegisterSubjectNames' -or $autofillServiceCode -match 'RegisterSubjectNames') {
+    $failures.Add('学科库仍会自动收录项目里的科目。')
+}
+
+if ($settingsCode -notmatch 'RegisterSettingsPage\("AutofillSubject"' -or
+    $settingsCode -notmatch 'RegisterSettingsPage\("AutofillHomework"' -or
+    $windowXaml -notmatch 'AutofillSettingsPanel' -or
+    $windowXaml -notmatch 'Tag="AutofillSubject"') {
+    $failures.Add('设置的自动填充分组、学科补全或作业补全页面尚未接入。')
+}
+
+if ($settingsCode -notmatch 'ToggleButton randomToggle' -or
+    $settingsCode -notmatch 'RandomSubjectColorBrush' -or
+    $autofillServiceCode -notmatch 'ResolveSubjectColor' -or
+    $stateCode -notmatch 'public bool RandomColor \{ get; set; \}' -or
+    $windowCode -notmatch '_refreshSubjectAutofill\?\.Invoke\(\)') {
+    $failures.Add('学科颜色没有始终按当前色系显示，或缺少随机配色按钮与切换色系后的刷新。')
+}
+
+if ($stateCode -notmatch 'public AutofillSettings Autofill \{ get; set; \}' -or
+    $stateCode -notmatch 'public bool Enabled \{ get; set; \}\s*// 匹配程度' -or
+    $stateCode -notmatch 'public bool Enabled \{ get; set; \}\r?\n\s*public bool AutoRecord' -or
+    $autofillServiceCode -notmatch 'PendingExpiryDays = 14' -or
+    $autofillServiceCode -notmatch 'PromotedExpiryDays = 90') {
+    $failures.Add('自动填充设置没有默认关闭，或过期天数与约定不一致。')
 }
 
 if ($failures.Count -gt 0) {

@@ -39,6 +39,14 @@ public static class FluentGlyphs
     public const string Document = "\uE687"; // ic_fluent_document_20_regular
     public const string Pen = "\uEC9D"; // ic_fluent_pen_20_regular
     public const string Eraser = "\uE7FF"; // ic_fluent_eraser_20_regular
+    public const string TextGrammarWand = "\uF285"; // ic_fluent_text_grammar_wand_20_regular
+    // 竖版控制窗里字体选择框收成图标按钮时用的字体图标。
+    public const string TextFont = "\uF26F"; // ic_fluent_text_font_20_regular
+    // 作业板缩放控件用的放大/缩小图标。
+    public const string ZoomIn = "\uF4D1"; // ic_fluent_zoom_in_20_regular
+    public const string ZoomOut = "\uF4D3"; // ic_fluent_zoom_out_20_regular
+    // 组件右下角缩放手柄的方向提示；同时用于校验该字形确实随字体分发。
+    public const string ArrowDownRight = "\uE0D1"; // ic_fluent_arrow_down_right_20_regular
     public static string Resolve(string symbol) => symbol switch
     {
         nameof(Board) => Board,
@@ -73,6 +81,11 @@ public static class FluentGlyphs
         nameof(Document) => Document,
         nameof(Pen) => Pen,
         nameof(Eraser) => Eraser,
+        nameof(TextGrammarWand) => TextGrammarWand,
+        nameof(TextFont) => TextFont,
+        nameof(ZoomIn) => ZoomIn,
+        nameof(ZoomOut) => ZoomOut,
+        nameof(ArrowDownRight) => ArrowDownRight,
         _ => throw new ArgumentException("未知图标名称", nameof(symbol))
     };
 }

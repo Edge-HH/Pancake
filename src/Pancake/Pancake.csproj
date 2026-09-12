@@ -31,6 +31,7 @@
   <ItemGroup>
     <Content Include="Assets\Settings\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\Fonts\**\*" Exclude="Assets\Fonts\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Pinyin\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="ApplyUpdate.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Tools\7zip\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\xiaomi_weather_cities.json" CopyToOutputDirectory="PreserveNewest" />

@@ -28,14 +28,18 @@ try
     string picture = Path.Combine(root, "source.png"); File.WriteAllBytes(picture, [1, 2, 3, 4]);
     first.Subjects[0].Entries[0].Attachments.Add(new AttachmentState { Name = "图片", Kind = "图片", Path = store.CopyAttachment(first.Id, picture), Rotation = 90, Scale = 2, OffsetX = 7, PositionY = 35 });
     File.Delete(picture);
+    // 仅时钟模式的整屏笔迹属于项目内容，和磁贴笔迹一起保存与分发。
+    first.ClockInkStrokes = [new InkStrokeState { Color = "#FFE5B3B3", Thickness = 2, Points = [new PointState { X = 12, Y = 34 }, new PointState { X = 1200, Y = 800 }] }];
     store.Save(library);
     ProjectLibrary restored = store.Load();
     Check(restored.ActiveProjectId == first.Id && restored.Projects[0].Subjects[0].X == 48, "项目与布局未恢复");
     Check(File.Exists(restored.Projects[0].Subjects[0].Entries[0].Attachments[0].Path), "附件未独立收纳");
     Check(!File.ReadAllText(store.LibraryPath).Contains(root.Replace("\\", "\\\\")), "本地附件应使用相对路径");
+    Check(restored.Projects[0].ClockInkStrokes.Count == 1 && restored.Projects[0].ClockInkStrokes[0].Points[1].X == 1200, "仅时钟模式的整屏笔迹未随项目文件往返");
     ProjectDocument reset = ProjectStore.Create(library, true);
     Check(reset.Name != first.Name && reset.Subjects.Count == 1, "同日项目名或模板错误");
     Check(reset.Subjects[0].Entries.Count == 0 && reset.Subjects[0].InkStrokes.Count == 0 && reset.Subjects[0].AccentHex == "#123456", "重置作业误删配色或未清内容");
+    Check(reset.ClockInkStrokes.Count == 0, "重置作业未清空仅时钟模式的整屏笔迹");
     Check(first.Subjects[0].Entries.Count == 1, "新项目污染原项目");
     Check(ProjectStore.Create(library, false).Subjects.Count == 0, "清空布局不应保留磁贴");
     string package = Path.Combine(root, "test.pch");
@@ -46,6 +50,7 @@ try
     AttachmentState image = imported.Subjects[0].Entries[0].Attachments[0];
     Check(File.ReadAllBytes(image.Path).SequenceEqual(new byte[] { 1, 2, 3, 4 }) && image.Rotation == 90 && image.OffsetX == 7, "图片或变换未往返");
     Check(imported.Subjects[0].Entries[0].RtfContent == first.Subjects[0].Entries[0].RtfContent && imported.Subjects[0].InkStrokes[0].Points[1].Y == 150, "RTF 或笔迹未往返");
+    Check(imported.ClockInkStrokes.Count == 1 && imported.ClockInkStrokes[0].Points[1].Y == 800 && imported.ClockInkStrokes[0].Color == "#FFE5B3B3", "仅时钟模式的整屏笔迹未随作业包往返");
     Check(imported.Subjects[0].Entries[0].FontFallbacks.Single().Family == "Unavailable Classroom Font", "缺失字体原始名称未随作业包往返");
     imported.Name = "重命名"; new PchPackageService(secondStore).Save(imported, package);
     Check(service.Import(package).Name == "重命名", "重复保存未更新包");
@@ -69,6 +74,13 @@ try
     Reject(() => service.Import(incomplete), "包内缺少附件仍然导入");
     noAssets.Version = 2;
     Reject(() => ProjectValidation.Validate(noAssets, true), "未知版本被接受");
+    ProjectDocument badClockInk = ProjectStore.Clone(first);
+    badClockInk.ClockInkStrokes[0].Thickness = 0;
+    Reject(() => ProjectValidation.Validate(badClockInk, false), "无效的整屏笔迹被接受");
+    ProjectDocument missingClockInk = ProjectStore.Clone(first);
+    missingClockInk.ClockInkStrokes = null!;
+    ProjectValidation.Validate(missingClockInk, false);
+    Check(missingClockInk.ClockInkStrokes.Count == 0, "缺少整屏笔迹字段的旧项目应补成空列表");
     SubjectState oldInk = new() { Width = 430, Height = 326, InkStrokes = [new InkStrokeState { Thickness = 5, Points = [new PointState { X = 1000, Y = 600 }] }] };
     ProjectStore.MigrateInk(oldInk);
     Check(oldInk.InkStrokes[0].Points[0].X == 417 && oldInk.InkStrokes[0].Points[0].Y == 313 && oldInk.InkStrokes[0].TipScaleX == .4, "旧笔迹转换错误");

@@ -341,6 +341,7 @@ public sealed partial class MainWindow
                 Check(highlightSwatches[2].IsSelected, "reopened highlight palette marks current selection color");
                 InvokeButton(highlightSwatches[0]); await NextLayoutAsync();
                 Check(paletteEditor.Document.GetRange(0, 2).CharacterFormat.BackgroundColor.Equals(TextConstants.AutoColor), "clear highlighting retains automatic background color");
+                await VerifyFloatingIslandsAsync(output, Check);
                 PaletteComboBox.SelectedIndex = 0;
                 ShowSettings(); AppearanceNavigationGroup.IsExpanded = false; AboutNavigationGroup.IsExpanded = true;
                 SettingsRoot.SelectedItem = AboutNavigationGroup; await NextLayoutAsync();
@@ -349,6 +350,7 @@ public sealed partial class MainWindow
                 await SaveVisualAsync(RootShell, Path.Combine(output, "about.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
                 await VerifyExtendedSettingsAsync(output, Check);
                 await VerifyPresentationSettingsAsync(output, Check);
+                await VerifyAutofillAsync(output, Check);
                 await VerifyAutoLayoutExportAsync(output, Check);
                 evidence.Add("UI_VERIFICATION_OK");
             }
@@ -361,9 +363,392 @@ public sealed partial class MainWindow
         };
     }
 
+    /// <summary>
+    /// 补全候选的真实按键验收：上下键切换、Tab/回车采纳、Esc 关闭。
+    /// 真实按键要经系统输入队列投递，窗口必须在前台，因此单独作为可选的验证模式运行。
+    /// </summary>
+    internal void ScheduleAutofillKeyVerification()
+    {
+        RootShell.Loaded += async (_, _) =>
+        {
+            string output = Path.Combine(AppContext.BaseDirectory, "verification");
+            Directory.CreateDirectory(output);
+            List<string> evidence = [];
+            try
+            {
+                void Check(bool condition, string message) { if (!condition) throw new Exception(message); evidence.Add("PASS: " + message); }
+                _settings.AutoUpdateEnabled = false;
+                _settings.Autofill.Subject.Enabled = true;
+                _settings.Autofill.Subject.MatchLevel = "Normal";
+                _library = new ProjectLibrary { Settings = _settings };
+                ProjectStore.Create(_library, false).Name = "补全探针";
+                ViewModel.ReplaceSubjects([]);
+                SubjectBoard probeSubject = ViewModel.AddSubject("语文");
+                probeSubject.X = 24;
+                probeSubject.Y = 24;
+                probeSubject.TileWidth = 420;
+                probeSubject.TileHeight = 320;
+                probeSubject.Entries.Add(new HomeworkEntry { Content = "完成 " });
+                BuildTiles();
+                ShowBoard();
+                EnterEditing();
+                await NextLayoutAsync();
+                SubjectTileControl tile = BoardCanvas.Children.OfType<SubjectTileControl>().First();
+                TextBox box = FindVisuals<TextBox>(tile).First();
+                nint hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                ForceForeground(hwnd);
+                await Task.Delay(600);
+                Check(GetForegroundWindow() == hwnd, "the verification window holds the foreground so real keys reach it");
+
+                string State(string label) =>
+                    $"{label}: popup={_autofillPopup.IsOpen} count={_autofillPopup.Count} highlight={_autofillPopup.Highlighted?.Text} text='{box.Text}' caret={box.SelectionStart} focus={Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(RootShell.XamlRoot)?.GetType().Name}";
+
+                async Task ArmAsync(string typed)
+                {
+                    box.Focus(FocusState.Programmatic);
+                    box.Text = string.Empty;
+                    await Task.Delay(60);
+                    box.SelectedText = typed;
+                    box.SelectionStart = box.Text.Length;
+                    box.SelectionLength = 0;
+                    await NextLayoutAsync();
+                }
+
+                // 上下键一次按键只能切换一格：曾出现同一处理函数同时挂在 Preview 与冒泡事件上，
+                // 一次按键先加一又立刻减一，看起来完全切不动，这里逐次核对。
+                await ArmAsync("sh");
+                evidence.Add(State("arm"));
+                Check(_autofillPopup.IsOpen && _autofillPopup.Count == 2, "typing 'sh' lists two subject candidates");
+                string first = _autofillPopup.Highlighted?.Text ?? string.Empty;
+                SendKey(Windows.System.VirtualKey.Down);
+                await Task.Delay(400);
+                evidence.Add(State("down"));
+                string second = _autofillPopup.Highlighted?.Text ?? string.Empty;
+                Check(first.Length > 0 && second != first, "Down moves the highlight to the next candidate");
+                SendKey(Windows.System.VirtualKey.Down);
+                await Task.Delay(400);
+                evidence.Add(State("down2"));
+                Check(_autofillPopup.Highlighted?.Text == first, "Down again cycles to the first candidate");
+                SendKey(Windows.System.VirtualKey.Up);
+                await Task.Delay(400);
+                evidence.Add(State("up"));
+                Check(_autofillPopup.Highlighted?.Text == second, "Up moves the highlight back");
+                SendKey(Windows.System.VirtualKey.Escape);
+                await Task.Delay(400);
+                evidence.Add(State("escape"));
+                Check(!_autofillPopup.IsOpen && box.Text == "sh", "Escape closes the popup without touching the typed text");
+
+                await ArmAsync("sh");
+                string tabTarget = _autofillPopup.Highlighted?.Text ?? string.Empty;
+                SendKey(Windows.System.VirtualKey.Tab);
+                await Task.Delay(400);
+                evidence.Add(State("tab"));
+                Check(!_autofillPopup.IsOpen && box.Text == tabTarget, $"Tab accepts the highlighted candidate (text='{box.Text}')");
+                await Task.Delay(1600);
+
+                await ArmAsync("sh");
+                string enterTarget = _autofillPopup.Highlighted?.Text ?? string.Empty;
+                SendKey(Windows.System.VirtualKey.Enter);
+                await Task.Delay(400);
+                evidence.Add(State("enter"));
+                Check(!_autofillPopup.IsOpen && box.Text == enterTarget, $"Enter accepts the highlighted candidate (text='{box.Text}')");
+                await Task.Delay(1600);
+
+                _settings.Autofill.Homework.Enabled = true;
+                _settings.Autofill.Homework.Items.Add(new HomeworkSuggestion
+                {
+                    Text = "同步练习册", Source = AutofillService.ManualSource, IsGlobal = true, Promoted = true,
+                    Count = 3, FirstSeenAt = DateTime.Now, LastSeenAt = DateTime.Now
+                });
+                await NextLayoutAsync();
+                tile = BoardCanvas.Children.OfType<SubjectTileControl>().First();
+                evidence.Add($"homework setup: editing={_isEditing} tiles={BoardCanvas.Children.OfType<SubjectTileControl>().Count()} editors={FindVisuals<RichEditBox>(tile).Count()} entries={ViewModel.Subjects.First().Entries.Count}");
+                RichEditBox editor = FindVisuals<RichEditBox>(tile).First();
+                string EditorText()
+                {
+                    editor.Document.GetText(TextGetOptions.None, out string content);
+                    return content.Replace("\r", "|");
+                }
+                async Task ArmEditorAsync(string typed)
+                {
+                    editor.Focus(FocusState.Programmatic);
+                    editor.Document.SetText(TextSetOptions.None, "完成 ");
+                    editor.Document.Selection.SetRange(3, 3);
+                    editor.Document.Selection.TypeText(typed);
+                    editor.Document.Selection.SetRange(3 + typed.Length, 3 + typed.Length);
+                    await NextLayoutAsync();
+                }
+                string EditorState(string label) =>
+                    $"{label}: popup={_autofillPopup.IsOpen} count={_autofillPopup.Count} highlight={_autofillPopup.Highlighted?.Text} text='{EditorText()}' focus={Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(RootShell.XamlRoot)?.GetType().Name}";
+
+                await ArmEditorAsync("同步");
+                evidence.Add(EditorState("hw-arm"));
+                Check(_autofillPopup.IsOpen, "typing a recorded homework name lists candidates");
+                SendKey(Windows.System.VirtualKey.Tab);
+                await Task.Delay(400);
+                evidence.Add(EditorState("hw-tab"));
+                Check(!_autofillPopup.IsOpen && EditorText() == "完成 同步练习册|", $"Tab accepts a homework candidate (text='{EditorText()}')");
+                await Task.Delay(1600);
+                await ArmEditorAsync("同步");
+                SendKey(Windows.System.VirtualKey.Enter);
+                await Task.Delay(400);
+                evidence.Add(EditorState("hw-enter"));
+                Check(!_autofillPopup.IsOpen && EditorText() == "完成 同步练习册|", $"Enter accepts a homework candidate (text='{EditorText()}')");
+                await Task.Delay(1600);
+
+                evidence.Add("AUTOFILL_KEY_VERIFICATION_OK");
+            }
+            catch (Exception ex)
+            {
+                evidence.Add("AUTOFILL_KEY_VERIFICATION_FAILED\n" + ex);
+            }
+            finally
+            {
+                File.WriteAllLines(Path.Combine(output, "autofill-key-result.txt"), evidence);
+                Close();
+            }
+        };
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint window);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool ShowWindow(nint window, int command);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern nint SetFocus(nint window);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(nint window, out uint processId);
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint attach, uint attachTo, bool attach1);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint SendInput(uint count, INPUT[] inputs, int size);
+
+    // 前台锁定会拒绝后台进程的置顶请求，先挂到当前前台线程再激活，否则按键不会进本窗口。
+    private static void ForceForeground(nint window)
+    {
+        uint current = GetCurrentThreadId();
+        nint foreground = GetForegroundWindow();
+        uint foregroundThread = foreground == nint.Zero ? 0 : GetWindowThreadProcessId(foreground, out _);
+        if (foregroundThread != 0 && foregroundThread != current) AttachThreadInput(current, foregroundThread, true);
+        ShowWindow(window, 9);
+        SetForegroundWindow(window);
+        SetFocus(window);
+        if (foregroundThread != 0 && foregroundThread != current) AttachThreadInput(current, foregroundThread, false);
+    }
+
+    // 只描述按键输入，字段偏移与 native INPUT/KEYBDINPUT 在 x64 下的布局一致。
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Explicit, Size = 40)]
+    private struct INPUT
+    {
+        [System.Runtime.InteropServices.FieldOffset(0)] public uint Type;
+        [System.Runtime.InteropServices.FieldOffset(8)] public ushort VirtualKey;
+        [System.Runtime.InteropServices.FieldOffset(12)] public uint Flags;
+    }
+
+    private static void SendKey(Windows.System.VirtualKey key)
+    {
+        SendInput(1, [new INPUT { Type = 1, VirtualKey = (ushort)key }], 40);
+        Thread.Sleep(30);
+        SendInput(1, [new INPUT { Type = 1, VirtualKey = (ushort)key, Flags = 2 }], 40);
+        Thread.Sleep(30);
+    }
+
     // RTF 字体表中的家族名，用于定位字体在哪一步丢失。
     private static string RtfFonts(string rtf) =>
         string.Join(",", System.Text.RegularExpressions.Regex.Matches(rtf, @"\\f\d+\\fnil\s*([^;]+);").Select(m => m.Groups[1].Value.Trim()));
+
+    /// <summary>
+    /// 悬浮岛验收：编辑模式下富文本工具贴在控制窗左侧、画笔模式换成画笔控件，竖版控制窗时改到上方，
+    /// 两块窗口与控制窗等高（竖版等宽）；缩放岛在另一侧并能真正改动作业板缩放比例。
+    /// </summary>
+    private async Task VerifyFloatingIslandsAsync(string output, Action<bool, string> check)
+    {
+        Rect Bounds(FrameworkElement element) => element.TransformToVisual(RootShell)
+            .TransformBounds(new Rect(0, 0, element.ActualWidth, element.ActualHeight));
+        static void Invoke(Button button) => ((Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider)new
+            Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(button)
+            .GetPattern(Microsoft.UI.Xaml.Automation.Peers.PatternInterface.Invoke)).Invoke();
+        // 富文本工具条由编辑器的聚焦事件提供，聚焦后需要等它真正挂到悬浮岛上。
+        async Task FocusEditorAsync()
+        {
+            RichEditBox box = FindVisuals<RichEditBox>(BoardCanvas).First();
+            for (int attempt = 0; attempt < 8 && RichTextIsland.Visibility != Visibility.Visible; attempt++)
+            {
+                box.Focus(FocusState.Programmatic);
+                box.Document.Selection.SetRange(0, 1);
+                await NextLayoutAsync();
+            }
+        }
+
+        _settings.LayoutMode = "Split"; _settings.ToolbarPosition = "BottomCenter";
+        _settings.ToolbarScale = 1; _settings.ToolbarIconOnly = true; _settings.ToolbarRadius = 14;
+        // 悬浮岛按教室大屏尺寸验收：窗口太小时浮层会按设计收窄并在岛内滚动，判据要与真实使用场景一致。
+        DisplayArea islandWorkArea = DisplayArea.GetFromWindowId(_appWindow!.Id, DisplayAreaFallback.Primary);
+        _appWindow.Resize(new Windows.Graphics.SizeInt32(islandWorkArea.WorkArea.Width, islandWorkArea.WorkArea.Height));
+        ShowBoard(); EnterEditing(); ApplyExtendedSettings(); await NextLayoutAsync();
+        await FocusEditorAsync();
+        Rect toolbar = Bounds(FloatingToolbar);
+        Rect island = Bounds(RichTextIsland);
+        check(RichTextIsland.Visibility == Visibility.Visible, "editing mode hosts the rich text island");
+        check(island.Right <= toolbar.Left + .5,
+            $"rich text island sits left of the control window ({island.Right:0.#} <= {toolbar.Left:0.#})");
+        check(Math.Abs(island.Height - toolbar.Height) < .5,
+            $"rich text island matches the control window height ({island.Height:0.#} / {toolbar.Height:0.#})");
+        check(RichTextIsland.CornerRadius.TopLeft == FloatingToolbar.CornerRadius.TopLeft &&
+            Math.Abs(RichTextIsland.Padding.Left - FloatingToolbar.Padding.Left) < .01 && RichTextIsland.Background is not null,
+            "rich text island inherits the control window corner, padding and background");
+        check(RichTextIsland.BorderThickness.Left >= 1, "rich text island keeps a visible outline");
+        await SaveVisualAsync(RootShell, Path.Combine(output, "islands-editor.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+
+        // 关闭无字模式后按钮名称必须排在图标下方，并保持与控制窗相同的高度。
+        _settings.ToolbarIconOnly = false; ApplyExtendedSettings(); await NextLayoutAsync();
+        Button boldButton = FindVisuals<Button>(RichTextToolbarHost).First(b => ToolTipService.GetToolTip(b)?.ToString() == "加粗");
+        StackPanel boldContent = (StackPanel)boldButton.Content;
+        TextBlock boldLabel = boldContent.Children.OfType<TextBlock>().First();
+        Rect iconBounds = Bounds((FrameworkElement)boldContent.Children[0]);
+        Rect labelBounds = Bounds(boldLabel);
+        check(boldLabel.Visibility == Visibility.Visible && boldLabel.Text == "加粗", "shown island button carries its name");
+        check(labelBounds.Top >= iconBounds.Bottom - .5,
+            $"island button name stays below its icon ({labelBounds.Top:0.#} >= {iconBounds.Bottom:0.#})");
+        check(Math.Abs(boldButton.ActualHeight - 64) < .5 && Math.Abs(RichTextIsland.ActualHeight - FloatingToolbar.ActualHeight) < .5,
+            "labeled island keeps the control window height");
+        _settings.ToolbarIconOnly = true; ApplyExtendedSettings(); await NextLayoutAsync();
+
+        // 画笔模式：富文本岛让位给画笔控件，位置和高度保持一致。
+        GlobalPenButton.IsChecked = true; ApplyExtendedSettings(); await NextLayoutAsync();
+        Rect penToolbar = Bounds(GlobalInkToolbar);
+        toolbar = Bounds(FloatingToolbar);
+        check(RichTextIsland.Visibility == Visibility.Collapsed && GlobalInkToolbar.Visibility == Visibility.Visible,
+            "pen mode swaps the rich text island for the pen toolbar");
+        check(penToolbar.Right <= toolbar.Left + .5, "pen toolbar takes over the slot left of the control window");
+        check(Math.Abs(penToolbar.Height - toolbar.Height) < .5,
+            $"pen toolbar matches the control window height ({penToolbar.Height:0.#} / {toolbar.Height:0.#})");
+        await SaveVisualAsync(RootShell, Path.Combine(output, "islands-pen.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+        GlobalPenButton.IsChecked = false; ApplyExtendedSettings(); await NextLayoutAsync();
+
+        // 缩放岛：只在编辑模式出现，滑条与档位按钮都要真正改动作业板缩放。
+        List<Button> zoomButtons = ZoomIslandItems.Children.OfType<Button>().ToList();
+        Slider zoomSlider = ZoomIslandItems.Children.OfType<Slider>().Single();
+        toolbar = Bounds(FloatingToolbar);
+        Rect zoom = Bounds(ZoomIsland);
+        Rect slider = Bounds(zoomSlider);
+        check(ZoomIsland.Visibility == Visibility.Visible && zoomButtons.Count == 3 && zoomSlider.Visibility == Visibility.Visible,
+            "editing mode offers the board zoom island with three buttons and a slider");
+        check(zoom.Left >= toolbar.Right - .5, $"zoom island sits right of the control window ({zoom.Left:0.#} >= {toolbar.Right:0.#})");
+        check(Math.Abs(zoom.Height - toolbar.Height) < .5,
+            $"zoom island matches the control window height ({zoom.Height:0.#} / {toolbar.Height:0.#})");
+        check(slider.Width > 0 && ZoomIslandItems.ActualWidth >= slider.Width - .5,
+            $"zoom slider is laid out inside the island content ({slider.Width:0.#} / {ZoomIslandItems.ActualWidth:0.#})");
+        // 窗口过窄时浮层按既有规则收窄并在岛内滚动，这里只在放得下时要求滑条完整可见。
+        if (zoom.Width >= ZoomIslandItems.ActualWidth - .5)
+        {
+            check(slider.Left >= zoom.Left - .5 && slider.Right <= zoom.Right + .5,
+                $"wide window keeps the slider inside the visible island ({slider.Left:0.#}..{slider.Right:0.#} in {zoom.Left:0.#}..{zoom.Right:0.#})");
+        }
+        double initialZoom = BoardScroller.ZoomFactor;
+        Invoke(zoomButtons[2]); await NextLayoutAsync();
+        check(BoardScroller.ZoomFactor > initialZoom + .001,
+            $"zoom in enlarges the board ({initialZoom:0.##} -> {BoardScroller.ZoomFactor:0.##})");
+        double zoomed = BoardScroller.ZoomFactor;
+        Invoke(zoomButtons[0]); await NextLayoutAsync();
+        check(BoardScroller.ZoomFactor < zoomed - .001, "zoom out shrinks the board again");
+        Invoke(zoomButtons[1]); await NextLayoutAsync();
+        check(Math.Abs(BoardScroller.ZoomFactor - 1) < .001 && Math.Abs(BoardZoom - 1) < .001,
+            "the percentage button restores 100%");
+        check(_zoomLevelText?.Text == "100%", "the zoom island shows the current percentage");
+        // 拖动滑条连续缩放，比例文字与档位按钮同步；点比例按钮时滑条也要回到 100%。
+        zoomSlider.Value = 220; await NextLayoutAsync();
+        check(Math.Abs(BoardScroller.ZoomFactor - 2.2) < .01 && Math.Abs(BoardZoom - 2.2) < .01 && _zoomLevelText?.Text == "220%",
+            $"the zoom slider scales the board ({BoardScroller.ZoomFactor:0.##} / {_zoomLevelText?.Text})");
+        Invoke(zoomButtons[1]); await NextLayoutAsync();
+        check(Math.Abs(zoomSlider.Value - 100) < .01 && Math.Abs(BoardScroller.ZoomFactor - 1) < .001,
+            "restoring 100% also moves the slider back");
+        // 查看模式：缩放岛收起，但缩放结果保留，作业板仍可平移。
+        SetBoardZoom(1.5); await NextLayoutAsync();
+        FinishEditing(); await NextLayoutAsync();
+        check(ZoomIsland.Visibility == Visibility.Collapsed, "view mode hides the zoom island");
+        check(Math.Abs(BoardScroller.ZoomFactor - 1.5) < .01 && BoardScroller.ZoomMode == ZoomMode.Enabled,
+            $"view mode keeps the applied zoom and stays pannable ({BoardScroller.ZoomFactor:0.##})");
+        EnterEditing(); ApplyExtendedSettings(); await NextLayoutAsync();
+        await FocusEditorAsync();
+        foreach (string mode in new[] { "Split", "Board", "Free" })
+        {
+            _settings.LayoutMode = mode; ApplyExtendedSettings(); await NextLayoutAsync();
+            check(ZoomIsland.Visibility == Visibility.Visible, mode + " keeps the board zoom island");
+            await FocusEditorAsync();
+            Rect modeToolbar = Bounds(FloatingToolbar), modeIsland = Bounds(RichTextIsland);
+            check(RichTextIsland.Visibility == Visibility.Visible && modeIsland.Right <= modeToolbar.Left + .5,
+                mode + " keeps the rich text island left of the control window");
+        }
+        _settings.LayoutMode = "Clock"; ApplyExtendedSettings(); await NextLayoutAsync();
+        check(ZoomIsland.Visibility == Visibility.Collapsed, "clock-only layout hides the board zoom island");
+        check(RichTextIsland.Visibility == Visibility.Collapsed, "clock-only layout hides the rich text island");
+
+        // 竖版控制窗：浮岛改到控制窗上方、缩放岛改到下方，宽度与控制窗一致。
+        // 屏幕高度不足时按设计退回左右，此时只要求浮岛同样贴边、尺寸与控制窗对齐。
+        DisplayArea workArea = DisplayArea.GetFromWindowId(_appWindow!.Id, DisplayAreaFallback.Primary);
+        _appWindow.Resize(new Windows.Graphics.SizeInt32(workArea.WorkArea.Width, workArea.WorkArea.Height));
+        await NextLayoutAsync();
+        _settings.LayoutMode = "Split"; _settings.ToolbarPosition = "CenterLeft";
+        ApplyExtendedSettings(); await NextLayoutAsync(); await FocusEditorAsync();
+        toolbar = Bounds(FloatingToolbar); island = Bounds(RichTextIsland); zoom = Bounds(ZoomIsland);
+        check(RichTextIsland.Visibility == Visibility.Visible && GlobalInkToolbar.Visibility == Visibility.Collapsed,
+            "vertical editing mode keeps the rich text island on screen");
+        bool islandAlignedVertically = island.Bottom <= toolbar.Top + .5 || island.Top >= toolbar.Bottom - .5;
+        bool zoomAlignedVertically = zoom.Top >= toolbar.Bottom - .5 || zoom.Bottom <= toolbar.Top + .5;
+        double horizontalCross = ToolbarContentSize(1) + 7 * 2 + IslandBorderThickness * 2;
+        check(islandAlignedVertically
+                ? Math.Abs(island.Width - toolbar.Width) < .5
+                : Math.Abs(island.Height - horizontalCross) < .5,
+            $"vertical island matches the control window and stays clear of it (island {island.X:0.#},{island.Y:0.#} {island.Width:0.#}x{island.Height:0.#}" +
+            $" / toolbar {toolbar.X:0.#},{toolbar.Y:0.#} {toolbar.Width:0.#}x{toolbar.Height:0.#} / root {RootShell.ActualWidth:0.#}x{RootShell.ActualHeight:0.#})");
+        check(islandAlignedVertically || island.Right <= toolbar.Left + .5 || island.Left >= toolbar.Right + .5,
+            "vertical island never overlaps the control window");
+        check(zoomAlignedVertically || zoom.Right <= toolbar.Left + .5 || zoom.Left >= toolbar.Right + .5,
+            "vertical zoom island stays clear of the control window");
+        check(!islandAlignedVertically || island.Bottom <= toolbar.Top + .5,
+            "vertical editing tools stay above the control window");
+        check(!zoomAlignedVertically || zoom.Top >= toolbar.Bottom - .5,
+            "vertical zoom island stays below the control window");
+        check(zoomAlignedVertically ? Math.Abs(zoom.Width - toolbar.Width) < .5 : Math.Abs(zoom.Height - horizontalCross) < .5,
+            $"vertical zoom island matches the control window cross size ({zoom.Width:0.#}x{zoom.Height:0.#})");
+        check(zoomAlignedVertically ? zoomSlider.Orientation == Orientation.Vertical : zoomSlider.Orientation == Orientation.Horizontal,
+            $"zoom slider follows the island direction ({zoomSlider.Orientation})");
+        // 竖版靠挪动控制窗让位，浮岛保持完整尺寸，不应再出现岛内上下翻页的滚动条。
+        check(!islandAlignedVertically || RichTextToolbar.ScrollableHeight <= 1.5,
+            $"vertical editing tools fit without a pager ({RichTextToolbar.ScrollableHeight:0.#})");
+        check(!zoomAlignedVertically || ZoomIslandScroll.ScrollableHeight <= 1.5,
+            $"vertical zoom island fits without a pager ({ZoomIslandScroll.ScrollableHeight:0.#})");
+        check(FindVisuals<Button>(RichTextToolbarHost).Any(button => Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(button) == "字体") &&
+            !FindVisuals<AutoSuggestBox>(RichTextToolbarHost).Any(),
+            "vertical island collapses the font picker into an icon button");
+        // 画笔栏同样排在控制窗上方，缩放岛仍在下方。
+        GlobalPenButton.IsChecked = true; ApplyExtendedSettings(); await NextLayoutAsync();
+        Rect penIsland = Bounds(GlobalInkToolbar);
+        toolbar = Bounds(FloatingToolbar); zoom = Bounds(ZoomIsland);
+        check(penIsland.Bottom <= toolbar.Top + .5 && zoom.Top >= toolbar.Bottom - .5 && ZoomIslandScroll.ScrollableHeight <= 1.5,
+            $"vertical pen toolbar stays above the control window with zoom below ({penIsland.Bottom:0.#} <= {toolbar.Top:0.#}, {zoom.Top:0.#} >= {toolbar.Bottom:0.#})");
+        GlobalPenButton.IsChecked = false; ApplyExtendedSettings(); await NextLayoutAsync();
+        await SaveVisualAsync(RootShell, Path.Combine(output, "islands-vertical.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+
+        SetBoardZoom(1);
+        _settings.LayoutMode = "Split"; _settings.ToolbarPosition = "BottomCenter";
+        _settings.ToolbarIconOnly = true; _settings.ToolbarScale = 1; _settings.ToolbarRadius = 14;
+        ApplyExtendedSettings(); await NextLayoutAsync();
+        check(FindVisuals<AutoSuggestBox>(RichTextToolbarHost).Any(),
+            "horizontal island restores the inline font picker");
+    }
 
     private async Task VerifyAutoLayoutExportAsync(string output, Action<bool, string> check)
     {
@@ -482,13 +867,75 @@ public sealed partial class MainWindow
                     mode + " clock bounds match the actual content ratio without one-sided blank space");
                 check(Math.Abs(components.Width / components.Height - DockedComponentsAspectRatio) < .01 && ClockComponents.Orientation == Orientation.Horizontal,
                     mode + " weather and noise scale together in one row");
-                int expectedLayers = mode == "Split" ? 3 : 2;
+                // 分屏与仅时钟都保留分隔滑条，再各加时钟、组件两层交互。
+                int expectedLayers = 3;
                 check(FreeLayoutHandles.Children.Count == expectedLayers, mode + " exposes constrained clock and component interactions while editing");
                 var interactions = FreeLayoutHandles.Children.OfType<Grid>().ToList();
                 check(interactions.Count == 2 && interactions.All(layer => layer.Children.OfType<Thumb>().Count() == 2),
                     mode + " allows dragging from the full clock and component surfaces");
                 check(interactions.SelectMany(layer => layer.Children.OfType<Thumb>()).Count(thumb => thumb.Opacity == 0) == 2,
                     mode + " resize boxes stay hidden until pointer hover");
+                check(interactions.All(layer => layer.Children.OfType<Border>().Count() == 1 && layer.Children.OfType<Border>().All(border => border.Opacity == 0)),
+                    mode + " component selection borders stay hidden until pointer hover");
+                var resizeThumbs = interactions.SelectMany(layer => layer.Children.OfType<Thumb>())
+                    .Where(thumb => thumb.HorizontalAlignment == HorizontalAlignment.Right && thumb.VerticalAlignment == VerticalAlignment.Bottom).ToList();
+                check(resizeThumbs.Count == interactions.Count && resizeThumbs.All(thumb => FindVisuals<FontIcon>(thumb).Any(icon => icon.Glyph == FluentGlyphs.ArrowDownRight)),
+                    mode + " resize boxes render the down-right arrow glyph");
+                // 秒数占位不能把大号时间挤偏：时间数字要和日期、组件栏共用同一条中轴线。
+                Rect timeBounds = MainTimeText.TransformToVisual(ClockPanel)
+                    .TransformBounds(new Rect(0, 0, MainTimeText.ActualWidth, MainTimeText.ActualHeight));
+                check(Math.Abs(timeBounds.X + timeBounds.Width / 2 - ClockPanel.ActualWidth / 2) < 3,
+                    mode + " time digits stay on the same center axis as the component row");
+            }
+            if (mode is "Clock" or "Board")
+            {
+                // 单区模式保留贴边分隔条，往回流方向拖动即可恢复分屏。
+                Thumb edge = FreeLayoutHandles.Children.OfType<Thumb>().Single();
+                check(mode == "Clock" ? Canvas.GetLeft(edge) > DisplayRoot.ActualWidth - 11 : Canvas.GetLeft(edge) == 0,
+                    mode + " keeps an edge split handle for dragging back to split");
+                BeginSplitDrag();
+                DragSplitHandle(false, (mode == "Clock" ? -1 : 1) * DisplayRoot.ActualWidth * .4, 0);
+                CompleteSplitDrag();
+                await NextLayoutAsync();
+                check(_settings.LayoutMode == "Split" && Math.Abs(_settings.SplitRatio - (mode == "Clock" ? .6 : .4)) < .01,
+                    mode + " returns to split when the edge handle is dragged back");
+                _settings.SplitRatio = .4; _settings.LayoutMode = mode;
+                ApplyExtendedSettings(); ShowBoard(); EnterEditing(); await NextLayoutAsync();
+            }
+            if (mode == "Clock")
+            {
+                // 仅时钟模式没有作业板：编辑工具栏只留画笔等必要入口，画笔可在整块屏幕书写并写进项目。
+                check(GlobalPenButton.Visibility == Visibility.Visible && AddSubjectButton.Visibility == Visibility.Collapsed &&
+                    AutoArrangeButton.Visibility == Visibility.Collapsed && GridSnapToggleButton.Visibility == Visibility.Collapsed &&
+                    DiscardEditButton.Visibility == Visibility.Visible,
+                    "clock mode keeps only the pen and save/discard actions in the editing toolbar");
+                check(FreeLayoutHandles.IsHitTestVisible && FreeLayoutHandles.Children.OfType<Thumb>().Count() == 1,
+                    "clock mode keeps the edge split handle usable while drawing");
+                GlobalPenButton.IsChecked = true;
+                await NextLayoutAsync();
+                check(ClockInkLayer.Visibility == Visibility.Visible && ClockInkLayer.IsHitTestVisible,
+                    "clock mode exposes a full-screen ink layer while the pen is on");
+                int inkBefore = ClockInkLayer.StrokeCount;
+                ClockInkLayer.VerificationDrawStroke(
+                [
+                    new Point(30, 140), new Point(DisplayRoot.ActualWidth / 2, DisplayRoot.ActualHeight / 2),
+                    new Point(DisplayRoot.ActualWidth - 40, DisplayRoot.ActualHeight - 80)
+                ]);
+                check(ClockInkLayer.StrokeCount == inkBefore + 1 && ClockInkLayer.Children.Count == inkBefore + 1,
+                    "clock ink accepts a stroke across the whole screen and renders it");
+                SaveStateNow();
+                check(CurrentProject!.ClockInkStrokes.Count == inkBefore + 1,
+                    "clock ink is written into the current project when saving");
+                ClockInkLayer.ClearStrokes();
+                check(ClockInkLayer.StrokeCount == 0 && ClockInkLayer.Children.Count == 0, "clearing clock ink empties the full-screen layer");
+                GlobalPenButton.IsChecked = false;
+                await NextLayoutAsync();
+                check(!ClockInkLayer.IsHitTestVisible && AddSubjectButton.Visibility == Visibility.Collapsed,
+                    "closing the pen ends clock writing without restoring board-only tools");
+            }
+            else
+            {
+                check(ClockInkLayer.Visibility == Visibility.Collapsed, mode + " hides the clock-only ink layer");
             }
             if (mode == "Free")
             {
@@ -643,7 +1090,7 @@ public sealed partial class MainWindow
             .Where(item => item.Tag is not null)
             .ToList();
         check(settingsPages.Count == _settingsPages.Count, "each settings content page has a navigation item");
-        check(SettingsRoot.MenuItems.OfType<NavigationViewItem>().Count(item => item.MenuItems.Count > 0) == 2,
+        check(SettingsRoot.MenuItems.OfType<NavigationViewItem>().Count(item => item.MenuItems.Count > 0) == 3,
             "settings subpages live in expandable navigation groups");
         check(ReferenceEquals(SettingsRoot.SelectedItem, AboutNavigationGroup) &&
             settingsPages.Count(item => item.IsSelected) == 1,
@@ -661,7 +1108,7 @@ public sealed partial class MainWindow
                 nav.Tag + " navigation clears the previous selected background");
         }
         AppearanceNavigationGroup.IsExpanded = true;
-        ComponentsNavigationGroup.IsExpanded = AboutNavigationGroup.IsExpanded = false;
+        ComponentsNavigationGroup.IsExpanded = AutofillNavigationGroup.IsExpanded = AboutNavigationGroup.IsExpanded = false;
         SettingsRoot.SelectedItem = AppearanceNavItem;
         await NextLayoutAsync();
         await Task.Delay(250);
@@ -738,6 +1185,11 @@ public sealed partial class MainWindow
     private async Task VerifyPresentationSettingsAsync(string output, Action<bool, string> check)
     {
         FinishEditing(); SetFullScreen(false); ShowSettings();
+        // 退出全屏后窗口可能落在另一块缩放比例不同的屏幕上；先按当前屏幕工作区把窗口放到最大，
+        // 让设置页有足够宽度，磁贴预览的右侧固定区才会生效（窄窗口按设计回退到页内预览）。
+        DisplayArea area = DisplayArea.GetFromWindowId(_appWindow!.Id, DisplayAreaFallback.Primary);
+        _appWindow.Resize(new Windows.Graphics.SizeInt32(area.WorkArea.Width, area.WorkArea.Height));
+        await Task.Delay(300);
         SettingsRoot.SelectedItem = AboutNavigationGroup;
         await NextLayoutAsync();
         check(AboutNavigationGroup.MenuItems.Count == 0 && SettingsPageTitle.Text == "关于" &&
@@ -747,11 +1199,34 @@ public sealed partial class MainWindow
         foreach (string page in new[] { "AppearanceTile", "AppearanceBackground", "AppearanceGrid", "AppearanceToolbar" })
         {
             ShowSettingsPage(page); await NextLayoutAsync();
-            var previews = FindVisuals<Border>(_settingsPages[page].Content).Where(border => border.Name.EndsWith("AppearancePreview")).ToList();
-            check(previews.Count == (page == "AppearanceBackground" ? 3 : 1) && previews.All(preview => preview.ActualWidth > 0 && preview.ActualHeight > 0),
-                page + " has all requested live previews");
+            // 磁贴预览在宽窗口里固定在设置页右侧，向下滚动编辑选项时始终可见；其余预览仍在可滚动内容中。
+            var previews = page == "AppearanceTile"
+                ? FindVisuals<Border>(SettingsPreviewHost).Where(border => border.Name == "TileStickyAppearancePreview").ToList()
+                : FindVisuals<Border>(_settingsPages[page].Content).Where(border => border.Name.EndsWith("AppearancePreview")).ToList();
+            // 失败时给出窗口与预览区的实际尺寸，便于判断是固定区还是页内回退没有生效。
+            check(SettingsPreviewHost.Visibility == (page == "AppearanceTile" ? Visibility.Visible : Visibility.Collapsed) &&
+                previews.Count == (page == "AppearanceBackground" ? 3 : 1) &&
+                previews.All(preview => preview.ActualWidth > 0 && preview.ActualHeight > 0),
+                page + " has all requested live previews [" + SettingsPreviewHost.Visibility + " host=" + SettingsContentHost.ActualWidth +
+                " root=" + RootShell.ActualWidth + "x" + RootShell.ActualHeight + " scale=" + (RootShell.XamlRoot?.RasterizationScale ?? 0) +
+                " panel=" + SettingsPreviewHost.ActualWidth + " count=" + previews.Count +
+                " sizes=" + string.Join(",", previews.Select(preview => $"{preview.Name}:{preview.ActualWidth}x{preview.ActualHeight}")) + "]");
             await SaveVisualAsync(RootShell, Path.Combine(output, page + "-preview.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
         }
+        // 窄窗口必须回退到页内预览：右侧区域放不下时，预览仍要出现在“标题大小”上方。
+        double physicalPerDip = Math.Max(1, _appWindow.Size.Width / Math.Max(1, RootShell.ActualWidth));
+        _appWindow.Resize(new Windows.Graphics.SizeInt32((int)(800 * physicalPerDip), (int)(600 * physicalPerDip)));
+        await Task.Delay(200);
+        ShowSettingsPage("AppearanceTile");
+        await NextLayoutAsync();
+        check(SettingsPreviewHost.Visibility == Visibility.Collapsed &&
+            FindVisuals<Border>(_settingsPages["AppearanceTile"].Content).Any(border =>
+                border.Name == "TileAppearancePreview" && border.ActualWidth > 0 && border.ActualHeight > 0),
+            "narrow settings page falls back to the inline tile preview");
+        await SaveVisualAsync(RootShell, Path.Combine(output, "tile-preview-inline.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+        _appWindow.Resize(new Windows.Graphics.SizeInt32(area.WorkArea.Width, area.WorkArea.Height));
+        await Task.Delay(200);
+        await NextLayoutAsync();
         ShowSettingsPage("Layout");
         await NextLayoutAsync();
         check(FindVisuals<Slider>(_settingsPages["Layout"].Content).Any(slider => Equals(slider.Header, "自动排版磁贴间隔")) &&
@@ -841,21 +1316,70 @@ public sealed partial class MainWindow
         check(titleTiming.ElapsedMilliseconds < 1000, "57 title slider updates take less than one second: " + titleTiming.ElapsedMilliseconds + "ms");
         check(originalEditors.SequenceEqual(FindVisuals<RichEditBox>(_appearancePreviews["Tile"])), "title slider preserves rich text editors");
         check(originalBackground.SequenceEqual(SharedBackgroundVisual.Children), "title slider preserves window background resources");
-        check(originalEditors.Length == 2, "fixed preview contains exactly two entries");
-        originalEditors[0].Document.GetText(Microsoft.UI.Text.TextGetOptions.FormatRtf, out string sampleItalic);
-        originalEditors[1].Document.GetText(Microsoft.UI.Text.TextGetOptions.FormatRtf, out string sampleLink);
-        check(sampleItalic.Contains("\\i") && sampleItalic.Contains("Through adversity to the stars."), "sample preserves italic text");
-        var sampleColor = originalEditors[0].Document.GetRange(0, 1).CharacterFormat.ForegroundColor;
+        check(originalEditors.Length == 3, "fixed preview contains the Chinese opening line and both Latin lines");
+        // 第一行中文排在原本的两行之前，原本两行整体后移。
+        originalEditors[0].Document.GetText(TextGetOptions.None, out string sampleFirstLine);
+        var sampleFirstFormat = originalEditors[0].Document.GetRange(0, 1).CharacterFormat;
+        check(sampleFirstFormat.Bold == FormatEffect.On && sampleFirstFormat.Italic == FormatEffect.Off &&
+            sampleFirstFormat.Underline == UnderlineType.None &&
+            sampleFirstLine.TrimEnd('\r', '\n') == "当有一天你不再纠结于答案 当我们又重逢于天涯或沧海",
+            "sample opens with the bold Chinese line");
+        originalEditors[1].Document.GetText(Microsoft.UI.Text.TextGetOptions.FormatRtf, out string sampleText);
+        originalEditors[2].Document.GetText(Microsoft.UI.Text.TextGetOptions.FormatRtf, out string sampleLink);
+        var sampleTextFormat = originalEditors[1].Document.GetRange(0, 1).CharacterFormat;
+        originalEditors[1].Document.GetText(TextGetOptions.None, out string samplePlainText);
+        check(sampleTextFormat.Bold == FormatEffect.On && sampleTextFormat.Italic == FormatEffect.Off &&
+            sampleTextFormat.Underline == UnderlineType.None &&
+            samplePlainText.TrimEnd('\r', '\n') == "Through hardships to the stars." && sampleText.Length > 0,
+            "sample text is bold, upright and not underlined");
+        check(sampleTextFormat.Name.Contains("HarmonyOS"), "sample text uses the app default font");
+        var sampleColor = sampleTextFormat.ForegroundColor;
         check(BoardTheme.IsLight ? sampleColor.R == 0 : sampleColor.R == 247, "sample text follows theme foreground color");
-        check(sampleLink.Contains("HYPERLINK") && sampleLink.Contains("https://en.wikipedia.org/wiki/Per_ardua_ad_astra"), "sample preserves hyperlink target");
+        // RichEdit 会给 HYPERLINK 域强制加下划线，示例正文改成普通文本才符合“无下划线”；这里守住这个前提。
+        originalEditors[2].Document.GetText(TextGetOptions.None, out string sampleLinkText);
+        check(sampleLinkText.TrimEnd('\r', '\n') == "Per ardua ad astra." && !sampleLink.Contains("HYPERLINK"),
+            "sample keeps the last line as plain text without a hyperlink underline");
+        var sampleLinkFormat = originalEditors[2].Document.GetRange(0, 1).CharacterFormat;
+        check(sampleLinkFormat.Underline == UnderlineType.None && sampleLinkFormat.ForegroundColor.Equals(sampleColor),
+            "sample last line is white without underline");
+        // 高光色使用当前色系的预设色，和磁贴编辑器高光色卡里的颜色一致。
+        int sampleAstraStart = "Per ardua ad ".Length;
+        var sampleHighlight = originalEditors[2].Document.GetRange(sampleAstraStart, sampleAstraStart + "astra".Length).CharacterFormat.BackgroundColor;
+        check(sampleHighlight.Equals(ViewModels.MainViewModel.BrushFromHex(ColorPalette.Resolve("#F472B6")).Color),
+            "sample highlight follows the current palette");
+        var sampleSubject = (SubjectBoard)originalTile.DataContext;
+        check(sampleSubject.AccentBrush.Color.Equals(ViewModels.MainViewModel.BrushFromHex(
+                ColorPalette.ResolveAccent("#FBBF24", false, ColorPalette.IsMacaron)).Color),
+            "tile appearance sample uses the yellow theme color");
+        // 三行正文必须完整落在示例磁贴里，不能靠磁贴内部的滚动条才看得到。
+        check(originalTile.MeasureContentSize().Height <= sampleSubject.TileHeight &&
+            FindVisuals<ScrollViewer>(originalTile).Where(viewer => viewer.Content is StackPanel).All(viewer => viewer.ScrollableHeight <= 0),
+            "three sample lines fit the fixed preview tile without scrolling [content=" +
+            originalTile.MeasureContentSize().Height.ToString("0.#") + " tile=" + sampleSubject.TileHeight +
+            " scrollers=" + string.Join("|", FindVisuals<ScrollViewer>(originalTile)
+                .Select(viewer => $"{viewer.Content?.GetType().Name}:{viewer.ScrollableHeight:0.#}")) + "]");
         var backdrop = FindVisuals<Image>(_appearancePreviews["Tile"]).First();
         check(backdrop.Source is Microsoft.UI.Xaml.Media.Imaging.BitmapImage bitmap && bitmap.PixelWidth > 0, "tile preview background asset loads");
+        check(backdrop.Stretch == Stretch.UniformToFill, "tile preview background fills the whole preview area");
+        var lightOverlay = FindVisuals<Border>(_appearancePreviews["Tile"]).Single(border => border.Name == "TilePreviewLightOverlay");
+        check(Math.Abs(lightOverlay.Opacity - (BoardTheme.IsLight ? .55 : 0)) < .01, "tile preview background brightens in light mode");
+        // 切到浅色模式后底图必须明显提亮，切回深色恢复原图。
+        ElementTheme originalRequestedTheme = RootShell.RequestedTheme;
+        RootShell.RequestedTheme = ElementTheme.Light;
+        await Task.Delay(150);
+        await NextLayoutAsync();
+        check(FindVisuals<Border>(_appearancePreviews["Tile"]).Single(border => border.Name == "TilePreviewLightOverlay").Opacity > .5,
+            "tile preview background is much brighter in light mode");
+        RootShell.RequestedTheme = originalRequestedTheme;
+        await Task.Delay(150);
+        await NextLayoutAsync();
         _settings.TileBackground.Glass = true;
         _settings.TileBackground.Blur = 15;
         _settings.TileBackground.Color = "";
         _settings.TileTitleSize = 29;
         ApplyExtendedSettings(); await NextLayoutAsync();
-        await SaveVisualAsync(_appearancePreviews["Tile"], Path.Combine(output, "tile-sample-glass.png"), 640, 300);
+        await SaveVisualAsync(_appearancePreviews["Tile"], Path.Combine(output, "tile-sample-glass.png"),
+            Math.Max(1, (int)_appearancePreviews["Tile"].ActualWidth), Math.Max(1, (int)_appearancePreviews["Tile"].ActualHeight));
         _settings.TileTitleSize = 47; ApplyExtendedSettings(); await NextLayoutAsync();
         check(FindVisuals<TextBox>(_appearancePreviews["Tile"]).Any(text => Math.Abs(text.FontSize - 47) < .01), "tile preview applies title size immediately");
         _settings.TileTitleSize = 29;
@@ -932,6 +1456,219 @@ public sealed partial class MainWindow
         presenter.Minimize(); await Task.Delay(300);
         check(!_noiseSuspended, "minimizing with pause disabled leaves monitoring active");
         presenter.Restore(); ApplyExtendedSettings(); await NextLayoutAsync();
+    }
+
+    /// <summary>自动填充：两个设置页的控件、拼音候选浮层、采纳上色与作业补全插入。</summary>
+    private async Task VerifyAutofillAsync(string output, Action<bool, string> check)
+    {
+        FinishEditing(); ShowSettings();
+        ShowSettingsPage("AutofillSubject");
+        await NextLayoutAsync();
+        check(_settings.Autofill.Subject.Subjects.Count >= 16 &&
+            FindVisuals<ToggleSwitch>(_settingsPages["AutofillSubject"].Content).Any(toggle => Equals(toggle.Header, "学科补全")) &&
+            FindVisuals<ComboBox>(_settingsPages["AutofillSubject"].Content).Any(combo => Equals(combo.Header, "匹配程度")),
+            "subject autofill page exposes the master switch, match level and subject list");
+        check(FindVisuals<ToggleSwitch>(_settingsPages["AutofillSubject"].Content).Count() == _settings.Autofill.Subject.Subjects.Count + 1,
+            "every subject row keeps its own enable switch");
+        check(FindVisuals<Button>(_settingsPages["AutofillSubject"].Content).Any(button => Equals(button.Content, "刷新列表")),
+            "subject page offers a list refresh button");
+        await SaveVisualAsync(RootShell, Path.Combine(output, "autofill-subject.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+
+        // 行内色卡必须显示当前色系下的学科颜色，切换色系后立即重算，而不是停留在构建时的颜色。
+        Button? SubjectColorButton(string name) => FindVisuals<Grid>(_settingsPages["AutofillSubject"].Content)
+            .Where(row => FindVisuals<TextBlock>(row).Any(text => text.Text == name))
+            .Select(row => FindVisuals<Button>(row).FirstOrDefault(button =>
+                FindVisuals<TextBlock>(button).Any(text => text.Text is "默认颜色" or "随机颜色")))
+            .FirstOrDefault(button => button is not null);
+        Border SubjectSwatch(string name) => FindVisuals<Border>(SubjectColorButton(name)!)
+            .First(border => border.Width == 18 && border.Height == 18);
+        SubjectSuggestion math = _settings.Autofill.Subject.Subjects.First(item => item.Name == "数学");
+        int paletteIndex = PaletteComboBox.SelectedIndex;
+        check(SubjectSwatch("数学").Background is SolidColorBrush vividSwatch &&
+            vividSwatch.Color.Equals(ViewModels.MainViewModel.BrushFromHex(ColorPalette.Resolve(math.Color)).Color),
+            "subject color swatch shows the subject color of the current palette");
+        PaletteComboBox.SelectedIndex = paletteIndex == 1 ? 0 : 1;
+        await NextLayoutAsync();
+        check(SubjectSwatch("数学").Background is SolidColorBrush macaronSwatch &&
+            macaronSwatch.Color.Equals(ViewModels.MainViewModel.BrushFromHex(ColorPalette.Resolve(math.Color)).Color),
+            "switching the palette refreshes the subject color swatch");
+        PaletteComboBox.SelectedIndex = paletteIndex;
+        await NextLayoutAsync();
+
+        // 「自定义颜色」右侧的随机按钮：开启后该学科改用随机预设色，色卡显示预设色渐变。
+        SubjectSuggestion physics = _settings.Autofill.Subject.Subjects.First(item => item.Name == "物理");
+        Button physicsColor = SubjectColorButton("物理")!;
+        Flyout physicsColors = (Flyout)physicsColor.Flyout;
+        physicsColors.ShowAt(physicsColor);
+        await NextLayoutAsync();
+        StackPanel flyoutContent = (StackPanel)physicsColors.Content;
+        List<Button> flyoutButtons = FindVisuals<Button>(flyoutContent).ToList();
+        check(flyoutButtons.Any(button => Equals(button.Content, "自定义颜色")),
+            "subject color flyout keeps the custom color entry");
+        ToggleButton randomToggle = FindVisuals<ToggleButton>(flyoutContent).Single(toggle => Equals(toggle.Content, "随机"));
+        check(!randomToggle.IsChecked.GetValueOrDefault(), "random colors stay off until the button is used");
+        randomToggle.IsChecked = true;
+        await NextLayoutAsync();
+        check(physics.RandomColor, "random button switches the subject to random colors");
+        check(SubjectSwatch("物理").Background is LinearGradientBrush, "random subject swatch previews the preset colors");
+        randomToggle.IsChecked = false;
+        physicsColors.Hide();
+        await NextLayoutAsync();
+        check(!physics.RandomColor && SubjectSwatch("物理").Background is SolidColorBrush,
+            "turning the random button off restores the fixed subject color");
+
+        ShowSettingsPage("AutofillHomework");
+        await NextLayoutAsync();
+        check(FindVisuals<ToggleSwitch>(_settingsPages["AutofillHomework"].Content).Any(toggle => Equals(toggle.Header, "作业补全")) &&
+            FindVisuals<ComboBox>(_settingsPages["AutofillHomework"].Content).Any(combo => Equals(combo.Header, "记录隔离")) &&
+            FindVisuals<ComboBox>(_settingsPages["AutofillHomework"].Content).Any(combo => Equals(combo.Header, "自动记录阈值")),
+            "homework autofill page exposes the switch, recording threshold and isolation");
+        await SaveVisualAsync(RootShell, Path.Combine(output, "autofill-homework.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+
+        // 标题输入拼音 → 浮层候选 → 采纳后写入标题并套用学科颜色。
+        _settings.Autofill.Subject.Enabled = true;
+        _settings.Autofill.Subject.MatchLevel = "Normal";
+        _settings.Autofill.Homework.Enabled = true;
+        ShowBoard(); EnterEditing(); await NextLayoutAsync();
+        SubjectTileControl tile = BoardCanvas.Children.OfType<SubjectTileControl>().First();
+        TextBox titleEditor = FindVisuals<TextBox>(tile).First();
+        titleEditor.Focus(FocusState.Programmatic);
+        titleEditor.Text = string.Empty;
+        titleEditor.SelectionStart = 0;
+        titleEditor.SelectedText = "yuwe";
+        // 程序化插入后光标停在选区起点，这里收拢到末尾，等同真实输入完最后一个字母。
+        titleEditor.SelectionStart = titleEditor.Text.Length;
+        titleEditor.SelectionLength = 0;
+        await NextLayoutAsync();
+        check(_autofillPopup.IsOpen,
+            $"typing pinyin in a tile title opens the completion popup (text='{titleEditor.Text}', caret={titleEditor.SelectionStart}, enabled={_settings.Autofill.Subject.Enabled}, subjects={_settings.Autofill.Subject.Subjects.Count}, matches={_autofill.MatchSubjects(AutofillInputText.CurrentWord(titleEditor.Text, titleEditor.SelectionStart)).Count})");
+        check(_autofillPopup.ChooseHighlighted(), "completion popup accepts the highlighted candidate");
+        await NextLayoutAsync();
+        SubjectSuggestion suggestion = _settings.Autofill.Subject.Subjects.First(item => item.Name == "语文");
+        SolidColorBrush expectedAccent = ViewModels.MainViewModel.BrushFromHex(ColorPalette.ResolveAccent(suggestion.Color, true, ColorPalette.IsMacaron));
+        check(ViewModel.Subjects.First().Name == "语文" && ViewModel.Subjects.First().AccentHex == suggestion.Color,
+            "accepting a subject candidate writes the title and applies the subject color");
+        check(tile.Children.OfType<Border>().Any(border => border.BorderBrush is SolidColorBrush brush && brush.Color.Equals(expectedAccent.Color)),
+            "tile border follows the completed subject color");
+        // 模拟输入法在补全之后又把拼音上屏一次：观察窗口必须把候选写回去，不能要求再点一次。
+        titleEditor.Text = "yuwe";
+        titleEditor.SelectionStart = titleEditor.Text.Length;
+        titleEditor.SelectionLength = 0;
+        await Task.Delay(500);
+        check(titleEditor.Text == "语文" && ViewModel.Subjects.First().Name == "语文",
+            $"subject completion survives an input method re-commit (text='{titleEditor.Text}', attached={titleEditor.XamlRoot is not null}, name='{ViewModel.Subjects.First().Name}', tiles={BoardCanvas.Children.OfType<SubjectTileControl>().Count()})");
+
+        // 随机配色：同一学科再次采纳时套用的颜色一定来自预设色板。
+        // 先等上一个采纳的输入法观察窗口结束，否则它会把这里的输入写回成上一次的结果。
+        await Task.Delay(1600);
+        suggestion.RandomColor = true;
+        titleEditor.Text = string.Empty;
+        titleEditor.SelectionStart = 0;
+        titleEditor.SelectedText = "yuwe";
+        titleEditor.SelectionStart = titleEditor.Text.Length;
+        titleEditor.SelectionLength = 0;
+        await NextLayoutAsync();
+        check(_autofillPopup.ChooseHighlighted(), "completion popup accepts the highlighted candidate in random color mode");
+        await NextLayoutAsync();
+        check(ColorPalette.Presets.Any(preset => preset.Equals(ViewModel.Subjects.First().AccentHex, StringComparison.OrdinalIgnoreCase)),
+            $"random subject colors apply one of the presets (applied={ViewModel.Subjects.First().AccentHex})");
+        suggestion.RandomColor = false;
+
+        // 作业正文补全：手动添加的类型立即参与候选，采纳后只替换光标左侧正在输入的一段。
+        _settings.Autofill.Homework.Items.Add(new HomeworkSuggestion
+        {
+            Text = "同步练习册", Source = AutofillService.ManualSource, IsGlobal = true, Promoted = true,
+            Count = 3, FirstSeenAt = DateTime.Now, LastSeenAt = DateTime.Now
+        });
+        RichEditBox editor = FindVisuals<RichEditBox>(tile).First();
+        editor.Focus(FocusState.Programmatic);
+        editor.Document.SetText(TextSetOptions.None, "完成 ");
+        editor.Document.Selection.SetRange(3, 3);
+        editor.Document.Selection.TypeText("同步");
+        // 光标移动会重新计算候选，这里固定一次位置让弹窗状态可预期。
+        editor.Document.Selection.SetRange(5, 5);
+        await NextLayoutAsync();
+        check(_autofillPopup.IsOpen, "typing a recorded homework name opens the completion popup");
+        check(_autofillPopup.ChooseHighlighted(), "homework completion popup accepts the highlighted candidate");
+        await NextLayoutAsync();
+        editor.Document.GetText(TextGetOptions.None, out string completed);
+        check(completed.Replace("\r", string.Empty) == "完成 同步练习册", "accepted homework candidate replaces only the word being typed");
+        editor.Document.SetText(TextSetOptions.None, "完成 同步");
+        editor.Document.Selection.SetRange(5, 5);
+        await Task.Delay(700);
+        editor.Document.GetText(TextGetOptions.None, out string restored);
+        check(restored.Replace("\r", string.Empty) == "完成 同步练习册",
+            $"homework completion survives an input method re-commit (restored='{restored.Replace("\r", "|")}')");
+
+        // 默认标题聚焦后清空，并直接给出全部推荐学科。
+        SubjectBoard fresh = ViewModel.AddSubject("新科目");
+        AddTile(fresh);
+        await NextLayoutAsync();
+        SubjectTileControl freshTile = FindTile(fresh)!;
+        TextBox freshTitle = FindVisuals<TextBox>(freshTile).First();
+        freshTitle.Focus(FocusState.Programmatic);
+        await NextLayoutAsync();
+        check(freshTitle.Text.Length == 0 && _autofillPopup.IsOpen && _autofillPopup.Count > 1,
+            "focusing the default title clears it and lists the recommended subjects");
+
+        // 候选浮层是代码创建的控件，必须跟着主题换色：浅色模式曾保留深色底又把文字换成黑色，完全看不清。
+        Border? AutofillFrame() => FindVisuals<Popup>(RootShell)
+            .Where(popup => popup.IsOpen)
+            .Select(popup => popup.Child)
+            .OfType<Border>()
+            .FirstOrDefault(border => border.Child is ScrollViewer);
+        async Task CheckPopupThemeAsync(ElementTheme theme, Windows.UI.Color background, Windows.UI.Color text)
+        {
+            RootShell.RequestedTheme = theme;
+            await NextLayoutAsync();
+            TextBox editor = FindVisuals<TextBox>(BoardCanvas.Children.OfType<SubjectTileControl>().First()).First();
+            editor.Focus(FocusState.Programmatic);
+            editor.Text = string.Empty;
+            editor.SelectedText = "sh";
+            editor.SelectionStart = editor.Text.Length;
+            editor.SelectionLength = 0;
+            await NextLayoutAsync();
+            Border frame = AutofillFrame() ?? throw new Exception("completion popup is not open while checking theme colors");
+            // 只取候选行自身的文字：浮层内部的滚动条模板也带 TextBlock，不参与配色。
+            List<Windows.UI.Color> rows = FindVisuals<Border>(frame)
+                .Select(border => border.Child)
+                .OfType<Grid>()
+                .SelectMany(grid => grid.Children.OfType<TextBlock>())
+                .Select(block => (block.Foreground as SolidColorBrush)?.Color ?? Windows.UI.Color.FromArgb(0, 0, 0, 0))
+                .ToList();
+            check((frame.Background as SolidColorBrush)?.Color == background && rows.Count > 0 && rows.All(row => row == text),
+                $"completion popup follows the {theme} theme (background={(frame.Background as SolidColorBrush)?.Color}, rows={rows.Count}, colors={string.Join("/", rows)})");
+        }
+        ElementTheme popupTheme = RootShell.ActualTheme;
+        await CheckPopupThemeAsync(ElementTheme.Light, Windows.UI.Color.FromArgb(255, 255, 255, 255), Windows.UI.Color.FromArgb(255, 0, 0, 0));
+        await CheckPopupThemeAsync(ElementTheme.Dark, Windows.UI.Color.FromArgb(255, 37, 37, 50), Windows.UI.Color.FromArgb(255, 240, 240, 245));
+        RootShell.RequestedTheme = popupTheme;
+        await NextLayoutAsync();
+
+        ShowSettingsPage("AutofillHomework");
+        await NextLayoutAsync();
+        List<Button> homeworkButtons = FindVisuals<Button>(_settingsPages["AutofillHomework"].Content).ToList();
+        check(homeworkButtons.Any(button => Equals(button.Content, "刷新列表")), "homework page offers a list refresh button");
+        check(homeworkButtons.Any(button => Equals(button.Content, "编辑")) && homeworkButtons.Any(button => Equals(button.Content, "屏蔽")),
+            "recorded homework rows expose edit and block buttons");
+        // 行内按钮必须各占一列，不能因为列定义缺失而叠在一起。
+        List<Rect> actionBounds = homeworkButtons
+            .Where(button => button.Content is "生效范围" or "编辑" or "屏蔽" or "删除")
+            .Select(button => button.TransformToVisual(RootShell).TransformBounds(new Rect(0, 0, button.ActualWidth, button.ActualHeight)))
+            .ToList();
+        bool overlapping = false;
+        for (int first = 0; first < actionBounds.Count; first++)
+            for (int second = first + 1; second < actionBounds.Count; second++)
+                overlapping |= actionBounds[first].X < actionBounds[second].X + actionBounds[second].Width &&
+                    actionBounds[second].X < actionBounds[first].X + actionBounds[first].Width &&
+                    actionBounds[first].Y < actionBounds[second].Y + actionBounds[second].Height &&
+                    actionBounds[second].Y < actionBounds[first].Y + actionBounds[first].Height;
+        check(actionBounds.Count >= 4 && !overlapping, "recorded homework row buttons keep separate columns");
+        await SaveVisualAsync(RootShell, Path.Combine(output, "autofill-homework-list.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+
+        _settings.Autofill.Subject.Enabled = false;
+        _settings.Autofill.Homework.Enabled = false;
+        FinishEditing();
     }
 
     private async Task NextLayoutAsync()

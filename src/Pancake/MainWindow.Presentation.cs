@@ -70,10 +70,14 @@ public sealed partial class MainWindow
         _toolbarAnimation?.Stop();
         _toolbarAnimation = null;
         FloatingToolbar.IsHitTestVisible = !hidden;
+        // 缩放悬浮岛跟随控制窗一起隐藏，否则自动隐藏时只藏了一半。
+        ZoomIsland.IsHitTestVisible = !hidden;
         if (!animate)
         {
             FloatingToolbar.Opacity = hidden ? 0 : 1;
             _toolbarTranslation.X = _toolbarTranslation.Y = 0;
+            ZoomIsland.Opacity = hidden ? 0 : 1;
+            _zoomIslandTranslation.X = _zoomIslandTranslation.Y = 0;
             return;
         }
         bool fly = _settings.ToolbarHideAnimation == "Fly";
@@ -95,6 +99,10 @@ public sealed partial class MainWindow
         Add(FloatingToolbar, "Opacity", opacity, hidden && !fly ? 0 : 1);
         Add(_toolbarTranslation, "X", x, targetX);
         Add(_toolbarTranslation, "Y", y, targetY);
+        // 缩放岛沿用同一段位移，隐藏与唤醒时都和控制窗保持相对位置。
+        Add(ZoomIsland, "Opacity", ZoomIsland.Opacity, hidden && !fly ? 0 : 1);
+        Add(_zoomIslandTranslation, "X", _zoomIslandTranslation.X, targetX);
+        Add(_zoomIslandTranslation, "Y", _zoomIslandTranslation.Y, targetY);
         _toolbarAnimation = storyboard;
         storyboard.Begin();
     }

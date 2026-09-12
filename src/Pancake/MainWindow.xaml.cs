@@ -33,6 +33,8 @@ public sealed partial class MainWindow : Window
     private readonly ReleaseUpdateService _updateService = new();
     private readonly AppDataStore _dataStore = new();
     private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(600) };
+    private readonly AutofillService _autofill;
+    private readonly AutofillPopup _autofillPopup = new();
     private BoardSettingsState _settings = new();
     private readonly bool _startFullScreen;
     private readonly string _initialView;
@@ -53,6 +55,8 @@ public sealed partial class MainWindow : Window
     private string _renderedGridAppearance = string.Empty;
     private bool IsGridSnappingEnabled = true;
     private bool _dialogOpen;
+    private double _autofillScrollX;
+    private double _autofillScrollY;
     private uint? _globalGesturePointerId;
     private Point _globalGestureStart;
 
@@ -63,8 +67,29 @@ public sealed partial class MainWindow : Window
         _startFullScreen = startFullScreen;
         _initialView = initialView;
         InitializeComponent();
+        // 补全设置跟随当前设置对象，切换项目或回滚时无需重新创建服务。
+        _autofill = new AutofillService(() => _settings.Autofill);
+        _autofillPopup.AttachTo(RootShell);
+        // 滚动位置变化时让候选浮层跟随输入位置：缩放和内容尺寸变化也会触发 ViewChanged，
+        // 这些无关更新不应该关掉正在使用的浮层，否则输入过程中候选会莫名消失。
+        BoardScroller.ViewChanged += (_, _) =>
+        {
+            double x = BoardScroller.HorizontalOffset;
+            double y = BoardScroller.VerticalOffset;
+            if (Math.Abs(x - _autofillScrollX) < 0.5 && Math.Abs(y - _autofillScrollY) < 0.5) return;
+            _autofillScrollX = x;
+            _autofillScrollY = y;
+            _autofillPopup.Reposition();
+        };
+        // 候选浮层的键盘操作放在窗口根面板：Tab 与上下键在输入框内部会被焦点导航或光标移动抢先处理。
+        // 只挂 PreviewKeyDown：同时挂 KeyDown 会让一次按键被处理两遍，
+        // 上下键会先加一又立刻减一，表现成完全切不动的样子。
+        RootShell.AddHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler(RootShell_PreviewKeyDown), true);
+        // 仅时钟模式的整屏笔迹写进当前项目，改动后按常规节奏安排保存。
+        ClockInkLayer.StrokesChanged += ScheduleSave;
         LoadPersistentState();
         InitializeProjectCommands();
+        InitializeFloatingIslands();
         InitializeExtendedSettings();
         InitializeBoardNavigation();
 
@@ -194,12 +219,15 @@ public sealed partial class MainWindow : Window
         BackToBoardButton.Visibility = Visibility.Collapsed;
         EditBoardButton.Visibility = Visibility.Visible;
         SettingsButton.Visibility = Visibility.Visible;
+        // 回到作业板时缩放岛重新出现，并重新贴合控制窗。
+        RefreshIslands();
     }
 
     private void ShowSettings()
     {
         _previewScenes.Remove("Shared");
         _previewScenes.Remove("Board");
+        HideAutofillPopups();
         RecordToolbarActivity(false);
         DisplayRoot.Visibility = Visibility.Collapsed;
         SettingsRoot.Visibility = Visibility.Visible;
@@ -214,11 +242,9 @@ public sealed partial class MainWindow : Window
         BackToBoardButton.Visibility = Visibility.Visible;
         EditBoardButton.Visibility = Visibility.Collapsed;
         SettingsButton.Visibility = Visibility.Collapsed;
-        AddSubjectButton.Visibility = Visibility.Collapsed;
-        AutoArrangeButton.Visibility = Visibility.Collapsed;
-        GlobalPenButton.Visibility = Visibility.Collapsed;
-        GridSnapToggleButton.Visibility = Visibility.Collapsed;
-        DiscardEditButton.Visibility = Visibility.Collapsed;
+        UpdateEditingToolbarVisibility();
+        // 设置页里没有作业板，缩放岛随作业板一起收起。
+        RefreshIslands();
     }
 
     private void EditBoardButton_Click(object sender, RoutedEventArgs e)
@@ -235,13 +261,10 @@ public sealed partial class MainWindow : Window
         _isEditing = true;
         UpdateEditButtonPosition();
         UpdateRichTextToolbar();
+        SnapshotClockInkForEditing();
         EditBoardIcon.Glyph = FluentGlyphs.Checkmark;
         AutomationProperties.SetName(EditBoardButton, "保存修改");
-        GlobalPenButton.Visibility = Visibility.Visible;
-        AddSubjectButton.Visibility = Visibility.Visible;
-        AutoArrangeButton.Visibility = Visibility.Visible;
-        GridSnapToggleButton.Visibility = Visibility.Visible;
-        DiscardEditButton.Visibility = Visibility.Visible;
+        UpdateEditingToolbarVisibility();
         UpdateGridSnapHint();
         SetTilesEditing(true);
         ApplyExtendedSettings();
@@ -252,6 +275,7 @@ public sealed partial class MainWindow : Window
         ViewModel.PublishEditing();
         _widgetEditSnapshot = null;
         _dockedCustomizationEditSnapshot = null;
+        _clockInkEditSnapshot = null;
         _isEditing = false;
         UpdateEditButtonPosition();
         GlobalPenButton.IsChecked = false;
@@ -259,11 +283,7 @@ public sealed partial class MainWindow : Window
         _activeTileInteractions = 0;
         EditBoardIcon.Glyph = FluentGlyphs.Edit;
         AutomationProperties.SetName(EditBoardButton, "编辑看板");
-        GlobalPenButton.Visibility = Visibility.Collapsed;
-        AddSubjectButton.Visibility = Visibility.Collapsed;
-        AutoArrangeButton.Visibility = Visibility.Collapsed;
-        GridSnapToggleButton.Visibility = Visibility.Collapsed;
-        DiscardEditButton.Visibility = Visibility.Collapsed;
+        UpdateEditingToolbarVisibility();
         SetTilesEditing(false);
         ApplyExtendedSettings();
         ScheduleSave();
@@ -277,6 +297,7 @@ public sealed partial class MainWindow : Window
         if (_dockedCustomizationEditSnapshot is not null) _settings.CustomizedDockedWidgets = _dockedCustomizationEditSnapshot;
         _widgetEditSnapshot = null;
         _dockedCustomizationEditSnapshot = null;
+        RestoreClockInkSnapshot();
         _isEditing = false;
         UpdateEditButtonPosition();
         GlobalPenButton.IsChecked = false;
@@ -285,11 +306,7 @@ public sealed partial class MainWindow : Window
         BuildTiles();
         EditBoardIcon.Glyph = FluentGlyphs.Edit;
         ApplyExtendedSettings();
-        GlobalPenButton.Visibility = Visibility.Collapsed;
-        AddSubjectButton.Visibility = Visibility.Collapsed;
-        AutoArrangeButton.Visibility = Visibility.Collapsed;
-        GridSnapToggleButton.Visibility = Visibility.Collapsed;
-        DiscardEditButton.Visibility = Visibility.Collapsed;
+        UpdateEditingToolbarVisibility();
         ScheduleSave();
     }
 
@@ -329,22 +346,17 @@ public sealed partial class MainWindow : Window
             LayoutCommitted,
             SetTileInteractionActive,
             AddAttachmentAsync,
-            ScheduleSave)
+            ScheduleSave,
+            _autofill,
+            _autofillPopup)
         {
             DataContext = subject
         };
         tile.FormattingToolbarChanged += (toolbar, active) =>
         {
-            if (active && _isEditing)
-            {
-                RichTextToolbarHost.Content = toolbar;
-
-            }
-            else if (ReferenceEquals(RichTextToolbarHost.Content, toolbar))
-            {
-                RichTextToolbarHost.Content = null;
-
-            }
+            // 工具条由窗口统一承载在控制窗左侧的悬浮岛上，只在当前作业获得焦点时出现。
+            if (active && _isEditing) ShowRichTextToolbar(toolbar);
+            else HideRichTextToolbar(toolbar);
         };
         tile.InkActivated += subject => { _activeInkSubject = subject; UpdateInkSubjectLabel(); };
         tile.ApplyAppearance(_settings);
@@ -359,12 +371,21 @@ public sealed partial class MainWindow : Window
         foreach (SubjectTileControl tile in BoardCanvas.Children.OfType<SubjectTileControl>()) tile.SetEditing(editing);
     }
 
+    /// <summary>看板滚动或切换布局时收起补全浮层，避免候选窗停在旧位置。</summary>
+    private void HideAutofillPopups()
+    {
+        _autofillPopup.Hide();
+        foreach (SubjectTileControl tile in BoardCanvas.Children.OfType<SubjectTileControl>()) tile.HideAutofill();
+    }
+
+    /// <summary>候选浮层打开时接管上下键、Tab、回车与 Esc，其余按键照常交给输入框。</summary>
+    private void RootShell_PreviewKeyDown(object sender, KeyRoutedEventArgs e) => _autofillPopup.HandleKey(e);
+
     private void UpdateRichTextToolbar()
     {
         // 结束编辑或重建磁贴时释放旧编辑器，避免按钮继续修改已删除的作业。
         RichTextToolbarHost.Content = null;
-
-        RichTextToolbar.Visibility = _isEditing ? Visibility.Visible : Visibility.Collapsed;
+        RefreshIslands();
         UpdateProjectCommands();
     }
 
@@ -745,6 +766,8 @@ public sealed partial class MainWindow : Window
     {
         ColorPalette.IsMacaron = _settings.Palette == "Macaron";
         RefreshInkPalette();
+        // 学科色卡按当前色系解析，切换色系后重建列表即可保持显示的颜色与套用结果一致。
+        _refreshSubjectAutofill?.Invoke();
         foreach (var subject in ViewModel.Subjects)
         {
             subject.AccentBrush = MainViewModel.BrushFromHex(ColorPalette.ResolveAccent(subject.AccentHex, subject.IsAccentExplicit, ColorPalette.IsMacaron));
@@ -1027,12 +1050,24 @@ public sealed partial class MainWindow : Window
                 _settings.DockedWidgetLayoutVersion = 2;
             }
             _settings.GridStyle = GridAppearance.EffectiveStyle(_settings.GridStyle, false, false);
+            // 旧配置缺少自动填充字段或整体为 null 时补齐默认值，保持向后兼容。
+            _settings.Autofill ??= new AutofillSettings();
+            _settings.Autofill.Subject ??= new SubjectCompletionSettings();
+            _settings.Autofill.Homework ??= new HomeworkCompletionSettings();
+            _settings.Autofill.Subject.Subjects ??= [];
+            _settings.Autofill.Homework.Items ??= [];
+            _settings.Autofill.Homework.Blocked ??= [];
+            _autofill.EnsureBuiltIns();
+            _autofill.Prune(DateTime.Now);
             _settings.GridLineThickness = Math.Clamp(_settings.GridLineThickness, .5, 5);
             _settings.GridDotDiameter = Math.Clamp(_settings.GridDotDiameter, 1, 12);
             _library.ActiveProjectId = CurrentProject?.Id ?? _library.Projects.OrderByDescending(p => p.LastUsedAt).FirstOrDefault()?.Id;
             ViewModel.ReplaceSubjects(AppDataStore.RestoreSubjects(CurrentProject?.Subjects ?? []));
+            LoadClockInk();
             ThemeComboBox.SelectedIndex = _settings.Theme switch { "Light" => 1, "Default" => 2, _ => 0 };
             PaletteComboBox.SelectedIndex = _settings.Palette == "Macaron" ? 1 : 0;
+            // 设置页在构造时就会按色系解析预设色（学科色卡等），因此先确定色系再构建设置页。
+            ColorPalette.IsMacaron = _settings.Palette == "Macaron";
             NoiseIntervalSlider.Value = Math.Clamp(_settings.NoiseIntervalSeconds, 0.1, 2);
             _settings.NoiseIntervalSeconds = NoiseIntervalSlider.Value;
             NoiseThresholdSlider.Value = Math.Clamp(_settings.NoiseThresholdDb, 20, 120);

@@ -93,10 +93,25 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Thumb">
-                    <Border Background="{ThemeResource BoardSurfaceElevatedBrush}" BorderBrush="#A0A0A0" BorderThickness="1" CornerRadius="3" />
+                    <Grid>
+                        <Border Background="{ThemeResource BoardSurfaceElevatedBrush}" BorderBrush="#A0A0A0" BorderThickness="1" CornerRadius="3" />
+                        <!-- 指向右下角的箭头，说明这个小方块用于缩放组件（ic_fluent_arrow_down_right_20_regular）。 -->
+                        <FontIcon Glyph="&#xE0D1;" FontFamily="{StaticResource BoardIconFontFamily}" FontSize="11"
+                                  Foreground="{ThemeResource BoardTextSecondaryBrush}"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Grid>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <!-- 组件选中框：编辑模式下指针落在时钟、天气、噪音等组件上时描一圈，明确当前操作的组件。 -->
+    <Style x:Key="WidgetSelectionBorderStyle" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{ThemeResource BoardBrandBrush}" />
+        <Setter Property="BorderThickness" Value="2" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+        <Setter Property="Opacity" Value="0" />
     </Style>
 
     <Style x:Key="BoardPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">

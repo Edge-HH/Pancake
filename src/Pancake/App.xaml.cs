@@ -87,6 +87,13 @@ public partial class App : Application
             _window.Activate();
             return;
         }
+        if (commandLine.Contains("--verify-autofill-keys", StringComparison.OrdinalIgnoreCase))
+        {
+            _window = new MainWindow(false, "verification");
+            _window.ScheduleAutofillKeyVerification();
+            _window.Activate();
+            return;
+        }
 #endif
         _window = new MainWindow(startFullScreen, initialView);
         _window.Activate();

@@ -98,6 +98,8 @@ public sealed partial class MainWindow
             ApplyFreeWidgets(free);
             if (!free && _settings.LayoutMode != "Board") ApplyDockedClockLayout();
             UpdateLayoutHandles();
+            // 仅时钟模式才显示和书写整屏笔迹，切换布局时同步显示状态。
+            RefreshClockInk();
         }
         finally { _layingOut = false; }
     }
@@ -215,40 +217,11 @@ public sealed partial class MainWindow
         if (FreeLayoutHandles is null || _splitDragging) return;
         FreeLayoutHandles.Children.Clear();
         bool split = _settings.LayoutMode == "Split";
+        // 单区模式同样保留分隔滑条：仅时钟贴右侧、仅作业贴左侧，用户随时能拖回分屏。
+        bool singleZone = _settings.LayoutMode is "Clock" or "Board";
         bool canEditWidgets = _isEditing && GlobalPenButton.IsChecked != true;
-        FreeLayoutHandles.IsHitTestVisible = split || (_settings.LayoutMode is "Free" or "Clock" && canEditWidgets);
-        if (split)
-        {
-            bool compact = RootShell.ActualWidth < 900;
-            _splitter = new Thumb { Background = new SolidColorBrush(Windows.UI.Color.FromArgb(95, 128, 128, 128)),
-                Width = compact ? Math.Max(1, DisplayRoot.ActualWidth) : 10,
-                Height = compact ? 10 : Math.Max(1, DisplayRoot.ActualHeight) };
-            ToolTipService.SetToolTip(_splitter, "拖动调整分屏，拖至边缘切换单区");
-            Canvas.SetLeft(_splitter, compact ? 0 : DisplayRoot.ActualWidth * _settings.SplitRatio - 5);
-            Canvas.SetTop(_splitter, compact ? DisplayRoot.ActualHeight * _settings.SplitRatio - 5 : 0);
-            _splitter.DragStarted += (_, _) => { _splitDragging = true; _splitDragRatio = _settings.SplitRatio; };
-            _splitter.DragDelta += (_, args) =>
-            {
-                _splitDragRatio += (compact ? args.VerticalChange : args.HorizontalChange) / Math.Max(1, compact ? DisplayRoot.ActualHeight : DisplayRoot.ActualWidth);
-                _settings.SplitRatio = Math.Clamp(_splitDragRatio, .01, .99);
-                ApplyDisplayLayout();
-                if (compact) Canvas.SetTop(_splitter, DisplayRoot.ActualHeight * _settings.SplitRatio - 5);
-                else Canvas.SetLeft(_splitter, DisplayRoot.ActualWidth * _settings.SplitRatio - 5);
-            };
-            _splitter.DragCompleted += (_, _) =>
-            {
-                _splitDragging = false;
-                if (WidgetLayout.CompleteSplit(_splitDragRatio) is "Board" or "Clock")
-                {
-                    _settings.LayoutMode = WidgetLayout.CompleteSplit(_splitDragRatio);
-                    _settings.SplitRatio = .4;
-                    if (_layoutChoice is not null) _layoutChoice.SelectedIndex = _settings.LayoutMode == "Board" ? 1 : 2;
-                }
-                SettingChanged();
-            };
-            Canvas.SetZIndex(_splitter, 100);
-            FreeLayoutHandles.Children.Add(_splitter);
-        }
+        FreeLayoutHandles.IsHitTestVisible = split || singleZone || (_settings.LayoutMode is "Free" or "Clock" && canEditWidgets);
+        if (split || singleZone) AddSplitHandle(split);
         if (_settings.LayoutMode is "Split" or "Clock" && canEditWidgets)
         {
             string prefix = _settings.LayoutMode == "Split" ? "Split" : "ClockMode";
@@ -266,6 +239,86 @@ public sealed partial class MainWindow
         }
     }
 
+    /// <summary>
+    /// 分隔滑条：分屏时停在两区交界处，单区时贴在被占满的一侧边缘（仅时钟在右、仅作业在左，
+    /// 窄窗口改成下、上）。从单区往回流方向拖动即恢复分屏，拖到另一端则再次切换单区。
+    /// </summary>
+    private void AddSplitHandle(bool split)
+    {
+        bool compact = RootShell.ActualWidth < 900;
+        bool clockOnly = _settings.LayoutMode == "Clock";
+        double width = Math.Max(1, DisplayRoot.ActualWidth), height = Math.Max(1, DisplayRoot.ActualHeight);
+        _splitter = new Thumb
+        {
+            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(95, 128, 128, 128)),
+            Width = compact ? width : 10,
+            Height = compact ? 10 : height
+        };
+        ToolTipService.SetToolTip(_splitter, split
+            ? "拖动调整分屏，拖至边缘切换单区"
+            : compact
+                ? clockOnly ? "向上拖动回到分屏" : "向下拖动回到分屏"
+                : clockOnly ? "向左拖动回到分屏" : "向右拖动回到分屏");
+        if (compact)
+        {
+            Canvas.SetLeft(_splitter, 0);
+            Canvas.SetTop(_splitter, split ? height * _settings.SplitRatio - 5 : clockOnly ? height - 10 : 0);
+        }
+        else
+        {
+            Canvas.SetLeft(_splitter, split ? width * _settings.SplitRatio - 5 : clockOnly ? width - 10 : 0);
+            Canvas.SetTop(_splitter, 0);
+        }
+        _splitter.DragStarted += (_, _) => BeginSplitDrag();
+        _splitter.DragDelta += (_, args) => DragSplitHandle(compact, args.HorizontalChange, args.VerticalChange);
+        _splitter.DragCompleted += (_, _) => CompleteSplitDrag();
+        Canvas.SetZIndex(_splitter, 100);
+        FreeLayoutHandles.Children.Add(_splitter);
+    }
+
+    /// <summary>按下分隔条时记录起始比例；单区模式按贴边位置起步（仅时钟 1，仅作业 0）。</summary>
+    private void BeginSplitDrag()
+    {
+        _splitDragging = true;
+        _splitDragRatio = _settings.LayoutMode switch { "Clock" => 1, "Board" => 0, _ => _settings.SplitRatio };
+    }
+
+    /// <summary>拖动分隔条：按位移换算比例，拖进分屏范围就即时切回分屏预览。</summary>
+    private void DragSplitHandle(bool compact, double horizontalChange, double verticalChange)
+    {
+        double width = Math.Max(1, DisplayRoot.ActualWidth), height = Math.Max(1, DisplayRoot.ActualHeight);
+        _splitDragRatio = Math.Clamp(_splitDragRatio + (compact ? verticalChange : horizontalChange) / (compact ? height : width), .01, .99);
+        _settings.SplitRatio = _splitDragRatio;
+        // 拖回分屏范围时立即切回分屏，松手前就能看到分屏比例，松手时才写入最终模式。
+        if (_settings.LayoutMode != "Split" && WidgetLayout.CompleteSplit(_splitDragRatio) == "Split") _settings.LayoutMode = "Split";
+        ApplyDisplayLayout();
+        if (_splitter is null) return;
+        if (compact) Canvas.SetTop(_splitter, height * _settings.SplitRatio - 5);
+        else Canvas.SetLeft(_splitter, width * _settings.SplitRatio - 5);
+    }
+
+    /// <summary>松开分隔条：落在两端就切换单区并复位比例，否则留在分屏并保留拖出来的比例。</summary>
+    private void CompleteSplitDrag()
+    {
+        _splitDragging = false;
+        string completed = WidgetLayout.CompleteSplit(_splitDragRatio);
+        if (completed is "Board" or "Clock")
+        {
+            _settings.LayoutMode = completed;
+            _settings.SplitRatio = .4;
+        }
+        SyncLayoutChoiceSelection();
+        SettingChanged();
+    }
+
+    /// <summary>拖动分隔条切换模式后，把设置里的布局下拉框同步到同一模式。</summary>
+    private void SyncLayoutChoiceSelection()
+    {
+        if (_layoutChoice is null) return;
+        int index = _settings.LayoutMode switch { "Board" => 1, "Clock" => 2, "Free" => 3, _ => 0 };
+        if (index < _layoutChoice.Items.Count) _layoutChoice.SelectedIndex = index;
+    }
+
     private void AddCenteredWidgetInteraction(string key, Viewbox view, string label, double aspectRatio, double minimumWidth)
     {
         if (!_settings.Widgets.TryGetValue(key, out RegionPlacement? placement)) return;
@@ -280,17 +333,27 @@ public sealed partial class MainWindow
         Action<double, double> movePlacement, Action<double, double> resizePlacement, Action complete)
     {
         Grid interactionLayer = new() { Width = placement.Width, Height = placement.Height, Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0)) };
+        // 选中框和缩放手柄同步出现：指针进入组件后描一圈表示当前选中的组件，离开组件再一起收起。
+        Border selectionBorder = new() { Style = (Style)Application.Current.Resources["WidgetSelectionBorderStyle"] };
         Thumb move = new() { Style = (Style)Application.Current.Resources["InvisibleWidgetMoveThumbStyle"] };
         Thumb resize = new()
         {
             Width = 18, Height = 18, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom,
             Style = (Style)Application.Current.Resources["WidgetResizeThumbStyle"], Opacity = 0
         };
+        // 选中框画在移动层之上、缩放手柄之下，避免被移动层的覆盖范围挡住，同时让手柄始终保持在最上层。
         interactionLayer.Children.Add(move);
+        interactionLayer.Children.Add(selectionBorder);
         interactionLayer.Children.Add(resize);
         bool dragging = false;
-        interactionLayer.PointerEntered += (_, _) => resize.Opacity = 1;
-        interactionLayer.PointerExited += (_, _) => { if (!dragging) resize.Opacity = 0; };
+        bool pointerOver = false;
+        void SetSelected(bool selected)
+        {
+            selectionBorder.Opacity = selected ? 1 : 0;
+            resize.Opacity = selected ? 1 : 0;
+        }
+        interactionLayer.PointerEntered += (_, _) => { pointerOver = true; SetSelected(true); };
+        interactionLayer.PointerExited += (_, _) => { pointerOver = false; if (!dragging) SetSelected(false); };
         void PositionInteraction()
         {
             interactionLayer.Width = placement.Width; interactionLayer.Height = placement.Height;
@@ -304,17 +367,18 @@ public sealed partial class MainWindow
             movePlacement(args.HorizontalChange, args.VerticalChange);
             PositionInteraction();
         };
-        move.DragStarted += (_, _) => dragging = true;
+        move.DragStarted += (_, _) => { dragging = true; SetSelected(true); };
         resize.DragDelta += (_, args) =>
         {
             resizePlacement(args.HorizontalChange, args.VerticalChange);
             PositionInteraction();
         };
-        resize.DragStarted += (_, _) => { dragging = true; resize.Opacity = 1; };
+        resize.DragStarted += (_, _) => { dragging = true; SetSelected(true); };
         void CompleteDrag()
         {
             dragging = false;
-            resize.Opacity = 0;
+            // 松手后指针通常仍停在组件上，此时保持选中框可见，等指针离开再收起。
+            SetSelected(pointerOver);
             complete();
         }
         move.DragCompleted += (_, _) => CompleteDrag(); resize.DragCompleted += (_, _) => CompleteDrag();

@@ -204,3 +204,142 @@ try
     Console.WriteLine("PASS: recent image ownership/history, mixed playlists, shuffle, persistence and Wallpaper Engine import boundaries.");
 }
 finally { Directory.Delete(mediaRoot, true); }
+
+// 自动填充：学科库、拼音三档匹配、作业切词统计、阈值晋升、过期与屏蔽。
+var autofillSettings = new AutofillSettings();
+var autofill = new AutofillService(autofillSettings);
+Check(autofill.EnsureBuiltIns() && autofillSettings.Subject.Subjects.Count == 16, "首次启动生成 16 个内置学科");
+Check(!autofill.EnsureBuiltIns() && autofillSettings.Subject.Subjects.Count == 16, "重复初始化不重复生成内置学科");
+Check(autofillSettings.Subject.Subjects.All(item => item.Color.Length == 7 && item.Enabled), "内置学科都有默认颜色并默认启用");
+Check(autofill.MatchSubjects("语文").Count == 0, "总开关关闭时不返回学科候选");
+
+const string customSubject = "道法";
+autofillSettings.Subject.Subjects.Add(new SubjectSuggestion
+{
+    Name = customSubject, Enabled = true, Color = "#818CF8", Source = AutofillService.ManualSource
+});
+Check(autofillSettings.Subject.Subjects.Count(item => item.Name == customSubject) == 1, "手动添加的学科进入学科库");
+Check(autofillSettings.Subject.Subjects.All(item => item.Source is AutofillService.BuiltInSource or AutofillService.ManualSource),
+    "学科库只包含内置与手动添加的学科，不会自动收录项目科目");
+
+autofillSettings.Subject.Enabled = true;
+Check(autofill.MatchSubjects("语").First().Name == "语文", "中文前缀匹配");
+Check(autofill.MatchSubjects("yw").First().Name == "语文", "拼音首字母匹配");
+Check(autofill.MatchSubjects("yuw").First().Name == "语文", "拼音全拼前缀匹配");
+Check(autofill.MatchSubjects("数学").Count == 0, "与输入完全相同的学科不再提示");
+Check(!autofill.MatchSubjects("xjs").Any(item => item.Name == "信息技术"), "正常档不允许首字母跳字");
+autofillSettings.Subject.MatchLevel = "Loose";
+Check(autofill.MatchSubjects("xjs").Any(item => item.Name == "信息技术"), "宽松档允许首字母跳字");
+Check(autofill.MatchSubjects("y").Count >= 2, "宽松档输入 1 个字母即提示");
+autofillSettings.Subject.MatchLevel = "Strict";
+Check(autofill.MatchSubjects("y").Count == 0 && autofill.MatchSubjects("yw").Any(item => item.Name == "语文"),
+    "严格档至少 2 个字符并只认完整前缀");
+autofillSettings.Subject.MatchLevel = "Normal";
+Check(autofill.MatchSubjects(new string('长', 30)).Count == 0, "超长输入不触发补全");
+
+Check(AutofillService.Tokenize("背诵《赤壁赋》第二段").SequenceEqual(["背诵", "赤壁赋", "第二段"]), "按标点切分中文片段");
+Check(AutofillService.Tokenize("数学双练一测P30").SequenceEqual(["数学双练一测"]), "页码字母不并入作业名称");
+Check(AutofillService.Tokenize("双练一测第3页").SequenceEqual(["双练一测"]), "页码前的序号词与量词不并入作业名称");
+Check(AutofillService.Tokenize("双练一测第3页答案").SequenceEqual(["双练一测", "答案"]), "页码之后的词仍然保留");
+Check(AutofillService.Tokenize("Unit 5 单词").SequenceEqual(["Unit", "单词"]), "英文单词与数字分开切分");
+Check(!AutofillService.IsRecordable("P") && !AutofillService.IsRecordable("30")
+    && !AutofillService.IsRecordable(AutofillService.PlaceholderHomework), "单字母、数字与占位文案不记录");
+Check(AutofillService.IsRecordable("Unit") && AutofillService.IsRecordable("练习题"), "英文短语与中文词可记录");
+Check(!AutofillService.IsRecordable("这是一个超过十二个字符的作业名称"), "过长片段视为句子不记录");
+
+autofillSettings.Homework.Enabled = true;
+Check(autofill.RecordHomework("完成 P30 练习题", "数学"), "首次输入累计待收录词条");
+Check(autofillSettings.Homework.Items.Any(item => item.Text == "练习题" && item.Count == 1 && !item.Promoted), "首次输入只累计不收录");
+Check(autofillSettings.Homework.Items.All(item => item.Text is not ("P" or "30")), "页码碎片不入库");
+Check(autofillSettings.Homework.Items.All(item => item.Text != AutofillService.PlaceholderHomework), "占位文案不进入待收录列表");
+Check(autofill.MatchHomework("练习", "数学").Count == 0, "未达阈值的词条不参与补全");
+autofill.RecordHomework("完成 P31 练习题", "数学");
+autofill.RecordHomework("完成 P32 练习题", "数学");
+Check(autofillSettings.Homework.Items.Single(item => item.Text == "练习题").Promoted, "达到默认 3 次后自动收录");
+Check(autofill.MatchHomework("练习", "数学").Single().Text == "练习题", "已收录词按前缀补全");
+Check(autofill.MatchHomework("lianxi", "数学").Single().Text == "练习题", "已收录词支持拼音全拼补全");
+HomeworkSuggestion repeated = autofillSettings.Homework.Items.Single(item => item.Text == "练习题");
+int repeatedBefore = repeated.Count;
+autofill.RecordHomework("练习题 练习题 练习题", "数学");
+Check(repeated.Count == repeatedBefore + 1, "同一条作业内重复出现的词只累计一次");
+Check(autofill.MatchSubjects("yu'wen").Single().Name == "语文", "输入法撇号分隔的拼音可以命中学科");
+Check(autofill.MatchSubjects("ｙｕ'ｗｅｎ").Single().Name == "语文", "全角拼音同样可以命中学科");
+Check(autofill.RecommendSubjects(12).Count >= 12 && autofill.RecommendSubjects(12).All(item => item.Enabled),
+    "空标题推荐列表只包含已启用的学科");
+
+// 学科颜色：未开启随机配色时沿用学科颜色；开启后每次补全都从预设色板里取一个且不连续重复。
+SubjectSuggestion randomSubject = autofillSettings.Subject.Subjects.First(item => item.Name == "语文");
+Check(autofill.ResolveSubjectColor(randomSubject) == randomSubject.Color, "未开启随机配色时套用学科自身的颜色");
+randomSubject.RandomColor = true;
+List<string> randomPicks = Enumerable.Range(0, 24).Select(_ => autofill.ResolveSubjectColor(randomSubject)).ToList();
+Check(randomPicks.All(pick => ColorPalette.Presets.Contains(pick)), "随机配色只从预设色板里取色");
+Check(!randomPicks.Where((pick, index) => index > 0 && pick == randomPicks[index - 1]).Any(),
+    "随机配色不连续重复同一个颜色");
+Check(randomPicks.Distinct().Count() > 1, "随机配色会落在多个预设颜色上");
+randomSubject.RandomColor = false;
+
+HomeworkSuggestion renamed = autofillSettings.Homework.Items.Single(item => item.Text == "练习题");
+Check(autofill.RenameHomework(renamed, "练习册") && renamed.Text == "练习册", "已收录的作业名称可以改写");
+Check(autofill.MatchHomework("练习", "数学").Single().Text == "练习册", "改写后按新名称补全");
+Check(autofill.RenameHomework(renamed, "练习册") == false, "名称未变化时不重复保存");
+Check(autofill.RecordHomework("在这里输入作业内容", "数学") == false, "占位文案不触发统计");
+
+autofillSettings.Homework.Isolation = "Subject";
+autofill.RecordHomework("同步练习册", "数学");
+Check(autofillSettings.Homework.Items.Any(item => item.Text == "同步练习册" && !item.IsGlobal && item.Subjects.Contains("数学")),
+    "分学科隔离写入学科桶");
+Check(!autofill.MatchHomework("同步", "英语").Any(), "分学科隔离下其他学科看不到该词");
+autofill.RecordHomework("同步练习册", "英语");
+Check(autofillSettings.Homework.Items.Count(item => item.Text == "同步练习册") == 2, "不同学科分别计数");
+autofillSettings.Homework.Isolation = "Global";
+
+autofill.BlockHomework("同步练习册");
+Check(autofill.IsBlocked("同步练习册") && autofillSettings.Homework.Items.All(item => item.Text != "同步练习册"),
+    "不再收录会移除词条并记住屏蔽");
+autofill.RecordHomework("同步练习册", "数学");
+Check(autofillSettings.Homework.Items.All(item => item.Text != "同步练习册"), "被屏蔽的词不会再次入库");
+autofill.UnblockHomework("同步练习册");
+Check(!autofill.IsBlocked("同步练习册") && autofillSettings.Homework.Blocked.Count == 0, "恢复收录清除屏蔽");
+
+Check(AutofillService.RecordThreshold("Loose") == 2 && AutofillService.RecordThreshold("Strict") == 5
+    && AutofillService.RemainingCount(new HomeworkSuggestion { Source = AutofillService.AutoSource, Count = 1 }, "Normal") == 2,
+    "三档阈值与剩余次数计算");
+DateTime staleTime = DateTime.Now.AddDays(-20);
+autofillSettings.Homework.Items.Add(new HomeworkSuggestion
+{
+    Text = "过期候选", Source = AutofillService.AutoSource, IsGlobal = true, Count = 1,
+    FirstSeenAt = staleTime, LastSeenAt = staleTime
+});
+autofillSettings.Homework.Items.Add(new HomeworkSuggestion
+{
+    Text = "过期收录", Source = AutofillService.AutoSource, IsGlobal = true, Count = 3, Promoted = true,
+    FirstSeenAt = DateTime.Now.AddDays(-120), LastSeenAt = DateTime.Now.AddDays(-120)
+});
+autofillSettings.Homework.Items.Add(new HomeworkSuggestion
+{
+    Text = "手动长期项", Source = AutofillService.ManualSource, IsGlobal = true, Count = 1, Promoted = true,
+    FirstSeenAt = DateTime.Now.AddDays(-400), LastSeenAt = DateTime.Now.AddDays(-400)
+});
+Check(autofill.Prune(DateTime.Now), "过期清理会移除超期词条");
+Check(autofillSettings.Homework.Items.All(item => item.Text is not ("过期候选" or "过期收录")),
+    "未收录 14 天与已收录 90 天的自动词条被清理");
+Check(autofillSettings.Homework.Items.Any(item => item.Text == "手动长期项"), "手动添加的作业类型永不过期");
+Check(AutofillService.RemainingDays(new HomeworkSuggestion
+{
+    Source = AutofillService.AutoSource, LastSeenAt = DateTime.Now
+}, DateTime.Now) == AutofillService.PendingExpiryDays, "剩余过期天数按未收录上限计算");
+
+BoardSettingsState autofillRoundTrip = JsonSerializer.Deserialize<BoardSettingsState>(
+    JsonSerializer.Serialize(new BoardSettingsState { Autofill = autofillSettings }))!;
+Check(autofillRoundTrip.Autofill.Homework.Isolation == "Global"
+    && autofillRoundTrip.Autofill.Subject.Subjects.Count == autofillSettings.Subject.Subjects.Count
+    && autofillRoundTrip.Autofill.Homework.Items.Count == autofillSettings.Homework.Items.Count,
+    "自动填充设置往返保存");
+Check(autofillRoundTrip.Autofill.Subject.Subjects.All(item => !item.RandomColor), "随机配色开关随学科一起保存");
+BoardSettingsState legacyAutofill = JsonSerializer.Deserialize<BoardSettingsState>("{}")!;
+Check(!legacyAutofill.Autofill.Subject.Enabled && !legacyAutofill.Autofill.Homework.Enabled
+    && legacyAutofill.Autofill.Subject.MatchLevel == "Normal" && legacyAutofill.Autofill.Homework.RecordLevel == "Normal"
+    && legacyAutofill.Autofill.Homework.Items.Count == 0
+    && legacyAutofill.Autofill.Subject.Subjects.All(item => !item.RandomColor),
+    "旧配置缺少自动填充字段时使用默认值并保持关闭");
+Console.WriteLine("PASS: autofill subject library, pinyin matching levels, homework tokenizing, thresholds, isolation, expiry and blocking.");

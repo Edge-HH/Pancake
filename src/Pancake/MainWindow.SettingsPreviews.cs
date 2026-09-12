@@ -10,27 +10,97 @@ namespace Pancake;
 
 public sealed partial class MainWindow
 {
+    // 页内预览的固定设计尺寸：经 Viewbox 等比缩放后，窄窗口也不会撑宽设置页。
+    private const double PreviewSceneWidth = 640, PreviewSceneHeight = 300;
+    // 右侧固定预览区的宽度范围与设置列的最小宽度：宽度不够时预览退回页内顶部，避免把设置控件挤到无法操作。
+    private const double StickyPreviewMinWidth = 400, StickyPreviewMaxWidth = 720, MinimumSettingsColumnWidth = 440;
+    // 浅色模式下给底图压一层白色提亮，深色图片在浅色设置页里不会再发闷。
+    private const double TilePreviewLightOverlayOpacity = .55;
+
     private readonly Dictionary<string, Grid> _appearancePreviews = [];
     private string _selectedSettingsPage = "";
     private SubjectTileControl? _tileAppearancePreview;
-    private bool _tilePreviewIsLight;
+    private Border? _tilePreviewInlineFrame;
+    private Border? _tilePreviewStickyFrame;
+    private Viewbox? _tilePreviewInlineViewbox;
+    private Viewbox? _tilePreviewTileBox;
     private readonly Dictionary<string, (string Key, List<Action> Refresh)> _previewScenes = [];
     private List<Action>? _buildingPreviewRefreshers;
 
     private UIElement CreateAppearancePreview(string kind)
     {
-        Grid scene = new() { Width = 640, Height = 300, IsHitTestVisible = false };
+        if (kind == "Tile") return CreateTileAppearancePreview();
+        Grid scene = new() { Width = PreviewSceneWidth, Height = PreviewSceneHeight, IsHitTestVisible = false };
         _appearancePreviews.Add(kind, scene);
         // 固定设计坐标经 Viewbox 等比缩放，窄窗口也不会撑宽设置页。
         Border frame = new()
         {
-            Name = kind + "AppearancePreview", MaxWidth = 640, HorizontalAlignment = HorizontalAlignment.Stretch,
+            Name = kind + "AppearancePreview", MaxWidth = PreviewSceneWidth, HorizontalAlignment = HorizontalAlignment.Stretch,
             BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8),
             Child = new Viewbox { Stretch = Stretch.Uniform, Child = scene }
         };
         // 边框随设置刷新使用当前主题；预览内容完全只读，不连接保存回调。
         frame.BorderBrush = BoardTheme.LineBrush;
         return frame;
+    }
+
+    /// <summary>
+    /// 磁贴设置页的预览准备两个容器：宽窗口放进右侧固定区，向下滚动编辑选项时预览始终可见；
+    /// 窄窗口回退到"标题大小"上方的页内位置。两个容器共用同一个场景与磁贴控件，
+    /// 切换时只搬动已有元素，不重建富文本编辑器和背景资源。
+    /// </summary>
+    private UIElement CreateTileAppearancePreview()
+    {
+        Grid scene = new() { IsHitTestVisible = false };
+        _appearancePreviews.Add("Tile", scene);
+        _tilePreviewInlineViewbox = new Viewbox { Stretch = Stretch.Uniform, Child = scene };
+        _tilePreviewInlineFrame = new Border
+        {
+            Name = "TileAppearancePreview", MaxWidth = PreviewSceneWidth, HorizontalAlignment = HorizontalAlignment.Stretch,
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8),
+            Child = _tilePreviewInlineViewbox
+        };
+        _tilePreviewStickyFrame = new Border
+        {
+            Name = "TileStickyAppearancePreview", HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12)
+        };
+        // 边框随设置刷新使用当前主题；预览内容完全只读，不连接保存回调。
+        _tilePreviewInlineFrame.BorderBrush = _tilePreviewStickyFrame.BorderBrush = BoardTheme.LineBrush;
+        SettingsPreviewHost.Children.Add(_tilePreviewStickyFrame);
+        return _tilePreviewInlineFrame;
+    }
+
+    private void SettingsContentHost_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateTilePreviewHosting();
+
+    /// <summary>
+    /// 按设置页当前的宽度决定磁贴预览挂在哪里。宽度足够时固定在右侧，
+    /// 并让背景图铺满整块区域、磁贴按区域宽度放大；宽度不足时回到页内顶部。
+    /// </summary>
+    private void UpdateTilePreviewHosting()
+    {
+        if (_tilePreviewInlineFrame is null || _tilePreviewStickyFrame is null ||
+            !_appearancePreviews.TryGetValue("Tile", out Grid? scene)) return;
+        double available = SettingsContentHost.ActualWidth;
+        double panelWidth = Math.Clamp(available * .52, StickyPreviewMinWidth, StickyPreviewMaxWidth);
+        bool sticky = _selectedSettingsPage == "AppearanceTile" && SettingsRoot.Visibility == Visibility.Visible &&
+            available - panelWidth >= MinimumSettingsColumnWidth;
+
+        SettingsPreviewHost.Visibility = sticky ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPreviewHost.Width = panelWidth;
+        _tilePreviewInlineFrame.Visibility = sticky ? Visibility.Collapsed : Visibility.Visible;
+        // 铺满右侧区域时缩小留白，让磁贴尽量占满预览；页内预览保持原比例。
+        if (_tilePreviewTileBox is not null) _tilePreviewTileBox.Margin = sticky ? new Thickness(16) : new Thickness(30);
+        // 页内预览使用固定设计尺寸供 Viewbox 等比缩放；铺满右侧区域时把尺寸交回布局。
+        scene.Width = sticky ? double.NaN : PreviewSceneWidth;
+        scene.Height = sticky ? double.NaN : PreviewSceneHeight;
+
+        // 页内预览多包一层 Viewbox 才能整体等比缩放，右侧区域则让场景直接铺满。
+        if (sticky ? ReferenceEquals(scene.Parent, _tilePreviewStickyFrame) : ReferenceEquals(scene.Parent, _tilePreviewInlineViewbox)) return;
+        if (scene.Parent is Viewbox inline) inline.Child = null;
+        else if (scene.Parent is Border pinned) pinned.Child = null;
+        if (sticky) _tilePreviewStickyFrame.Child = scene;
+        else if (_tilePreviewInlineViewbox is not null) _tilePreviewInlineViewbox.Child = scene;
     }
 
     private void RefreshAppearancePreviews()
@@ -43,15 +113,20 @@ public sealed partial class MainWindow
         foreach (string kind in kinds)
         {
             if (!_appearancePreviews.TryGetValue(kind, out Grid? scene)) continue;
-            if (scene.Parent is Viewbox { Parent: Border frame }) frame.BorderBrush = BoardTheme.LineBrush;
-            if (kind == "Tile" && _tileAppearancePreview is not null && _tilePreviewIsLight == BoardTheme.IsLight)
+            // 磁贴预览的边框可能在右侧固定区，也可能在设置页内，两处都要跟随主题刷新。
+            if (kind == "Tile")
             {
-                _tileAppearancePreview.ApplyAppearance(_settings);
-                continue;
+                if (_tilePreviewInlineFrame is not null) _tilePreviewInlineFrame.BorderBrush = BoardTheme.LineBrush;
+                if (_tilePreviewStickyFrame is not null) _tilePreviewStickyFrame.BorderBrush = BoardTheme.LineBrush;
             }
-            string key = kind == "Toolbar"
-                ? $"{BoardTheme.IsLight}|{RootShell.ActualWidth}|{RootShell.ActualHeight}|{_settings.ToolbarPosition}|{_settings.ToolbarScale}|{_settings.ToolbarIconOnly}|{_settings.ToolbarRadius}|{_settings.ToolbarGlass}|{_settings.ToolbarBlur}|{_settings.ToolbarHorizontalInset}|{_settings.ToolbarVerticalInset}"
-                : $"{BoardTheme.IsLight}|{_settings.LayoutMode}";
+            else if (scene.Parent is Viewbox { Parent: Border frame }) frame.BorderBrush = BoardTheme.LineBrush;
+            string key = kind switch
+            {
+                "Toolbar" => $"{BoardTheme.IsLight}|{RootShell.ActualWidth}|{RootShell.ActualHeight}|{_settings.ToolbarPosition}|{_settings.ToolbarScale}|{_settings.ToolbarIconOnly}|{_settings.ToolbarRadius}|{_settings.ToolbarGlass}|{_settings.ToolbarBlur}|{_settings.ToolbarHorizontalInset}|{_settings.ToolbarVerticalInset}",
+                // 磁贴示例的主题色与高光色都取自当前色系，主题或色系变化必须重建示例才和真实磁贴一致。
+                "Tile" => $"{BoardTheme.IsLight}|{ColorPalette.IsMacaron}",
+                _ => $"{BoardTheme.IsLight}|{_settings.LayoutMode}"
+            };
             // 只有网格页每次重建；布局页缓存真实磁贴控件，拖动时只走刷新器，不重建控件与背景。
             if (kind != "Grid" && _previewScenes.TryGetValue(kind, out var cached) && cached.Key == key)
             {
@@ -67,15 +142,22 @@ public sealed partial class MainWindow
             switch (kind)
             {
                 case "Tile":
+                    // 背景图铺满整块预览；浅色模式额外压一层白色提亮，观感和浅色设置页一致。
                     scene.Children.Add(new Image
                     {
                         Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/Settings/tile-preview-background.png")),
                         Stretch = Stretch.UniformToFill
                     });
+                    scene.Children.Add(new Border
+                    {
+                        Name = "TilePreviewLightOverlay",
+                        Background = new SolidColorBrush(Microsoft.UI.Colors.White),
+                        Opacity = BoardTheme.IsLight ? TilePreviewLightOverlayOpacity : 0,
+                        IsHitTestVisible = false
+                    });
                     _tileAppearancePreview = PreviewTile(CreateTileAppearanceSample());
-                    _tilePreviewIsLight = BoardTheme.IsLight;
-                    scene.Children.Add(new Viewbox { Margin = new Thickness(30), Stretch = Stretch.Uniform,
-                        Child = _tileAppearancePreview });
+                    _tilePreviewTileBox = new Viewbox { Stretch = Stretch.Uniform, Child = _tileAppearancePreview };
+                    scene.Children.Add(_tilePreviewTileBox);
                     break;
                 case "Shared":
                     AddPreviewBackground(scene, () => UseSharedBackground ? _settings.SharedBackground : new());
@@ -131,6 +213,8 @@ public sealed partial class MainWindow
             }
             _buildingPreviewRefreshers = null;
         }
+        // 磁贴预览的位置取决于设置页当前宽度，刷新后重新决定挂在页内还是右侧固定区。
+        UpdateTilePreviewHosting();
     }
 
     private void AddPreviewBackground(Grid target, Func<BackgroundSettings> settings, Func<bool>? shared = null)
@@ -160,18 +244,47 @@ public sealed partial class MainWindow
     private static SubjectBoard CreateTileAppearanceSample()
     {
         // 固定示例只属于设置预览，不读取项目作业，也不接入保存回调。
-        SubjectBoard sample = new() { Name = "这是标题~", TileWidth = 560, TileHeight = 230 };
+        SubjectBoard sample = new()
+        {
+            // 三行正文比原来的两行更高，磁贴相应加高，示例内容不会被自己的滚动条裁掉。
+            Name = "这是标题~", TileWidth = 560, TileHeight = 320,
+            AccentHex = TileSampleAccentHex,
+            // 与看板一致地按当前色系解析预设色，示例主题色和真实磁贴表现相同。
+            AccentBrush = ViewModels.MainViewModel.BrushFromHex(
+                ColorPalette.ResolveAccent(TileSampleAccentHex, false, ColorPalette.IsMacaron))
+        };
+        // 正文统一用默认字体、加粗、不斜体、白色、无下划线；"astra" 用当前色系的高光色选中。
+        // RichEdit 会给 HYPERLINK 域强制画下划线且格式无法关闭，示例正文因此不再放超链接字段。
+        string run = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 " + FontService.FamilyName + ";}}{\\colortbl ;" +
+            TileSampleWhite + ";" + RtfColor(ColorPalette.Resolve(TileSampleHighlightHex)) + ";}\\f0\\fs36\\b\\ulnone\\cf1";
         sample.Entries.Add(new HomeworkEntry
         {
-            Content = "Through adversity to the stars.",
-            RtfContent = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Segoe UI;}}{\\colortbl ;\\red247\\green247\\blue249;}\\f0\\fs36\\cf1\\i Through adversity to the stars.\\i0\\par}"
+            Content = TileSampleFirstLine,
+            RtfContent = run + TileSampleFirstLine + "\\par}"
+        });
+        sample.Entries.Add(new HomeworkEntry
+        {
+            Content = "Through hardships to the stars.",
+            RtfContent = run + "Through hardships to the stars.\\par}"
         });
         sample.Entries.Add(new HomeworkEntry
         {
             Content = "Per ardua ad astra.",
-            RtfContent = "{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Segoe UI;}}{\\colortbl ;\\red247\\green247\\blue249;}\\f0\\fs36\\cf1{\\field{\\*\\fldinst HYPERLINK \"https://en.wikipedia.org/wiki/Per_ardua_ad_astra\"}{\\fldrslt Per ardua ad astra}}.\\par}"
+            RtfContent = run + "Per ardua ad \\highlight2 astra\\highlight0.\\par}"
         });
         return sample;
+    }
+
+    // 设置预览示例的固定样式：预设黄色主题色、白色正文、预设高光色；预设色都跟随当前色系解析。
+    private const string TileSampleAccentHex = "#FBBF24";
+    private const string TileSampleHighlightHex = "#F472B6";
+    private const string TileSampleFirstLine = "当有一天你不再纠结于答案 当我们又重逢于天涯或沧海";
+    private const string TileSampleWhite = @"\red247\green247\blue249";
+
+    private static string RtfColor(string hex)
+    {
+        Windows.UI.Color color = ViewModels.MainViewModel.BrushFromHex(hex).Color;
+        return $"\\red{color.R}\\green{color.G}\\blue{color.B}";
     }
 
     private static void DisablePreviewTabStops(DependencyObject element)
@@ -206,9 +319,17 @@ public sealed partial class MainWindow
             return text;
         }
         StackPanel content = new() { Spacing = 18 };
-        StackPanel time = new() { Orientation = Orientation.Horizontal, Spacing = 7, HorizontalAlignment = HorizontalAlignment.Center };
-        time.Children.Add(LiveText(MainTimeText, 112));
-        TextBlock seconds = LiveText(SecondsText, 28); seconds.Margin = new Thickness(0, 17, 0, 0); time.Children.Add(seconds);
+        // 与看板同款结构：秒数右侧留空多少，左侧就补多少，时间数字才能落在中轴线上。
+        Grid time = new() { ColumnSpacing = 7, HorizontalAlignment = HorizontalAlignment.Center };
+        time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        TextBlock timeText = LiveText(MainTimeText, 112);
+        TextBlock seconds = LiveText(SecondsText, 28); seconds.Margin = new Thickness(0, 17, 0, 0);
+        Border mirror = new();
+        mirror.SetBinding(FrameworkElement.WidthProperty, new Binding { Source = seconds, Path = new PropertyPath("ActualWidth"), Mode = BindingMode.OneWay });
+        Grid.SetColumn(mirror, 0); Grid.SetColumn(timeText, 1); Grid.SetColumn(seconds, 2);
+        time.Children.Add(mirror); time.Children.Add(timeText); time.Children.Add(seconds);
         content.Children.Add(time); content.Children.Add(LiveText(ClockDateText, 20));
         StackPanel components = new() { Orientation = Orientation.Horizontal, Spacing = 20, HorizontalAlignment = HorizontalAlignment.Center };
         components.Children.Add(LiveText(WeatherText, 14)); components.Children.Add(LiveText(NoiseText, 14));

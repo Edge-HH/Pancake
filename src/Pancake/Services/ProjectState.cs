@@ -64,6 +64,61 @@ public sealed class BoardSettingsState
     public string WeatherCityCode { get; set; } = "101010100";
     public bool GridSnappingEnabled { get; set; } = true;
     public bool AutoUpdateEnabled { get; set; } = true;
+    public AutofillSettings Autofill { get; set; } = new();
+}
+
+/// <summary>自动填充设置属于软件设置，跨项目共享；默认全部关闭，升级后不改变原有输入行为。</summary>
+public sealed class AutofillSettings
+{
+    public SubjectCompletionSettings Subject { get; set; } = new();
+    public HomeworkCompletionSettings Homework { get; set; } = new();
+}
+
+/// <summary>学科补全：候选只来自内置清单与设置页手动添加项，程序不会自动收录项目科目。</summary>
+public sealed class SubjectCompletionSettings
+{
+    public bool Enabled { get; set; }
+    // 匹配程度：Loose（1 个字符即提示且允许首字母跳字）、Normal、Strict（只认完整前缀）。
+    public string MatchLevel { get; set; } = "Normal";
+    public List<SubjectSuggestion> Subjects { get; set; } = [];
+}
+
+public sealed class SubjectSuggestion
+{
+    public string Name { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
+    public string Color { get; set; } = "#818CF8";
+    // 随机配色：开启后每次补全都从预设色板里随机取一个，不再固定使用 Color。
+    public bool RandomColor { get; set; }
+    // 来源：BuiltIn（内置清单）、Manual（设置页添加）；Learned 仅为兼容旧版本已自动登记的条目。
+    public string Source { get; set; } = "Manual";
+    public DateTime LastUsedAt { get; set; }
+}
+
+/// <summary>作业补全：统计常输入的作业名称，达到阈值后进入候选。</summary>
+public sealed class HomeworkCompletionSettings
+{
+    public bool Enabled { get; set; }
+    public bool AutoRecord { get; set; } = true;
+    // 收录阈值档位，与学科补全共用 Loose/Normal/Strict 命名，但表示出现次数（2/3/5）。
+    public string RecordLevel { get; set; } = "Normal";
+    // 记录隔离：Global（全部记进全局桶）或 Subject（自动学习写入当前学科桶，全局桶始终可用）。
+    public string Isolation { get; set; } = "Global";
+    public List<HomeworkSuggestion> Items { get; set; } = [];
+    public List<string> Blocked { get; set; } = [];
+}
+
+public sealed class HomeworkSuggestion
+{
+    public string Text { get; set; } = string.Empty;
+    // 来源：Auto（自动学习）、Manual（设置页添加，永不过期）。
+    public string Source { get; set; } = "Auto";
+    public bool IsGlobal { get; set; } = true;
+    public List<string> Subjects { get; set; } = [];
+    public int Count { get; set; }
+    public bool Promoted { get; set; }
+    public DateTime FirstSeenAt { get; set; }
+    public DateTime LastSeenAt { get; set; }
 }
 
 public sealed class SubjectState

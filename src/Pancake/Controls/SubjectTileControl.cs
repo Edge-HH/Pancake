@@ -33,6 +33,10 @@ public sealed class SubjectTileControl : Grid
     private readonly Action<bool> _interactionChanged;
     private readonly Func<HomeworkEntry, Task> _addAttachment;
     private readonly Action _contentChanged;
+    private readonly AutofillService? _autofill;
+    private readonly AutofillPopup? _autofillPopup;
+    private readonly List<HomeworkAutofillInput> _entryAutofills = [];
+    private SubjectAutofillInput? _titleAutofill;
     public event Action<FrameworkElement, bool>? FormattingToolbarChanged;
     private readonly Canvas _inkCanvas = new()
     {
@@ -63,7 +67,9 @@ public sealed class SubjectTileControl : Grid
         Action<SubjectBoard> layoutCommitted,
         Action<bool> interactionChanged,
         Func<HomeworkEntry, Task> addAttachment,
-        Action contentChanged)
+        Action contentChanged,
+        AutofillService? autofill = null,
+        AutofillPopup? autofillPopup = null)
     {
         _subject = subject;
         _deleteSubject = deleteSubject;
@@ -72,6 +78,8 @@ public sealed class SubjectTileControl : Grid
         _interactionChanged = interactionChanged;
         _addAttachment = addAttachment;
         _contentChanged = contentChanged;
+        _autofill = autofill;
+        _autofillPopup = autofillPopup;
 
         Width = subject.TileWidth;
         Height = subject.TileHeight;
@@ -131,6 +139,7 @@ public sealed class SubjectTileControl : Grid
         _headerMoveThumb.DragStarted += (_, _) =>
         {
             IsMoving = true;
+            HideAutofill();
             dragX = _subject.X; dragY = _subject.Y;
             _interactionChanged(true);
         };
@@ -163,6 +172,9 @@ public sealed class SubjectTileControl : Grid
             _watermark.Text = _subject.Watermark;
             _contentChanged();
         };
+        if (_autofill is not null && _autofillPopup is not null)
+            // 学科开启随机配色时，每次采纳都换一个预设色；否则使用学科自身的颜色。
+            _titleAutofill = new SubjectAutofillInput(_autofill, _autofillPopup, _nameEditor, suggestion => ApplyAccent(_autofill.ResolveSubjectColor(suggestion)));
         header.Children.Add(_nameEditor);
 
         _editingTools.Children.Add(CreateIconButton(FluentGlyphs.Add, "添加一条作业", (_, _) => AddHomework()));
@@ -202,6 +214,13 @@ public sealed class SubjectTileControl : Grid
     }
 
     public bool IsMoving { get; private set; }
+
+    /// <summary>收起候选浮层；统计只在编辑真正结束时结算，避免滚动时把半截文字计入。</summary>
+    public void HideAutofill()
+    {
+        _titleAutofill?.Hide();
+        foreach (HomeworkAutofillInput input in _entryAutofills) input.Hide();
+    }
 
     internal (double Width, double Height) MeasureContentSize(double maxWidth = double.PositiveInfinity)
     {
@@ -255,6 +274,7 @@ public sealed class SubjectTileControl : Grid
     public void SetEditing(bool editing)
     {
         _isEditing = editing;
+        if (!editing) HideAutofill();
         _editingTools.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
         _headerMoveThumb.Visibility = editing ? Visibility.Visible : Visibility.Collapsed;
         foreach (Thumb thumb in Children.OfType<Thumb>())
@@ -289,7 +309,11 @@ public sealed class SubjectTileControl : Grid
             ManipulationMode = ManipulationModes.None,
             Tag = edge
         };
-        thumb.DragStarted += (_, _) => _interactionChanged(true);
+        thumb.DragStarted += (_, _) =>
+        {
+            HideAutofill();
+            _interactionChanged(true);
+        };
         thumb.DragDelta += ResizeHandle_DragDelta;
         thumb.DragCompleted += (_, _) =>
         {
@@ -337,6 +361,10 @@ public sealed class SubjectTileControl : Grid
 
     private void RebuildEntries()
     {
+        // 重建编辑器前先结算统计，避免未失焦的作业被漏计。
+        foreach (HomeworkAutofillInput input in _entryAutofills) input.Flush();
+        _entryAutofills.Clear();
+        _titleAutofill?.Hide();
         _entriesPanel.Children.Clear();
         int index = 1;
         foreach (HomeworkEntry homework in _subject.Entries)
@@ -448,6 +476,18 @@ public sealed class SubjectTileControl : Grid
                 CaptureRichText(editor, homework);
             }
         };
+        if (_autofill is not null && _autofillPopup is not null)
+        {
+            _entryAutofills.Add(new HomeworkAutofillInput(
+                _autofill,
+                _autofillPopup,
+                editor,
+                () => _subject.Name,
+                () => documentReady,
+                () => homework.Content,
+                _contentChanged));
+        }
+
         return editor;
     }
 
@@ -607,14 +647,8 @@ public sealed class SubjectTileControl : Grid
             Button swatch = CreateColorSwatch(hex, 32);
             swatch.Click += (_, _) =>
             {
-                _subject.IsAccentExplicit = true;
-                _subject.AccentHex = hex;
-                _subject.AccentBrush = MainViewModel.BrushFromHex(hex);
-                _frame.BorderBrush = _subject.AccentBrush;
-                _nameEditor.Foreground = _subject.AccentBrush;
-                _watermark.Foreground = _subject.AccentBrush;
+                ApplyAccent(hex);
                 button.Flyout.Hide();
-                _contentChanged();
             };
             colors.Children.Add(swatch);
         }
@@ -625,6 +659,20 @@ public sealed class SubjectTileControl : Grid
                 swatch.SetSelected(swatch.Color.Equals(_subject.AccentBrush.Color));
         };
         return button;
+    }
+
+    /// <summary>
+    /// 套用学科颜色：边框、标题与水印共用同一个画刷；预设色仍跟随色系切换，自定义色保持不变。
+    /// </summary>
+    private void ApplyAccent(string hex)
+    {
+        _subject.IsAccentExplicit = true;
+        _subject.AccentHex = hex;
+        _subject.AccentBrush = MainViewModel.BrushFromHex(ColorPalette.ResolveAccent(hex, true, ColorPalette.IsMacaron));
+        _frame.BorderBrush = _subject.AccentBrush;
+        _nameEditor.Foreground = _subject.AccentBrush;
+        _watermark.Foreground = _subject.AccentBrush;
+        _contentChanged();
     }
 
     private static ColorSwatchButton CreateColorSwatch(string hex, double size) =>
@@ -690,6 +738,7 @@ public sealed class SubjectTileControl : Grid
     {
         _inkSettings = settings;
         _isDrawing = drawing && _isEditing;
+        if (_isDrawing) HideAutofill();
         _inkCanvas.IsHitTestVisible = _isDrawing;
         _entriesPanel.IsHitTestVisible = !_isDrawing;
         _editingTools.Visibility = _isEditing && !_isDrawing ? Visibility.Visible : Visibility.Collapsed;
@@ -731,7 +780,7 @@ public sealed class SubjectTileControl : Grid
         _activeStrokeData.Points.Add(point);
         _activeStrokeData.Points.Add(new Point(point.X + 0.01, point.Y));
         _subject.InkStrokes.Add(_activeStrokeData);
-        _activeStrokeShape = CreateStrokeShape(_activeStrokeData);
+        _activeStrokeShape = InkStrokeVisual.Create(_activeStrokeData);
         _activeStrokeShape.Points.Add(point);
         _activeStrokeShape.Points.Add(new Point(point.X + 0.01, point.Y));
         _inkCanvas.Children.Add(_activeStrokeShape);
@@ -793,7 +842,7 @@ public sealed class SubjectTileControl : Grid
         _renderedStrokes.Clear();
         foreach (InkStrokeData stroke in _subject.InkStrokes)
         {
-            Polyline shape = CreateStrokeShape(stroke);
+            Polyline shape = InkStrokeVisual.Create(stroke);
             foreach (Point point in stroke.Points)
             {
                 shape.Points.Add(new Point(point.X / stroke.TipScaleX, point.Y / stroke.TipScaleY));
@@ -802,13 +851,6 @@ public sealed class SubjectTileControl : Grid
             _renderedStrokes[shape] = stroke;
         }
     }
-
-    private static Polyline CreateStrokeShape(InkStrokeData stroke) => new()
-    {
-        Stroke = new SolidColorBrush(BoardTheme.DisplayContentColor(stroke.Color)), StrokeThickness = stroke.Thickness,
-        RenderTransform = new ScaleTransform { ScaleX = stroke.TipScaleX, ScaleY = stroke.TipScaleY },
-        StrokeLineJoin = PenLineJoin.Round, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round
-    };
 
     private void UndoLastStroke()
     {

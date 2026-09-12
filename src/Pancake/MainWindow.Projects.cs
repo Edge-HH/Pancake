@@ -105,6 +105,7 @@ public sealed partial class MainWindow
     private void CaptureCurrentProject()
     {
         if (CurrentProject is { } project) project.Subjects = AppDataStore.CaptureSubjects(ViewModel.Subjects);
+        CaptureClockInk();
     }
 
     private void PersistProjects()
@@ -159,6 +160,7 @@ public sealed partial class MainWindow
             _library = before;
             _settings = _library.Settings;
             ViewModel.ReplaceSubjects(AppDataStore.RestoreSubjects(CurrentProject?.Subjects ?? []));
+            LoadClockInk();
             GlobalPenButton.IsChecked = false;
             _isEditing = false;
             BuildTiles();
@@ -198,6 +200,7 @@ public sealed partial class MainWindow
         _activeInkSubject = null;
         if (project is not null) project.LastUsedAt = DateTime.Now;
         ViewModel.ReplaceSubjects(AppDataStore.RestoreSubjects(project?.Subjects ?? []));
+        LoadClockInk();
         if (project is not null) await OfferProjectAppearanceAsync(project);
         ApplyPalette();
         BuildTiles();
@@ -334,16 +337,30 @@ public sealed partial class MainWindow
         if (GlobalPenButton is null || GlobalInkToolbar is null) return;
         bool drawing = _isEditing && GlobalPenButton.IsChecked == true;
         GlobalInkToolbar.Visibility = drawing ? Visibility.Visible : Visibility.Collapsed;
-        RichTextToolbar.Visibility = _isEditing && !drawing ? Visibility.Visible : Visibility.Collapsed;
         AddSubjectButton.IsEnabled = GridSnapToggleButton.IsEnabled = !drawing;
-        // 隐藏当前不可操作的按钮，避免 WinUI 禁用态出现灰色底框。
-        AddSubjectButton.Visibility = _isEditing && !drawing ? Visibility.Visible : Visibility.Collapsed;
-        GridSnapToggleButton.Visibility = _isEditing && !drawing ? Visibility.Visible : Visibility.Collapsed;
-        AutoArrangeButton.Visibility = _isEditing && !drawing ? Visibility.Visible : Visibility.Collapsed;
+        UpdateEditingToolbarVisibility();
         UpdateLayoutHandles();
         ApplyToolbarSettings();
         foreach (SubjectTileControl tile in BoardCanvas.Children.OfType<SubjectTileControl>()) tile.SetInkMode(drawing, _inkSettings);
         UpdateInkSubjectLabel();
+        RefreshClockInk();
+    }
+
+    /// <summary>
+    /// 编辑工具栏按当前状态显示：画笔模式下不再显示只在作业板上生效的按钮，避免出现按了没有反应的入口；
+    /// 仅时钟模式没有作业板，添加磁贴、自动排列和网格吸附同样无处生效。
+    /// </summary>
+    private void UpdateEditingToolbarVisibility()
+    {
+        if (GlobalPenButton is null) return;
+        bool drawing = _isEditing && GlobalPenButton.IsChecked == true;
+        bool boardTools = _isEditing && !drawing && _settings.LayoutMode != "Clock";
+        // 隐藏当前不可操作的按钮，避免 WinUI 禁用态出现灰色底框。
+        GlobalPenButton.Visibility = _isEditing ? Visibility.Visible : Visibility.Collapsed;
+        AddSubjectButton.Visibility = boardTools ? Visibility.Visible : Visibility.Collapsed;
+        AutoArrangeButton.Visibility = boardTools ? Visibility.Visible : Visibility.Collapsed;
+        GridSnapToggleButton.Visibility = boardTools ? Visibility.Visible : Visibility.Collapsed;
+        DiscardEditButton.Visibility = _isEditing ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void UpdateInkSubjectLabel()
@@ -354,16 +371,21 @@ public sealed partial class MainWindow
     private async void ClearInk_Click(object sender, RoutedEventArgs e)
     {
         UpdateInkSubjectLabel();
+        bool clockOnly = _settings.LayoutMode == "Clock";
         ContentDialog dialog = new()
         {
             XamlRoot = RootShell.XamlRoot, Title = "清空笔迹", Content = "选择要清空的范围，下一步确认。",
-            PrimaryButtonText = _activeInkSubject is null ? "当前磁贴" : _activeInkSubject.Name,
-            IsPrimaryButtonEnabled = _activeInkSubject is not null, SecondaryButtonText = "全部磁贴", CloseButtonText = "取消"
+            PrimaryButtonText = clockOnly ? "时钟区域" : _activeInkSubject is null ? "当前磁贴" : _activeInkSubject.Name,
+            IsPrimaryButtonEnabled = clockOnly || _activeInkSubject is not null,
+            SecondaryButtonText = clockOnly ? "时钟与全部磁贴" : "全部磁贴", CloseButtonText = "取消"
         };
         ContentDialogResult result = await dialog.ShowAsync();
         if (result == ContentDialogResult.None) return;
-        string scope = result == ContentDialogResult.Primary ? _activeInkSubject?.Name ?? "当前磁贴" : "全部磁贴";
+        string scope = result == ContentDialogResult.Primary
+            ? clockOnly ? "时钟区域" : _activeInkSubject?.Name ?? "当前磁贴"
+            : clockOnly ? "时钟与全部磁贴" : "全部磁贴";
         if (await ShowConfirmAsync("确认清空笔迹", $"清空{scope}的笔迹？") != ContentDialogResult.Primary) return;
+        if (clockOnly) ClockInkLayer.ClearStrokes();
         foreach (SubjectTileControl tile in BoardCanvas.Children.OfType<SubjectTileControl>())
             if (result == ContentDialogResult.Secondary || ReferenceEquals(tile.DataContext, _activeInkSubject)) tile.ClearStrokes();
     }

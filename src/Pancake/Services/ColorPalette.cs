@@ -9,6 +9,9 @@ public static class ColorPalette
     private static readonly string[] Macaron = ["#A8D5BA", "#BCBCE3", "#AECBE8", "#E8D5A5", "#E3B6D0", "#A5D5CF", "#E5B3B3", "#B0D5B4", "#BEB5E8"];
     public static bool IsMacaron { get; set; }
 
+    /// <summary>可选预设色（保存的是鲜明色系原值，显示与套用时按当前色系解析）。</summary>
+    public static IReadOnlyList<string> Presets => Vivid;
+
     public static string Resolve(string hex) => ConvertHex(hex, IsMacaron);
 
     public static bool IsPreset(string hex) => Vivid.Any(value => value.Equals(hex, StringComparison.OrdinalIgnoreCase))

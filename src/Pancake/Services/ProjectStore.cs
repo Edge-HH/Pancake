@@ -14,6 +14,8 @@ public sealed class ProjectDocument
     public string Theme { get; set; } = "Dark";
     public string Palette { get; set; } = "Vivid";
     public List<SubjectState> Subjects { get; set; } = [];
+    // 仅时钟模式的全屏笔迹：作业板是磁贴自己的笔迹，这里独立保存整屏书写的内容。
+    public List<InkStrokeState> ClockInkStrokes { get; set; } = [];
 }
 
 public sealed class ProjectLibrary
@@ -185,6 +187,15 @@ public static class ProjectValidation
         if (project.Theme is not ("Dark" or "Light" or "Default") || project.Palette is not ("Vivid" or "Macaron"))
             throw new InvalidDataException("项目主题或色系无效。");
         if (project.Subjects is null || project.Subjects.Count > 1000) throw new InvalidDataException("磁贴数量无效。");
+        // 旧项目文件没有整屏笔迹字段，反序列化后补成空列表即可；有内容时按磁贴笔迹同样的规则校验。
+        project.ClockInkStrokes ??= [];
+        if (project.ClockInkStrokes.Count > 20000) throw new InvalidDataException("时钟区域笔迹数量无效。");
+        foreach (InkStrokeState stroke in project.ClockInkStrokes)
+        {
+            Color(stroke.Color);
+            if (!Finite(stroke.Thickness, stroke.TipScaleX, stroke.TipScaleY) || stroke.Thickness <= 0 || stroke.TipScaleX <= 0 || stroke.TipScaleY <= 0 || stroke.Points is null || stroke.Points.Any(p => !Finite(p.X, p.Y)))
+                throw new InvalidDataException("时钟区域笔迹内容无效。");
+        }
         foreach (SubjectState subject in project.Subjects)
         {
             if (subject.InkCoordinateVersion != 1 || !Finite(subject.X, subject.Y, subject.Width, subject.Height) || subject.Width < 1 || subject.Height < 1)
