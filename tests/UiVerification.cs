@@ -1017,17 +1017,35 @@ public sealed partial class MainWindow
             $"vertical editing tools fit without a pager ({RichTextToolbar.ScrollableHeight:0.#})");
         check(!zoomAlignedVertically || ZoomIslandScroll.ScrollableHeight <= 1.5,
             $"vertical zoom island fits without a pager ({ZoomIslandScroll.ScrollableHeight:0.#})");
-        check(FindVisuals<Button>(RichTextToolbarHost).Any(button => Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(button) == "字体") &&
-            !FindVisuals<AutoSuggestBox>(RichTextToolbarHost).Any(),
+        // 窗口高度不足时按设计退回左右排布，此时字体选择框仍是内联输入框，只在竖排时要求收成图标按钮。
+        check(!islandAlignedVertically ||
+            (FindVisuals<Button>(RichTextToolbarHost).Any(button => Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(button) == "字体") &&
+                !FindVisuals<AutoSuggestBox>(RichTextToolbarHost).Any()),
             "vertical island collapses the font picker into an icon button");
         // 画笔栏同样排在控制窗上方，缩放岛仍在下方。
         GlobalPenButton.IsChecked = true; ApplyExtendedSettings(); await NextLayoutAsync();
         Rect penIsland = Bounds(GlobalInkToolbar);
         toolbar = Bounds(FloatingToolbar); zoom = Bounds(ZoomIsland);
         check(penIsland.Bottom <= toolbar.Top + .5 && zoom.Top >= toolbar.Bottom - .5 && ZoomIslandScroll.ScrollableHeight <= 1.5,
-            $"vertical pen toolbar stays above the control window with zoom below ({penIsland.Bottom:0.#} <= {toolbar.Top:0.#}, {zoom.Top:0.#} >= {toolbar.Bottom:0.#})");
+            $"vertical pen toolbar stays above the control window with zoom below ({penIsland.Bottom:0.#} <= {toolbar.Top:0.#}, {zoom.Top:0.#} >= {toolbar.Bottom:0.#})" +
+            $" [pen {penIsland.X:0.#},{penIsland.Y:0.#} {penIsland.Width:0.#}x{penIsland.Height:0.#} / toolbar {toolbar.X:0.#},{toolbar.Y:0.#} {toolbar.Width:0.#}x{toolbar.Height:0.#}" +
+            $" / zoom {zoom.X:0.#},{zoom.Y:0.#} {zoom.Width:0.#}x{zoom.Height:0.#} / root {RootShell.ActualWidth:0.#}x{RootShell.ActualHeight:0.#} / pager {ZoomIslandScroll.ScrollableHeight:0.#}]");
         GlobalPenButton.IsChecked = false; ApplyExtendedSettings(); await NextLayoutAsync();
         await SaveVisualAsync(RootShell, Path.Combine(output, "islands-vertical.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
+
+        // 窗口高度不足时（例如 768p 的屏幕）竖版上下两块浮岛都放不下，必须退回左右排布：
+        // 编辑工具不能掉到控制窗下方，浮岛也不能被挤出窗口。
+        _appWindow.Resize(new Windows.Graphics.SizeInt32(1024, 700));
+        ApplyExtendedSettings(); await NextLayoutAsync(); await FocusEditorAsync();
+        toolbar = Bounds(FloatingToolbar); island = Bounds(RichTextIsland); zoom = Bounds(ZoomIsland);
+        check(island.Bottom <= toolbar.Top + .5 || island.Right <= toolbar.Left + .5 || island.Left >= toolbar.Right + .5,
+            $"short window keeps the editing tools above or beside the control window (island {island.X:0.#},{island.Y:0.#} {island.Width:0.#}x{island.Height:0.#}" +
+            $" / toolbar {toolbar.X:0.#},{toolbar.Y:0.#} {toolbar.Width:0.#}x{toolbar.Height:0.#})");
+        check(zoom.Right <= RootShell.ActualWidth + .5 && zoom.Bottom <= RootShell.ActualHeight + .5,
+            $"short window keeps the zoom island inside the window (zoom {zoom.X:0.#},{zoom.Y:0.#} {zoom.Width:0.#}x{zoom.Height:0.#}" +
+            $" / root {RootShell.ActualWidth:0.#}x{RootShell.ActualHeight:0.#})");
+        _appWindow.Resize(new Windows.Graphics.SizeInt32(workArea.WorkArea.Width, workArea.WorkArea.Height));
+        ApplyExtendedSettings(); await NextLayoutAsync();
 
         SetBoardZoom(1);
         _settings.LayoutMode = "Split"; _settings.ToolbarPosition = "BottomCenter";

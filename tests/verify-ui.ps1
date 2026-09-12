@@ -24,7 +24,8 @@ try {
     }
     $verificationArgument = if ($MediaPerformanceOnly) { '--verify-media-performance' } elseif ($BackgroundMediaOnly) { '--verify-background-media' } elseif ($FullScreenHintOnly) { '--verify-fullscreen-hint' } elseif ($AutoLayoutOnly) { '--verify-ui --auto-layout-only' } elseif ($FontAuditOnly) { '--verify-font-audit' } elseif ($AutofillKeysOnly) { '--verify-autofill-keys' } elseif ($AutofillImeOnly) { '--verify-autofill-ime' } else { '--verify-ui' }
     $process = Start-Process -FilePath (Join-Path $testRoot 'Pancake.exe') -ArgumentList $verificationArgument -WorkingDirectory $testRoot -WindowStyle Hidden -PassThru
-    if (-not $process.WaitForExit(60000)) { throw '隔离 UI 验证在 60 秒内未结束。' }
+    # 真实窗口检查数量随功能增加，慢机器上会接近一分钟；上限只用于兜住卡死，留足正常通过的时间。
+    if (-not $process.WaitForExit(180000)) { throw '隔离 UI 验证在 180 秒内未结束。' }
     $resultName = if ($MediaPerformanceOnly) { 'performance-result.txt' } elseif ($BackgroundMediaOnly) { 'media-result.txt' } elseif ($FullScreenHintOnly) { 'fullscreen-result.txt' } elseif ($FontAuditOnly) { 'font-audit-result.txt' } elseif ($AutofillKeysOnly) { 'autofill-key-result.txt' } elseif ($AutofillImeOnly) { 'ime-result.txt' } else { 'result.txt' }
     $successMarker = if ($MediaPerformanceOnly) { 'MEDIA_PERFORMANCE_VERIFICATION_OK' } elseif ($BackgroundMediaOnly) { 'BACKGROUND_MEDIA_VERIFICATION_OK' } elseif ($FullScreenHintOnly) { 'FULLSCREEN_HINT_VERIFICATION_OK' } elseif ($FontAuditOnly) { 'FONT_AUDIT_OK' } elseif ($AutofillKeysOnly) { 'AUTOFILL_KEY_VERIFICATION_OK' } elseif ($AutofillImeOnly) { 'AUTOFILL_IME_DIAGNOSTIC_OK' } else { 'UI_VERIFICATION_OK' }
     $result = Join-Path $testRoot "verification/$resultName"

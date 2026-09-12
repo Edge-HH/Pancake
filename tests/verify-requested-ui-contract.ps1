@@ -147,12 +147,12 @@ if ($islands -notmatch 'private Slider\? _zoomSlider' -or
     $islands -notmatch 'bool zoomBefore = false;') {
     $failures.Add('缩放悬浮岛缺少滑条、没有限制在编辑模式，或没有固定在控制窗右侧（竖版控制窗时下方）。')
 }
-# 竖版控制窗：编辑工具在上、缩放在下；放不下时挪动控制窗让位，而不是把浮岛压成要翻页的一条。
-# 让位逻辑用 smallestTop / largestTop 表示可用区间，取不下时贴到 largestTop，再按差值挪动控制窗。
+# 竖版控制窗：编辑工具在上、缩放在下；放不下时先挪动控制窗让位，富文本工具条仍放不下就整块退回左右排布。
+# 让位逻辑用 smallestTop / largestTop 表示可用区间，富文本工具条放不下时返回 false（退回左右），否则按居中位置挪动控制窗。
 if ($islands -notmatch 'ApplyIslandControlShift' -or
     $islands -notmatch 'double smallestTop' -or
     $islands -notmatch 'double largestTop' -or
-    $islands -notmatch '\?\s*Math\.Clamp\(centered, smallestTop, largestTop\)\s*:\s*largestTop' -or
+    $islands -notmatch 'smallestTop > largestTop && ReferenceEquals\(EditIsland, RichTextIsland\)\) return false' -or
     $islands -notmatch 'ApplyIslandControlShift\(top - centered\)' -or
     $islands -notmatch 'ApplyFontPickerAppearance' -or
     $islands -notmatch 'CreateFontPickerButton' -or

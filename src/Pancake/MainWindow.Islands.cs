@@ -229,9 +229,10 @@ public sealed partial class MainWindow
     }
 
     /// <summary>
-    /// 竖版控制窗上下要完整放下两块浮岛：编辑工具在上、缩放控件在下。
+    /// 竖版控制窗上下要放下两块浮岛：编辑工具在上、缩放控件在下。
     /// 放得下时把控制窗上下挪到刚好放得下的位置，浮岛因此保持自然尺寸，
-    /// 不会出现只能在岛内翻页的滚动条；连同挪动都放不下才退回左右排布。
+    /// 不会出现只能在岛内翻页的滚动条；富文本工具条即使挪动也放不下时退回左右排布，
+    /// 画笔栏本身比窗口还高，保持上方排布并在岛内滚动。
     /// </summary>
     private bool FitVerticalBand()
     {
@@ -249,10 +250,12 @@ public sealed partial class MainWindow
         double largestTop = windowHeight - insetY - below - toolbarHeight;
         if (largestTop < insetY) return false;
         double smallestTop = insetY + above;
+        // 富文本工具条必须完整显示，不能被压成岛内翻页的一条：上下都放不下就整块退回左右排布。
+        // 画笔栏本身比窗口还高，允许在岛内滚动，因此仍然保持上方排布（见画笔栏的验收约定）。
+        if (smallestTop > largestTop && ReferenceEquals(EditIsland, RichTextIsland)) return false;
         // 用户设置的是控制窗居中；这里只在需要让位时上下挪动最小距离。
         double centered = (windowHeight - toolbarHeight) / 2;
-        // 上下都放得下就挪到刚好放下的位置；上方实在不够时贴到最低位置，
-        // 把空间都留给编辑工具（它在岛内滚动），缩放控件仍然完整显示在下方。
+        // 上下都放得下就挪到刚好放下的位置；放不下时贴到最低位置，把上方空间都留给编辑工具。
         double top = smallestTop <= largestTop ? Math.Clamp(centered, smallestTop, largestTop) : largestTop;
         ApplyIslandControlShift(top - centered);
         return true;
