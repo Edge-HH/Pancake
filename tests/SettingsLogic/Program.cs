@@ -177,8 +177,10 @@ try
         string previous = playback.Current;
         Check(playback.Advance(true) && playback.Current != previous, "随机播放不连续重复同一项");
     }
-    playback.Configure(new() { PlaylistEnabled = true, Playlist = [ownedA, b, video] });
-    Check(playback.Advance(false, true) && playback.Current == b && playback.Advance(false, true) && playback.Current == video && !playback.Advance(false, true), "全部失败后停止换曲避免死循环");
+    // 重新配置会保留当前项（见上面的外观变化断言），因此这里用独立实例确保从首项开始，断言不受随机播放的落点影响。
+    BackgroundPlaylist exhausted = new();
+    Check(exhausted.Configure(new() { PlaylistEnabled = true, Playlist = [ownedA, b, video] }) && exhausted.Current == ownedA, "新建播放列表从首项开始");
+    Check(exhausted.Advance(false, true) && exhausted.Current == b && exhausted.Advance(false, true) && exhausted.Current == video && !exhausted.Advance(false, true), "全部失败后停止换曲避免死循环");
     BackgroundSettings roundTrip = JsonSerializer.Deserialize<BackgroundSettings>(JsonSerializer.Serialize(playlistSettings))!;
     Check(roundTrip.Playlist.SequenceEqual(playlistSettings.Playlist) && roundTrip.SwitchOnTimer && !roundTrip.SwitchOnMediaEnded && roundTrip.SwitchIntervalSeconds == 12, "队列顺序与切换开关往返保存");
     playback.Configure(new() { ImagePath = b });
