@@ -54,7 +54,8 @@ if ($windowXaml -match 'x:Name="BoardScrollViewer"' -or $windowXaml -notmatch 'x
     $failures.Add('右侧磁贴板仍由 ScrollViewer 承载，画布仍可能被拖动或在大视口中居中留白。')
 }
 
-if ($windowCode -notmatch 'GridSize\s*=>\s*Math.Clamp\(_settings.GridSize' -or $windowCode -notmatch 'IsGridSnappingEnabled') {
+# 网格尺寸属性由设置值夹取而来；取整等格式调整不应影响这条约定，只校验夹取本身。
+if ($windowCode -notmatch 'GridSize\s*=>\s*Math\.Clamp\([^;]*_settings\.GridSize' -or $windowCode -notmatch 'IsGridSnappingEnabled') {
     $failures.Add('粗网格和可关闭的吸附状态尚未实现。')
 }
 
@@ -137,13 +138,15 @@ if ($autofillPopupCode -notmatch 'public void AttachTo\(Panel host\)' -or
     $failures.Add('补全候选浮层没有挂在窗口根面板上，会被磁贴裁剪或缩放影响。')
 }
 
+# 输入法覆盖后的补写由 ApplyGuard 承担：组合结束（CompositionEnded）与失焦两条路径都会核对并被覆盖的内容补写回候选。
 if ($windowCode -notmatch 'RootShell_PreviewKeyDown' -or
     $windowCode -notmatch 'UIElement\.PreviewKeyDownEvent' -or
     $windowCode -notmatch '_autofillPopup\.HandleKey' -or
     $autofillPopupCode -notmatch 'VirtualKey\.Up' -or
     $autofillPopupCode -notmatch 'VirtualKey\.Tab' -or
     $autofillPopupCode -notmatch 'VirtualKey\.Escape' -or
-    $autofillInputCode -notmatch 'WriteWatch') {
+    $autofillInputCode -notmatch 'ApplyGuard' -or
+    $autofillInputCode -notmatch 'CompositionEnded\(') {
     $failures.Add('补全候选缺少窗口级上下键切换、Tab 采纳、Esc 关闭或输入法覆盖后的补写处理。')
 }
 
