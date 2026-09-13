@@ -74,7 +74,7 @@ jobs:
 
       - name: 📷 保留窗口测试证据
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: Pancake-ui-evidence
           path: .\artifacts\ui-evidence
@@ -113,7 +113,7 @@ jobs:
           .\tests\verify-release-startup.ps1 -PublishDirectory .\artifacts\package-check
 
       - name: 📤 上传便携版产物
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: Pancake-win-x64-${{ steps.version.outputs.version }}
           path: .\artifacts\Pancake-win-x64-${{ steps.version.outputs.version }}.zip
