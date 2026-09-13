@@ -20,10 +20,10 @@ jobs:
 
     steps:
       - name: 📥 获取项目代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: 🛠️ 配置 .NET 8
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
@@ -74,7 +74,7 @@ jobs:
 
       - name: 📷 保留窗口测试证据
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Pancake-ui-evidence
           path: .\artifacts\ui-evidence
@@ -113,7 +113,7 @@ jobs:
           .\tests\verify-release-startup.ps1 -PublishDirectory .\artifacts\package-check
 
       - name: 📤 上传便携版产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Pancake-win-x64-${{ steps.version.outputs.version }}
           path: .\artifacts\Pancake-win-x64-${{ steps.version.outputs.version }}.zip
