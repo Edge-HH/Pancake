@@ -104,7 +104,6 @@ public sealed partial class MainWindow
             BoardWorkspace.IsVisible = Settings.LayoutMode != "Clock";
             ClockPanel.BorderThickness = new Thickness(0);
             this.FindControl<TextBlock>("MainTimeText")!.FontSize = compact ? 72 : 112;
-            this.FindControl<TextBlock>("BoardModeHint")!.IsVisible = BoardWorkspace.IsVisible;
             if (split)
             {
                 double ratio = Math.Clamp(Settings.SplitRatio, .05, .95);
@@ -504,8 +503,8 @@ public sealed partial class MainWindow
 
     private void UpdateSubjectCount()
     {
-        this.FindControl<TextBlock>("SubjectCountText")!.Text = _viewModel.SubjectCountText;
+        // 看板标题栏已按 WinUI 原版移除，科目数量仍显示在顶部项目选择按钮中。
+        this.FindControl<TextBlock>("ProjectSubjectCountText")!.Text = _viewModel.SubjectCountText;
     }
-
     private double SnapToGrid(double value) => Math.Round(value / GridSize) * GridSize;
 }

@@ -155,15 +155,9 @@ public sealed partial class MainWindow
         card.Children.Add(CreateRow("毛玻璃", "只作用于背景媒体，颜色层保持清晰。", glass));
         card.Children.Add(CreateRow("模糊程度", "毛玻璃的模糊半径（0–100）。", blur));
         card.Children.Add(CreatePlaylistEditor(style, apply, allowVideo));
-        return new Border
-        {
-            Padding = new Thickness(24),
-            CornerRadius = new CornerRadius(12),
-            Background = new SolidColorBrush(BoardTheme.SurfaceColor.ToColor()),
-            BorderBrush = new SolidColorBrush(BoardTheme.LineColor.ToColor()),
-            BorderThickness = new Thickness(1),
-            Child = card
-        };
+        // 原版背景页是连续内容流，只有预览自身保留边框；不要再给整组设置套深色卡片。
+        card.HorizontalAlignment = HorizontalAlignment.Stretch;
+        return card;
     }
 
     /// <summary>选择背景媒体文件；返回本机路径，取消时返回 null。</summary>

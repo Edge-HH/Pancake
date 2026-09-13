@@ -6,6 +6,10 @@
   <Application.Styles>
     <!-- FluentAvaloniaTheme 提供与 WinUI 对应的主题、强调色与控件样式。 -->
     <fa:FluentAvaloniaTheme PreferSystemTheme="False" />
+    <!-- 与 WinUI 原版一致：普通文字统一使用随包字体。 -->
+    <Style Selector="TextBlock">
+      <Setter Property="FontFamily" Value="avares://Pancake.Ui/Assets/Fonts/HarmonyOS_Sans_SC_Regular.ttf#HarmonyOS Sans SC" />
+    </Style>
   </Application.Styles>
 
   <Application.Resources>

@@ -8,7 +8,10 @@
         Height="900"
         MinWidth="720"
         MinHeight="480"
-        Background="{DynamicResource BoardBackgroundBrush}">
+        Background="{DynamicResource BoardBackgroundBrush}"
+        ExtendClientAreaToDecorationsHint="True"
+        ExtendClientAreaChromeHints="PreferSystemChrome"
+        ExtendClientAreaTitleBarHeightHint="68">
 
   <!-- 主题色画刷由核心层颜色值转换而来，磁贴、组件栏与设置页共用同一个转换器。 -->
   <Window.Resources>
@@ -16,10 +19,10 @@
   </Window.Resources>
 
   <Grid x:Name="RootShell" RowDefinitions="68,*" KeyDown="RootShell_KeyDown" SizeChanged="RootShell_SizeChanged">
-    <!-- 顶部栏：品牌、项目入口与日期；项目入口在项目功能接入后显示。 -->
+    <!-- 与 WinUI 原版一致：顶部栏同时作为 Windows 标题栏，品牌与项目入口保留原位。 -->
     <Border x:Name="TopBar" Grid.Row="0" Padding="28,0" Background="{DynamicResource BoardSurfaceBrush}"
             BorderBrush="{DynamicResource BoardLineBrush}" BorderThickness="0,0,0,1">
-      <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="16">
+      <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="16">
         <Grid x:Name="BrandRegion" Background="Transparent">
           <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center" IsHitTestVisible="False">
             <Border Width="38" Height="38" Background="{DynamicResource BoardSurfaceBrush}" CornerRadius="8">
@@ -42,12 +45,14 @@
               <TextBlock x:Name="ProjectNameText" Text="选择项目" VerticalAlignment="Center" />
               <!-- 名称与板上计数区分开，避免与作业区标题栏的计数重名。 -->
               <TextBlock x:Name="ProjectSubjectCountText" Foreground="{DynamicResource BoardTextMutedBrush}" VerticalAlignment="Center" />
+              <TextBlock Text="&#xE448;" FontFamily="{StaticResource BoardIconFontFamily}" FontSize="12" VerticalAlignment="Center" />
             </StackPanel>
           </Button>
           <Button x:Name="FileMenuButton" AutomationProperties.Name="文件">
             <StackPanel Orientation="Horizontal" Spacing="7">
               <controls:FluentIcon Symbol="Document" VerticalAlignment="Center" />
               <TextBlock Text="文件" VerticalAlignment="Center" />
+              <TextBlock Text="&#xE448;" FontFamily="{StaticResource BoardIconFontFamily}" FontSize="12" VerticalAlignment="Center" />
             </StackPanel>
             <Button.Flyout>
               <MenuFlyout>
@@ -63,9 +68,7 @@
           </Button>
         </StackPanel>
 
-        <Grid Grid.Column="2" Background="Transparent" />
-        <TextBlock x:Name="TopDateText" Grid.Column="3" VerticalAlignment="Center" FontSize="13"
-                   Foreground="{DynamicResource BoardTextSecondaryBrush}" />
+        <Grid Grid.Column="2" Margin="0,0,140,0" Background="Transparent" />
       </Grid>
     </Border>
 
@@ -116,21 +119,7 @@
 
         <Grid x:Name="BoardWorkspace" Grid.Row="0" Grid.Column="1" Background="{DynamicResource BoardSurfaceBrush}">
           <controls:BackgroundVisual x:Name="BoardBackgroundVisual" />
-          <Grid RowDefinitions="64,*">
-            <Border Padding="30,0,24,0" Background="Transparent">
-              <Grid ColumnDefinitions="*,Auto">
-                <StackPanel VerticalAlignment="Center" Spacing="2">
-                  <TextBlock Text="今日作业" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource BoardTextBrush}" />
-                  <TextBlock x:Name="BoardModeHint" FontSize="12" Foreground="{DynamicResource BoardTextMutedBrush}"
-                             Text="所有文字和笔迹都完整显示在磁贴上" />
-                </StackPanel>
-                <Border Grid.Column="1" Padding="11,6" VerticalAlignment="Center" CornerRadius="8"
-                        Background="{DynamicResource BoardBackgroundBrush}">
-                  <TextBlock x:Name="SubjectCountText" FontSize="12" Foreground="{DynamicResource BoardTextSecondaryBrush}" />
-                </Border>
-              </Grid>
-            </Border>
-            <ScrollViewer x:Name="BoardScroller" Grid.Row="1" HorizontalScrollBarVisibility="Disabled"
+            <ScrollViewer x:Name="BoardScroller" HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Disabled" HorizontalContentAlignment="Left" VerticalContentAlignment="Top">
               <Grid x:Name="BoardViewport" Background="Transparent" SizeChanged="BoardViewport_SizeChanged">
                 <Grid x:Name="BoardSurface" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent">
@@ -140,7 +129,6 @@
                 </Grid>
               </Grid>
             </ScrollViewer>
-          </Grid>
         </Grid>
       </Grid>
       <Canvas x:Name="FreeWidgetsCanvas" />
@@ -178,19 +166,19 @@
     </Grid>
 
     <!-- 设置页：左侧分类导航 + 右侧可滚动内容，分类随迁移进度逐项接入。 -->
-    <Grid x:Name="SettingsRoot" Grid.Row="1" IsVisible="False" ColumnDefinitions="240,*,Auto"
+    <Grid x:Name="SettingsRoot" Grid.Row="1" IsVisible="False" ColumnDefinitions="260,*,Auto"
           Background="{DynamicResource BoardBackgroundBrush}">
-      <Border Background="{DynamicResource BoardSurfaceBrush}" BorderBrush="{DynamicResource BoardLineBrush}"
+      <Border Background="{DynamicResource SettingsPaneBrush}" BorderBrush="{DynamicResource BoardLineBrush}"
               BorderThickness="0,0,1,0">
         <ScrollViewer VerticalScrollBarVisibility="Auto">
-          <StackPanel x:Name="SettingsNavigation" Margin="12,20,12,20" Spacing="4" />
+          <StackPanel x:Name="SettingsNavigation" Margin="8,12,8,12" Spacing="4" />
         </ScrollViewer>
       </Border>
-      <ScrollViewer x:Name="SettingsContentScrollViewer" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
-        <StackPanel Margin="32,28,32,100" Spacing="22">
+      <ScrollViewer x:Name="SettingsContentScrollViewer" Grid.Column="1" Background="{DynamicResource SettingsContentBrush}" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
+        <StackPanel Margin="32,28,32,100" Spacing="28">
           <StackPanel Spacing="8">
-            <TextBlock x:Name="SettingsPageTitle" FontSize="32" Foreground="{DynamicResource BoardTextBrush}" />
-            <TextBlock x:Name="SettingsPageDescription" FontSize="14" TextWrapping="Wrap"
+            <TextBlock x:Name="SettingsPageTitle" FontSize="36" Foreground="{DynamicResource BoardTextBrush}" />
+            <TextBlock x:Name="SettingsPageDescription" FontSize="15" TextWrapping="Wrap"
                        Foreground="{DynamicResource BoardTextSecondaryBrush}" />
           </StackPanel>
           <StackPanel x:Name="SettingsContent" Spacing="22" />

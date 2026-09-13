@@ -54,30 +54,134 @@ public sealed partial class MainWindow
         UpdateProjectCommands();
     }
 
+    // WinUI 的 NavigationView 默认展开“外观”，其余分组按用户操作保持展开状态。
+    // 重建导航时不丢失这个状态，切换设置项不会意外折叠菜单。
+    private readonly Dictionary<string, bool> _expandedSettingsGroups = new()
+    {
+        ["Appearance"] = true,
+        ["Components"] = false,
+        ["Autofill"] = false
+    };
+
     private void BuildSettingsNavigation()
     {
         SettingsNavigation.Children.Clear();
-        foreach (SettingsSection section in SettingsSections)
-        {
-            Button button = new()
-            {
-                Content = section.Title,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                Padding = new Thickness(14, 10),
-                Background = new SolidColorBrush(
-                    section.Tag == _settingsSection ? BoardTheme.LineColor.ToColor() : BoardColor.Transparent.ToColor())
-            };
-            button.Click += (_, _) => ShowSettingsSection(section.Tag);
-            SettingsNavigation.Children.Add(button);
-        }
+        SettingsNavigation.Children.Add(CreateSettingsNavItem("Layout", "布局", FluentGlyphs.Layout));
+        AddSettingsNavGroup("Appearance", "外观", FluentGlyphs.Color,
+        [
+            ("AppearanceTile", "磁贴", FluentGlyphs.Board),
+            ("AppearanceBackground", "背景板", FluentGlyphs.Image),
+            ("AppearanceTheme", "主题", FluentGlyphs.Color),
+            ("AppearanceGrid", "网格", FluentGlyphs.Grid),
+            ("AppearanceToolbar", "控制窗", FluentGlyphs.Settings)
+        ]);
+        AddSettingsNavGroup("Components", "组件", FluentGlyphs.Components,
+        [
+            ("ComponentsWeather", "天气", FluentGlyphs.Weather),
+            ("ComponentsNoise", "噪音检测", FluentGlyphs.Microphone)
+        ]);
+        AddSettingsNavGroup("Autofill", "自动填充", FluentGlyphs.TextGrammarWand,
+        [
+            ("AutofillSubject", "学科补全", FluentGlyphs.Board),
+            ("AutofillHomework", "作业补全", FluentGlyphs.Document)
+        ]);
+        SettingsNavigation.Children.Add(CreateSettingsNavItem("About", "关于", FluentGlyphs.Info));
     }
 
+    private void AddSettingsNavGroup(string key, string title, string glyph,
+        (string Tag, string Title, string Glyph)[] children)
+    {
+        bool expanded = _expandedSettingsGroups[key];
+        Button header = CreateSettingsNavButton(title, glyph, selected: false, indent: 0);
+        header.Content = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            Children =
+            {
+                CreateSettingsNavLabel(title, glyph),
+                new TextBlock
+                {
+                    Text = expanded ? "\uE450" : "\uE448",
+                    FontFamily = FontService.IconFamily,
+                    FontSize = 14,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Foreground = new SolidColorBrush(Color.Parse(BoardTheme.IsLight ? "#555568" : "#A4A4B4"))
+                }
+            }
+        };
+        Grid.SetColumn((Control)((Grid)header.Content).Children[1], 1);
+        header.Click += (_, _) =>
+        {
+            _expandedSettingsGroups[key] = !_expandedSettingsGroups[key];
+            BuildSettingsNavigation();
+        };
+        SettingsNavigation.Children.Add(header);
+
+        if (!expanded) return;
+        foreach ((string tag, string childTitle, string childGlyph) in children)
+            SettingsNavigation.Children.Add(CreateSettingsNavItem(tag, childTitle, childGlyph, indent: 24));
+    }
+
+    private Button CreateSettingsNavItem(string tag, string title, string glyph, int indent = 0)
+    {
+        bool selected = tag == _settingsSection;
+        Button button = CreateSettingsNavButton(title, glyph, selected, indent);
+        Grid item = new() { ColumnDefinitions = new ColumnDefinitions("4,*"), ColumnSpacing = 10 };
+        item.Children.Add(new Border
+        {
+            Width = 3, Height = 18, CornerRadius = new CornerRadius(2),
+            Background = new SolidColorBrush(Color.Parse(BoardTheme.IsLight ? "#5457DB" : "#42E6D5")),
+            Opacity = selected ? 1 : 0,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        StackPanel label = CreateSettingsNavLabel(title, glyph);
+        Grid.SetColumn(label, 1);
+        item.Children.Add(label);
+        button.Content = item;
+        button.Click += (_, _) => ShowSettingsSection(tag);
+        return button;
+    }
+
+    private static Button CreateSettingsNavButton(string title, string glyph, bool selected, int indent)
+    {
+        Color background = selected
+            ? Color.Parse(BoardTheme.IsLight ? "#E6E6ED" : "#2A2A35")
+            : Colors.Transparent;
+        return new Button
+        {
+            Content = CreateSettingsNavLabel(title, glyph),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            MinHeight = 40,
+            Margin = new Thickness(indent, 0, 0, 0),
+            Padding = new Thickness(12, 7),
+            CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(0),
+            Background = new SolidColorBrush(background),
+            Foreground = new SolidColorBrush(Color.Parse(BoardTheme.IsLight ? "#000000" : "#F0F0F5"))
+        };
+    }
+
+    private static StackPanel CreateSettingsNavLabel(string title, string glyph)
+    {
+        return new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 14,
+            Children =
+            {
+                new TextBlock { Text = glyph, FontFamily = FontService.IconFamily, FontSize = 20,
+                    VerticalAlignment = VerticalAlignment.Center },
+                new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center }
+            }
+        };
+    }
     private void ShowSettingsSection(string tag)
     {
         _settingsSection = tag;
         SettingsSection section = SettingsSections.First(item => item.Tag == tag);
-        this.FindControl<TextBlock>("SettingsPageTitle")!.Text = section.Title;
+        this.FindControl<TextBlock>("SettingsPageTitle")!.Text = section.Title.Split(" · ")[^1];
         this.FindControl<TextBlock>("SettingsPageDescription")!.Text = section.Description;
         SettingsContent.Children.Clear();
         _refreshSettingAvailability.Clear();
@@ -660,22 +764,27 @@ public sealed partial class MainWindow
     }
 
     /// <summary>设置卡片：统一的标题样式与内边距。</summary>
+    /// <summary>
+    /// WinUI 原版设置页使用连续的 NavigationView 内容流，而不是卡片套卡片。
+    /// 保留这个工厂方法是为了让各设置页共用一致的纵向间距，同时避免改动已有交互逻辑。
+    /// </summary>
     private static Control CreateCard(string title, params Control[] content)
     {
         StackPanel stack = new() { Spacing = 18 };
-        stack.Children.Add(new TextBlock { Text = title, FontSize = 22, FontWeight = FontWeight.SemiBold });
-        foreach (Control item in content) stack.Children.Add(item);
-        return new Border
+        stack.Children.Add(new TextBlock
         {
-            Padding = new Thickness(24),
-            CornerRadius = new CornerRadius(12),
-            Background = new SolidColorBrush(BoardTheme.SurfaceColor.ToColor()),
-            BorderBrush = new SolidColorBrush(BoardTheme.LineColor.ToColor()),
-            BorderThickness = new Thickness(1),
-            Child = stack
-        };
+            Text = title,
+            FontSize = 22,
+            FontWeight = FontWeight.SemiBold,
+            Foreground = new SolidColorBrush(BoardTheme.TextColor.ToColor())
+        });
+        foreach (Control item in content)
+        {
+            item.HorizontalAlignment = HorizontalAlignment.Stretch;
+            stack.Children.Add(item);
+        }
+        return stack;
     }
-
     /// <summary>颜色值转 #RRGGBB；取色器与预设色共用同一种保存格式。</summary>
     private static string ToHex(Color color) => $"#{color.R:X2}{color.G:X2}{color.B:X2}";
 

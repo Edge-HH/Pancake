@@ -123,6 +123,7 @@ public sealed partial class MainWindow : Window
         _isLoaded = true;
         ApplyTheme();
         BuildTiles();
+        UpdateSubjectCount();
         BuildPenToolbar();
         BuildProjectCommands();
         InitializeBoardZoom();
@@ -578,6 +579,7 @@ public sealed partial class MainWindow : Window
                 ApplyDisplayLayout();
                 ResetArrangeSamples();
                 BuildTiles();
+                UpdateSubjectCount();
                 await Task.Delay(400);
 
                 double viewportWidth = Math.Max(BoardViewport.Bounds.Width, 600);
@@ -613,6 +615,7 @@ public sealed partial class MainWindow : Window
                 }
 
                 BuildTiles();
+                UpdateSubjectCount();
                 await Task.Delay(300);
                 ArrangeTiles();
                 await Task.Delay(200);
@@ -625,6 +628,7 @@ public sealed partial class MainWindow : Window
                 Settings.AutoLayoutResize = true;
                 ResetArrangeSamples();
                 BuildTiles();
+                UpdateSubjectCount();
                 await Task.Delay(300);
                 ArrangeTiles();
                 await Task.Delay(200);
@@ -635,6 +639,7 @@ public sealed partial class MainWindow : Window
                 await Task.Delay(600);
                 ResetArrangeSamples();
                 BuildTiles();
+                UpdateSubjectCount();
                 await Task.Delay(300);
                 ArrangeTiles();
                 await Task.Delay(200);
@@ -1215,8 +1220,8 @@ public sealed partial class MainWindow : Window
         this.FindControl<TextBlock>("SecondsText")!.Text = now.ToString("ss");
         this.FindControl<TextBlock>("ClockDateText")!.Text =
             $"{now:yyyy 年 M 月 d 日} {GetChineseWeekday(now.DayOfWeek)}";
-        this.FindControl<TextBlock>("TopDateText")!.Text = now.ToString("yyyy-MM-dd");
         this.FindControl<TextBlock>("ProjectNameText")!.Text = _viewModel.ProjectName;
+        UpdateSubjectCount();
     }
 
     private static string GetChineseWeekday(DayOfWeek day) => day switch
@@ -1435,8 +1440,8 @@ public sealed partial class MainWindow : Window
 
         // 附件控件需要按新数据重建，重建后仍保持当前编辑态。
         BuildTiles();
-        UpdateBoardBounds();
         UpdateSubjectCount();
+        UpdateBoardBounds();
         ScheduleSave();
     }
 
@@ -1601,6 +1606,7 @@ public sealed partial class MainWindow : Window
         _isEditing = false;
         ApplyEditingState();
         BuildTiles();
+        UpdateSubjectCount();
         SaveNow();
     }
 
@@ -1622,8 +1628,8 @@ public sealed partial class MainWindow : Window
     {
         SubjectBoard subject = _viewModel.AddSubject("新科目");
         AddTile(subject);
-        UpdateBoardBounds();
         UpdateSubjectCount();
+        UpdateBoardBounds();
         ScheduleSave();
     }
 

@@ -1,36 +1,57 @@
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <!--
-    与控制窗、磁贴、背景层共用的颜色令牌。
+    与控制窗、磁贴、背景层共用的颜色令牌；色值与 WinUI 原版 ThemeResources.xaml 完全一致。
     深色与浅色各定义一份，界面统一通过 DynamicResource 引用，切换主题时无需重建控件。
   -->
   <ResourceDictionary.ThemeDictionaries>
     <ResourceDictionary x:Key="Dark">
+      <!-- 明确导航选中背景，避免系统色回退时白色底与白色标题重合。 -->
+      <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected" Color="#2A2A35" />
+      <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Color="#353543" />
+      <SolidColorBrush x:Key="NavigationViewItemForegroundSelected" Color="#F0F0F5" />
       <SolidColorBrush x:Key="BoardBackgroundBrush" Color="#0E0E12" />
       <SolidColorBrush x:Key="BoardSurfaceBrush" Color="#16161E" />
       <SolidColorBrush x:Key="BoardSurfaceSecondaryBrush" Color="#1E1E28" />
+      <SolidColorBrush x:Key="BoardSurfaceElevatedBrush" Color="#252532" />
       <SolidColorBrush x:Key="BoardTextBrush" Color="#F0F0F5" />
+      <SolidColorBrush x:Key="GitHubIconBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="BoardTextSecondaryBrush" Color="#A4A4B4" />
       <SolidColorBrush x:Key="BoardTextMutedBrush" Color="#737386" />
       <SolidColorBrush x:Key="BoardLineBrush" Color="#2A2A35" />
       <SolidColorBrush x:Key="BoardBrandBrush" Color="#6D70F6" />
+      <SolidColorBrush x:Key="BoardBrandSoftBrush" Color="#2A2B58" />
       <SolidColorBrush x:Key="BoardSuccessBrush" Color="#4ADE80" />
       <SolidColorBrush x:Key="BoardWarningBrush" Color="#FBBF24" />
       <SolidColorBrush x:Key="BoardDangerBrush" Color="#F87171" />
+      <SolidColorBrush x:Key="BoardPaperBrush" Color="#FFFDF7" />
+      <!-- 设置页的两层 Mica 底色，和 WinUI NavigationView 的导航区/内容区分层一致。 -->
+      <SolidColorBrush x:Key="SettingsPaneBrush" Color="#1D262B" />
+      <SolidColorBrush x:Key="SettingsContentBrush" Color="#252B2F" />
+      <!-- 网格线颜色是移植版新增的令牌，WinUI 原版网格线由主题色推导。 -->
       <SolidColorBrush x:Key="BoardGridLineBrush" Color="#6956565C" />
     </ResourceDictionary>
     <ResourceDictionary x:Key="Light">
-      <SolidColorBrush x:Key="BoardBackgroundBrush" Color="#F5F5FA" />
+      <SolidColorBrush x:Key="NavigationViewItemBackgroundSelected" Color="#E6E6ED" />
+      <SolidColorBrush x:Key="NavigationViewItemBackgroundSelectedPointerOver" Color="#DADAE3" />
+      <SolidColorBrush x:Key="NavigationViewItemForegroundSelected" Color="#000000" />
+      <SolidColorBrush x:Key="BoardBackgroundBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="BoardSurfaceBrush" Color="#FFFFFF" />
-      <SolidColorBrush x:Key="BoardSurfaceSecondaryBrush" Color="#ECECF4" />
-      <SolidColorBrush x:Key="BoardTextBrush" Color="#1E1E28" />
+      <SolidColorBrush x:Key="BoardSurfaceSecondaryBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="BoardSurfaceElevatedBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="BoardTextBrush" Color="#000000" />
+      <SolidColorBrush x:Key="GitHubIconBrush" Color="#000000" />
       <SolidColorBrush x:Key="BoardTextSecondaryBrush" Color="#555568" />
       <SolidColorBrush x:Key="BoardTextMutedBrush" Color="#747486" />
       <SolidColorBrush x:Key="BoardLineBrush" Color="#D9D9E6" />
       <SolidColorBrush x:Key="BoardBrandBrush" Color="#5457DB" />
+      <SolidColorBrush x:Key="BoardBrandSoftBrush" Color="#FFFFFF" />
       <SolidColorBrush x:Key="BoardSuccessBrush" Color="#15803D" />
       <SolidColorBrush x:Key="BoardWarningBrush" Color="#B45309" />
       <SolidColorBrush x:Key="BoardDangerBrush" Color="#DC2626" />
+      <SolidColorBrush x:Key="BoardPaperBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="SettingsPaneBrush" Color="#F2F5F8" />
+      <SolidColorBrush x:Key="SettingsContentBrush" Color="#FAFBFD" />
       <SolidColorBrush x:Key="BoardGridLineBrush" Color="#6956565C" />
     </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>
@@ -39,4 +60,11 @@
   <x:Double x:Key="BoardControlRadius">14</x:Double>
   <CornerRadius x:Key="BoardTileCornerRadius">14</CornerRadius>
   <CornerRadius x:Key="BoardControlCornerRadius">14</CornerRadius>
+
+  <!-- 字体随程序分发，避免依赖系统版本（与 WinUI 原版同一份字体文件）。 -->
+  <FontFamily x:Key="BoardIconFontFamily">avares://Pancake.Ui/Assets/Fonts/FluentSystemIcons-Resizable.ttf#FluentSystemIcons-Resizable</FontFamily>
+  <FontFamily x:Key="BoardTextFontFamily">avares://Pancake.Ui/Assets/Fonts/HarmonyOS_Sans_SC_Regular.ttf#HarmonyOS Sans SC</FontFamily>
+  <!-- FluentAvalonia 的控件模板通过 DynamicResource 读取这个键，覆盖后按钮、输入框等全部换成随包字体。 -->
+  <FontFamily x:Key="ContentControlThemeFontFamily">avares://Pancake.Ui/Assets/Fonts/HarmonyOS_Sans_SC_Regular.ttf#HarmonyOS Sans SC</FontFamily>
+
 </ResourceDictionary>

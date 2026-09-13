@@ -163,10 +163,10 @@ public sealed partial class MainWindow
     {
         _isEditing = false;
         BuildTiles();
+        UpdateSubjectCount();
         ClockInkLayer.Attach(_viewModel.ClockInk);
         ApplyDisplayLayout();
         UpdateBoardBounds();
-        UpdateSubjectCount();
         ApplyEditingState();
         UpdateProjectCommands();
         if (this.FindControl<ToggleButton>("GlobalPenButton") is { } pen) pen.IsChecked = false;
