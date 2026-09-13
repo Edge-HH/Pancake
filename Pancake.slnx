@@ -2,7 +2,24 @@
   <Configurations>
     <BuildType Name="Debug" />
     <BuildType Name="Release" />
-    <Platform Name="x64" />
+    <Platform Name="Any CPU" />
   </Configurations>
-  <Project Path="src/Pancake/Pancake.csproj" DefaultStartup="true" />
+  <!-- 可执行入口按当前操作系统选择平台工程，因此解决方案在任一平台上都能直接构建。 -->
+  <Project Path="src/Pancake.Desktop/Pancake.Desktop.csproj" DefaultStartup="true" />
+  <Project Path="src/Pancake/Pancake.csproj" />
+  <Project Path="src/Pancake.Core/Pancake.Core.csproj" />
+  <Project Path="src/Pancake.Platforms.Abstractions/Pancake.Platforms.Abstractions.csproj" />
+  <Project Path="src/platforms/Pancake.Platforms.Windows/Pancake.Platforms.Windows.csproj" />
+  <Project Path="src/platforms/Pancake.Platforms.Linux/Pancake.Platforms.Linux.csproj" />
+  <Project Path="src/platforms/Pancake.Platforms.MacOs/Pancake.Platforms.MacOs.csproj" />
+  <Project Path="src/Pancake.Platforms.Shared/Pancake.Platforms.Shared.csproj" />
+  <Project Path="tests/ProjectLogic/ProjectLogic.csproj" />
+  <Project Path="tests/SettingsLogic/SettingsLogic.csproj" />
+  <Project Path="tests/UpdateLogic/UpdateLogic.csproj" />
+  <Project Path="tests/RichTextLogic/RichTextLogic.csproj" />
+  <!--
+    Headless 界面测试（tests/UiHeadless）不放进解决方案：它需要 -p:EnableUiVerification=true
+    才会编译出界面层的自检入口，放进解决方案会让普通构建失败。
+    运行方式见 README 的「验证」一节，CI 也在每个平台单独调用它。
+  -->
 </Solution>

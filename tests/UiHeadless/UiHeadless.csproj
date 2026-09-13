@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Avalonia Headless 界面测试：不需要显示设备，三个平台的 CI 都能跑。
+    真正的窗口渲染关闭（UseHeadlessDrawing = false），布局、命中测试与输入路由仍走真实实现。
+    界面层的检查实现在 Pancake.Ui 里（EnableUiVerification=true 时编译），这里只做启动与结果输出。
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>UiHeadless</RootNamespace>
+    <AssemblyName>UiHeadless</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Pancake\Pancake.csproj" />
+    <ProjectReference Include="..\..\src\Pancake.Core\Pancake.Core.csproj" />
+    <ProjectReference Include="..\..\src\Pancake.Platforms.Abstractions\Pancake.Platforms.Abstractions.csproj" />
+    <PackageReference Include="Avalonia.Headless" Version="$(AvaloniaVersion)" />
+  </ItemGroup>
+
+  <Import Project="..\..\Global.props" />
+  <Import Project="..\..\AvaloniaShared.props" />
+</Project>

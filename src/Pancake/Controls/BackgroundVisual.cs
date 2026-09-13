@@ -1,183 +1,232 @@
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
+using Avalonia.Threading;
+using Pancake.Platforms.Abstraction;
 using Pancake.Services;
-using Pancake.ViewModels;
-using Windows.Media.Core;
-using Windows.Media.Playback;
 
 namespace Pancake.Controls;
 
-/// <summary>背景媒体、模糊与前景分层；重复应用外观不会重新开始当前视频或计时。</summary>
+/// <summary>
+/// 区域背景层：先铺颜色层，再放图片（或后续接入的视频、网页壁纸），最后按需模糊。
+/// 磁贴、时钟区、作业区和跨区背景共用这一个控件，样式全部来自 BackgroundSettings。
+/// </summary>
 public sealed class BackgroundVisual : Grid
 {
-    private readonly Grid _media = new();
-    private readonly Grid _overlays = new();
+    private readonly Border _colorLayer = new();
+    private readonly Image _image = new() { Stretch = Stretch.UniformToFill };
+    private readonly Panel _mediaHost = new();
+    private readonly VideoWallpaperView _video = new();
+    private Control? _web;
+    private string _webPath = string.Empty;
     private readonly BackgroundPlaylist _playlist = new();
-    private readonly DispatcherTimer _timer = new();
+    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(60) };
     private BackgroundSettings _style = new();
-    private string _path = "";
-    private MediaPlayer? _player;
-    private MediaPlayerElement? _video;
-    private Image? _image;
-    private WebWallpaperView? _web;
-    private bool _shared;
+    private string _loadedPath = string.Empty;
     private bool _failed;
-    private bool _inViewport = true;
-
-    // 局部外观预览可要求铺满；不改变项目保存的图片显示模式。
-    internal Stretch? MediaStretchOverride { get; init; }
 
     public BackgroundVisual()
     {
         IsHitTestVisible = false;
-        Children.Add(_media);
-        Children.Add(_overlays);
+        ClipToBounds = true;
+        _mediaHost.Children.Add(_image);
+        _mediaHost.Children.Add(_video);
+        Children.Add(_mediaHost);
+        Children.Add(_colorLayer);
         _timer.Tick += (_, _) => Advance();
-        Loaded += (_, _) => { ShowCurrent(); UpdateTimer(); };
-        Unloaded += (_, _) => { _timer.Stop(); ReleaseMedia(); };
-        EffectiveViewportChanged += (_, args) =>
+        // 视频播完时按设置切换下一项；循环播放时不会触发该事件。
+        _video.PlaybackEnded += () =>
         {
-            // 折叠设置页或滚出可见区域时暂停解码和定时器，避免隐藏预览继续消耗资源。
-            bool visible = args.EffectiveViewport.Width > 0 && args.EffectiveViewport.Height > 0;
-            if (_inViewport == visible) return;
-            _inViewport = visible;
-            if (visible) { ShowCurrent(); _player?.Play(); _web?.SetPaused(false); UpdateTimer(); }
-            else { _player?.Pause(); _web?.SetPaused(true); _timer.Stop(); }
+            if (_style.PlaylistEnabled && _style.SwitchOnMediaEnded) Advance();
+        };
+        _video.PlaybackFailed += _ => { };
+        Unloaded += (_, _) =>
+        {
+            // 离开可视树时释放视频与网页资源，避免隐藏的预览继续解码或执行脚本。
+            _timer.Stop();
+            _video.Stop();
+            HideWebWallpaper();
         };
     }
 
-    public void Apply(BackgroundSettings style, Brush fallback, bool shared = false, bool surface = false)
+    /// <summary>区域自身的默认颜色（未设置颜色层时使用，一般为当前主题的界面背景）。</summary>
+    public BoardColor FallbackColor { get; set; } = BoardColor.FromRgb(21, 21, 21);
+
+#if PANCAKE_UI_TESTS
+    /// <summary>验证构建专用：当前实际加载的媒体路径。</summary>
+    internal string CurrentMediaPathForVerification => _loadedPath;
+
+    internal bool IsTimerRunningForVerification => _timer.IsEnabled;
+
+    internal bool IsVideoPlayingForVerification => _video.IsPlaying;
+
+    internal long VideoPositionForVerification => _video.PositionMilliseconds;
+#endif
+
+    /// <summary>是否使用主题的界面背景色作为默认色，而不是固定色值。</summary>
+    public bool UseThemeFallback { get; init; }
+
+    public void Apply(BackgroundSettings style)
     {
         _style = style;
-        _shared = shared;
-        Background = shared || (style.Glass && string.IsNullOrWhiteSpace(style.Color)) ? null : string.IsNullOrWhiteSpace(style.Color) ? fallback : SafeColor(style.Color, fallback);
-        if (surface) Background = style.Glass ? null : SurfaceBackground.Create(
-            style.Color, style.ColorOpacity, style.ColorCleared, false, style.Blur);
-        bool changed = _playlist.Configure(style);
-        if (changed) { _failed = false; _timer.Stop(); }
-        if (shared) ReleaseMedia();
-        else if (IsLoaded && !_failed) ShowCurrent();
-        _overlays.Children.Clear();
-        if (surface)
-        {
-            // 在媒体之上统一合成颜色与模糊，清除颜色不能移除模糊层。
-            if (style.Glass)
-                _overlays.Children.Add(new Border { Background = SurfaceBackground.Create(
-                    style.Color, style.ColorOpacity, style.ColorCleared, true, style.Blur) });
-        }
-        else if (style.Glass)
-        {
-            _overlays.Children.Add(new Border { Background = new BlurBackdropBrush(style.Blur) });
-            _overlays.Children.Add(new Border { Background = new SolidColorBrush(BoardTheme.IsLight
-                ? Windows.UI.Color.FromArgb(36, 255, 255, 255) : Windows.UI.Color.FromArgb(36, 0, 0, 0)) });
-        }
+        ApplyColorLayer(style);
+        // 播放队列内容变化时立刻切到当前项，否则只刷新显示参数。
+        if (_playlist.Configure(style)) ShowCurrent();
+        else ApplyMedia(style);
         UpdateTimer();
     }
 
-    private void ShowCurrent()
-    {
-        if (_shared || !IsLoaded || !_inViewport || _failed) return;
-        string path = _playlist.Current;
-        if (_path != path)
-        {
-            ReleaseMedia();
-            _path = path;
-            if (File.Exists(path))
-            {
-                try
-                {
-                    if (MediaLibrary.IsWeb(path))
-                    {
-                        WebWallpaperView web = new(path);
-                        _web = web;
-                        web.Failed += () => { if (ReferenceEquals(_web, web)) Failed(); };
-                        _media.Children.Add(web);
-                    }
-                    else if (MediaLibrary.IsVideo(path))
-                    {
-                        MediaPlayer player = new() { IsMuted = true, AutoPlay = true };
-                        _player = player;
-                        player.CommandManager.IsEnabled = false;
-                        _video = new MediaPlayerElement { AreTransportControlsEnabled = false, IsHitTestVisible = false };
-                        _video.SetMediaPlayer(player);
-                        _media.Children.Add(_video);
-                        // 回调不在 UI 线程，并可能晚于换曲或卸载，必须核对播放器身份。
-                        player.MediaEnded += (_, _) => DispatcherQueue.TryEnqueue(() =>
-                        {
-                            if (ReferenceEquals(_player, player) && _style.PlaylistEnabled && _style.SwitchOnMediaEnded) Advance();
-                        });
-                        player.MediaFailed += (_, _) => DispatcherQueue.TryEnqueue(() =>
-                        {
-                            if (ReferenceEquals(_player, player)) Failed();
-                        });
-                        player.Source = MediaSource.CreateFromUri(new Uri(path));
-                    }
-                    else
-                    {
-                        _image = new Image();
-                        Image current = _image;
-                        current.ImageFailed += (_, _) => { if (ReferenceEquals(_image, current)) Failed(); };
-                        current.Source = new BitmapImage(new Uri(path));
-                        _media.Children.Add(current);
-                    }
-                }
-                catch (Exception) { Failed(); }
-            }
-        }
-        Stretch stretch = MediaStretchOverride ?? (_style.ImageMode switch { "Stretch" => Stretch.Fill, "Fit" => Stretch.Uniform, _ => Stretch.UniformToFill });
-        if (_image is not null) _image.Stretch = stretch;
-        if (_video is not null) _video.Stretch = stretch;
-        if (_player is not null) _player.IsLoopingEnabled = !_style.PlaylistEnabled || !_style.SwitchOnMediaEnded;
-    }
-
-    private void Advance()
-    {
-        _timer.Stop();
-        if (_playlist.Advance(_style.Shuffle)) { _failed = false; ShowCurrent(); }
-        else if (!_failed && _player is not null) { _player.PlaybackSession.Position = TimeSpan.Zero; _player.Play(); }
-        UpdateTimer();
-    }
-
-    private void Failed()
-    {
-        _timer.Stop();
-        if (_playlist.Advance(_style.Shuffle, failed: true)) { ShowCurrent(); UpdateTimer(); }
-        else
-        {
-            _failed = true;
-            ReleaseMedia();
-            _media.Children.Add(new TextBlock { Text = "背景媒体无法播放，请重新选择文件或检查视频编码。",
-                TextWrapping = TextWrapping.Wrap, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center });
-        }
-    }
-
+    /// <summary>按设置启动或停止定时切换；视频结束时切换需要播放器事件，当前仅图片生效。</summary>
     private void UpdateTimer()
     {
-        if (!IsLoaded || !_inViewport || _shared || _failed || !_style.PlaylistEnabled || !_style.SwitchOnTimer || string.IsNullOrEmpty(_playlist.Current)) { _timer.Stop(); return; }
-        TimeSpan interval = TimeSpan.FromSeconds(BackgroundPlaylist.NormalizeInterval(_style.SwitchIntervalSeconds));
-        if (_timer.Interval != interval) { _timer.Stop(); _timer.Interval = interval; }
-        if (!_timer.IsEnabled) _timer.Start();
+        _timer.Stop();
+        if (!_style.PlaylistEnabled || !_style.SwitchOnTimer || _style.Playlist.Count <= 1) return;
+        _timer.Interval = TimeSpan.FromSeconds(BackgroundPlaylist.NormalizeInterval(_style.SwitchIntervalSeconds));
+        _timer.Start();
     }
 
-    private void ReleaseMedia()
+    /// <summary>切换到下一项；全部不可用时停止轮播，避免反复重试坏文件。</summary>
+    private void Advance()
     {
-        MediaPlayer? player = _player;
-        _player = null;
-        _video?.SetMediaPlayer(null);
-        player?.Dispose();
-        _video = null;
-        _web?.Dispose();
+        if (!_playlist.Advance(_style.Shuffle)) _timer.Stop();
+        ShowCurrent();
+    }
+
+    private void ShowCurrent() => ApplyMedia(_style);
+
+    /// <summary>
+    /// 显示网页壁纸：由平台服务创建承载控件，同一个项目重复应用不会重建页面。
+    /// 项目损坏或平台不支持时保持隐藏，背景自然退回颜色层。
+    /// </summary>
+    private void ShowWebWallpaper(string entry)
+    {
+        if (string.Equals(entry, _webPath, StringComparison.Ordinal) && _web is not null) return;
+        HideWebWallpaper();
+        try
+        {
+            WebWallpaperPackage package = WebWallpaperPackage.Load(entry);
+            Control? view = PlatformServices.WebWallpaper.TryCreate(package.Directory, package.EntryPath);
+            if (view is null) return;
+            _web = view;
+            _webPath = entry;
+            _mediaHost.Children.Add(view);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            // 损坏的网页项目直接跳过，避免整个看板加载失败。
+            HideWebWallpaper();
+        }
+    }
+
+    private void HideWebWallpaper()
+    {
+        if (_web is null) return;
+        _mediaHost.Children.Remove(_web);
+        (_web as IDisposable)?.Dispose();
         _web = null;
-        _image = null;
-        _path = "";
-        _media.Children.Clear();
+        _webPath = string.Empty;
     }
 
-    private static Brush SafeColor(string value, Brush fallback)
+    private void ApplyColorLayer(BackgroundSettings style)
     {
-        try { return MainViewModel.BrushFromHex(value); }
-        catch { return fallback; }
+        BoardColor baseColor = UseThemeFallback ? BoardTheme.SurfaceColor : FallbackColor;
+        if (style.ColorCleared)
+        {
+            _colorLayer.Background = null;
+            return;
+        }
+
+        BoardColor color = string.IsNullOrWhiteSpace(style.Color)
+            ? baseColor
+            : BoardColor.Parse(style.Color, baseColor);
+        _colorLayer.Background = new SolidColorBrush(color.ToColor());
+        _colorLayer.Opacity = Math.Clamp(style.ColorOpacity, 0, 1);
+    }
+
+    private void ApplyMedia(BackgroundSettings style)
+    {
+        string path = ResolveMediaPath(style);
+        if (MediaLibrary.IsWeb(path) && PlatformServices.WebWallpaper.IsSupported)
+        {
+            ShowWebWallpaper(path);
+            _image.Source = null;
+            _image.IsVisible = false;
+            _video.Stop();
+            _mediaHost.Effect = null;
+            return;
+        }
+
+        HideWebWallpaper();
+        bool isVideo = MediaLibrary.IsVideo(path) && VideoPlayerHost.IsSupported;
+        if (isVideo)
+        {
+            // 视频交给原生渲染面（无法被 Avalonia 合成器模糊），图片层随即清空。
+            _image.Source = null;
+            _image.IsVisible = false;
+            _loadedPath = string.Empty;
+            _mediaHost.Effect = null;
+            if (style.SwitchOnMediaEnded)
+            {
+                // 结束时切换才需要监听结尾事件；否则直接循环播放。
+                _video.Play(path, loop: false);
+            }
+            else
+            {
+                _video.Play(path, loop: true);
+            }
+
+            return;
+        }
+
+        _video.Stop();
+        if (!string.Equals(path, _loadedPath, StringComparison.Ordinal))
+        {
+            _loadedPath = path;
+            _failed = false;
+            _image.Source = null;
+            if (!string.IsNullOrWhiteSpace(path)) _ = LoadImageAsync(path);
+        }
+
+        _image.Stretch = style.ImageMode switch
+        {
+            "Stretch" => Stretch.Fill,
+            "Fit" => Stretch.Uniform,
+            _ => Stretch.UniformToFill
+        };
+        _image.IsVisible = _image.Source is not null && !_failed;
+
+        // 毛玻璃只作用于媒体层，颜色层保持清晰，和 WinUI 版本的分层一致。
+        _mediaHost.Effect = style.Glass && style.Blur > 0
+            ? new BlurEffect { Radius = Math.Clamp(style.Blur, 0, 80) }
+            : null;
+    }
+
+    /// <summary>播放队列启用时取当前项，否则用单媒体路径。</summary>
+    private string ResolveMediaPath(BackgroundSettings style) =>
+        style.PlaylistEnabled && style.Playlist.Count > 0
+            ? _playlist.Current
+            : style.ImagePath;
+
+    private async Task LoadImageAsync(string path)
+    {
+        try
+        {
+            Bitmap bitmap = await Task.Run(() => new Bitmap(path));
+            // 异步加载期间可能已经切换到别的媒体，这里丢弃过期结果。
+            if (!string.Equals(path, _loadedPath, StringComparison.Ordinal))
+            {
+                bitmap.Dispose();
+                return;
+            }
+
+            _image.Source = bitmap;
+            _image.IsVisible = true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            _failed = true;
+            _image.IsVisible = false;
+        }
     }
 }

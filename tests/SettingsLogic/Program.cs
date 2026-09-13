@@ -197,6 +197,21 @@ try
     string projectFile = Path.Combine(mediaRoot, "project.json");
     File.WriteAllText(projectFile, JsonSerializer.Serialize(new { type = "video", file = "clip.mp4", title = "测试壁纸" }));
     Check(WallpaperEngineLibrary.ReadProject(mediaRoot)?.Path == video, "识别 Wallpaper Engine 视频项目");
+    // 预览图与类型标签：导入窗口按旧版显示缩略图与「视频壁纸／网页壁纸」。
+    string preview = Path.Combine(mediaRoot, "preview.png");
+    File.WriteAllText(preview, "preview");
+    File.WriteAllText(projectFile, JsonSerializer.Serialize(new { type = "video", file = "clip.mp4", title = "测试壁纸", preview = "preview.png" }));
+    WallpaperProject? withPreview = WallpaperEngineLibrary.ReadProject(mediaRoot);
+    Check(withPreview?.PreviewPath == preview, "读取 Wallpaper Engine 项目预览图");
+    Check(withPreview?.PreviewUri is not null && withPreview.TypeLabel == "视频壁纸", "预览图地址与类型标签可用");
+    string outsidePreview = Path.Combine(Path.GetDirectoryName(mediaRoot)!, "outside-preview.png");
+    File.WriteAllText(outsidePreview, "outside");
+    File.WriteAllText(projectFile, JsonSerializer.Serialize(new { type = "video", file = "clip.mp4", preview = "../outside-preview.png" }));
+    Check(WallpaperEngineLibrary.ReadProject(mediaRoot)?.PreviewPath == "", "拒绝项目目录外的预览图");
+    File.Delete(outsidePreview); // 项目外的临时文件立即清理，避免留在系统临时目录里。
+    File.WriteAllText(projectFile, JsonSerializer.Serialize(new { type = "web", file = "index.html", title = "网页壁纸", preview = "preview.png" }));
+    File.WriteAllText(Path.Combine(mediaRoot, "index.html"), "<html></html>");
+    Check(WallpaperEngineLibrary.ReadProject(mediaRoot)?.TypeLabel == "网页壁纸", "网页壁纸类型标签");
     File.WriteAllText(projectFile, JsonSerializer.Serialize(new { type = "scene", file = "clip.mp4" }));
     Check(WallpaperEngineLibrary.ReadProject(mediaRoot) is null, "场景壁纸不当成视频导入");
     File.WriteAllText(projectFile, JsonSerializer.Serialize(new { type = "video", file = "../outside.mp4" }));

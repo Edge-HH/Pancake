@@ -1,0 +1,328 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Pancake.Controls"
+        xmlns:conv="clr-namespace:Pancake.Converters"
+        x:Class="Pancake.Views.MainWindow"
+        Title="Pancake 班级作业看板"
+        Width="1440"
+        Height="900"
+        MinWidth="720"
+        MinHeight="480"
+        Background="{DynamicResource BoardBackgroundBrush}">
+
+  <!-- 主题色画刷由核心层颜色值转换而来，磁贴、组件栏与设置页共用同一个转换器。 -->
+  <Window.Resources>
+    <conv:BoardColorToBrushConverter x:Key="BoardColorToBrush" />
+  </Window.Resources>
+
+  <Grid x:Name="RootShell" RowDefinitions="68,*" KeyDown="RootShell_KeyDown" SizeChanged="RootShell_SizeChanged">
+    <!-- 顶部栏：品牌、项目入口与日期；项目入口在项目功能接入后显示。 -->
+    <Border x:Name="TopBar" Grid.Row="0" Padding="28,0" Background="{DynamicResource BoardSurfaceBrush}"
+            BorderBrush="{DynamicResource BoardLineBrush}" BorderThickness="0,0,0,1">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="16">
+        <Grid x:Name="BrandRegion" Background="Transparent">
+          <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center" IsHitTestVisible="False">
+            <Border Width="38" Height="38" Background="{DynamicResource BoardSurfaceBrush}" CornerRadius="8">
+              <controls:FluentIcon FontSize="18" Foreground="{DynamicResource BoardBrandBrush}" Symbol="Board"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <StackPanel VerticalAlignment="Center" Spacing="1">
+              <TextBlock FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource BoardTextBrush}" Text="Pancake" />
+              <TextBlock FontSize="11" Foreground="{DynamicResource BoardTextBrush}" Text="班级作业看板" />
+            </StackPanel>
+          </StackPanel>
+        </Grid>
+
+        <!-- 项目切换与文件菜单；没有项目时整组隐藏，由空状态面板引导新建或导入。 -->
+        <StackPanel x:Name="ProjectCommands" Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                    VerticalAlignment="Center" IsVisible="False">
+          <Button x:Name="ProjectPickerButton" MaxWidth="260">
+            <StackPanel Orientation="Horizontal" Spacing="7">
+              <controls:FluentIcon Symbol="Folder" VerticalAlignment="Center" />
+              <TextBlock x:Name="ProjectNameText" Text="选择项目" VerticalAlignment="Center" />
+              <!-- 名称与板上计数区分开，避免与作业区标题栏的计数重名。 -->
+              <TextBlock x:Name="ProjectSubjectCountText" Foreground="{DynamicResource BoardTextMutedBrush}" VerticalAlignment="Center" />
+            </StackPanel>
+          </Button>
+          <Button x:Name="FileMenuButton" AutomationProperties.Name="文件">
+            <StackPanel Orientation="Horizontal" Spacing="7">
+              <controls:FluentIcon Symbol="Document" VerticalAlignment="Center" />
+              <TextBlock Text="文件" VerticalAlignment="Center" />
+            </StackPanel>
+            <Button.Flyout>
+              <MenuFlyout>
+                <MenuItem x:Name="NewProjectMenu" Header="新建" Click="NewProject_Click" />
+                <MenuItem x:Name="RenameProjectMenu" Header="重命名" Click="RenameProject_Click" />
+                <MenuItem x:Name="DeleteProjectMenu" Header="删除" Click="DeleteProject_Click" />
+                <Separator />
+                <MenuItem x:Name="ImportProjectMenu" Header="导入" Click="ImportProject_Click" />
+                <MenuItem x:Name="SaveProjectMenu" Header="保存" Click="SaveProject_Click" />
+                <MenuItem x:Name="ExportProjectMenu" Header="导出" Click="ExportImage_Click" />
+              </MenuFlyout>
+            </Button.Flyout>
+          </Button>
+        </StackPanel>
+
+        <Grid Grid.Column="2" Background="Transparent" />
+        <TextBlock x:Name="TopDateText" Grid.Column="3" VerticalAlignment="Center" FontSize="13"
+                   Foreground="{DynamicResource BoardTextSecondaryBrush}" />
+      </Grid>
+    </Border>
+
+    <!-- 看板区：跨区背景、时钟区、作业区与自由布局组件共用同一块画布。 -->
+    <Grid x:Name="DisplayRoot" Grid.Row="1" Background="{DynamicResource BoardBackgroundBrush}">
+      <controls:BackgroundVisual x:Name="SharedBackgroundVisual" />
+      <Grid x:Name="DisplayGrid" RowDefinitions="*,0" ColumnDefinitions="2*,3*">
+        <Border x:Name="ClockPanel" Grid.Row="0" Grid.Column="0" Background="{DynamicResource BoardSurfaceBrush}"
+                BorderBrush="{DynamicResource BoardLineBrush}" BorderThickness="0,0,1,0">
+          <Grid>
+            <controls:BackgroundVisual x:Name="ClockBackgroundVisual" />
+            <Canvas x:Name="ClockLayoutCanvas">
+              <Viewbox x:Name="ClockContentView" Stretch="Uniform">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="18">
+                  <!-- 左侧留出与秒数等宽的空白，让时间数字和日期、组件栏共用同一条中轴线。 -->
+                  <Grid HorizontalAlignment="Center" ColumnDefinitions="Auto,Auto,Auto" ColumnSpacing="7">
+                    <Border Grid.Column="0" Width="{Binding #SecondsText.Bounds.Width}" />
+                    <TextBlock Grid.Column="1" x:Name="MainTimeText" FontSize="112" FontWeight="Light"
+                               Foreground="{DynamicResource BoardTextBrush}" Text="11:20" />
+                    <TextBlock Grid.Column="2" x:Name="SecondsText" Margin="0,17,0,0" VerticalAlignment="Top"
+                               FontSize="28" Foreground="{DynamicResource BoardTextBrush}" Text="10" />
+                  </Grid>
+                  <TextBlock x:Name="ClockDateText" HorizontalAlignment="Center" FontSize="20"
+                             Foreground="{DynamicResource BoardTextBrush}" />
+                </StackPanel>
+              </Viewbox>
+              <Viewbox x:Name="ClockComponentsView" Stretch="Uniform">
+                <StackPanel x:Name="ClockComponents" Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                  <Border x:Name="WeatherWidget" Padding="16,10" Background="{DynamicResource BoardSurfaceBrush}" CornerRadius="8">
+                    <StackPanel Orientation="Horizontal" Spacing="9">
+                      <controls:FluentIcon Foreground="{DynamicResource BoardWarningBrush}" Symbol="Weather" VerticalAlignment="Center" />
+                      <TextBlock x:Name="WeatherText" FontSize="14" Foreground="{DynamicResource BoardTextBrush}" Text="天气未配置" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Border>
+                  <Border x:Name="NoiseWidget" Padding="16,10" Background="{DynamicResource BoardSurfaceBrush}" CornerRadius="8">
+                    <StackPanel Orientation="Horizontal" Spacing="9">
+                      <controls:FluentIcon Foreground="{DynamicResource BoardSuccessBrush}" Symbol="Microphone" VerticalAlignment="Center" />
+                      <TextBlock x:Name="NoiseText" FontSize="14" Foreground="{DynamicResource BoardTextBrush}" Text="-- dB" VerticalAlignment="Center" />
+                    </StackPanel>
+                  </Border>
+                </StackPanel>
+              </Viewbox>
+            </Canvas>
+            <!-- 仅时钟模式的全屏笔迹层：覆盖整块时钟区域，可在任意位置书写。 -->
+            <controls:InkCanvasLayer x:Name="ClockInkLayer" IsVisible="False" />
+          </Grid>
+        </Border>
+
+        <Grid x:Name="BoardWorkspace" Grid.Row="0" Grid.Column="1" Background="{DynamicResource BoardSurfaceBrush}">
+          <controls:BackgroundVisual x:Name="BoardBackgroundVisual" />
+          <Grid RowDefinitions="64,*">
+            <Border Padding="30,0,24,0" Background="Transparent">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel VerticalAlignment="Center" Spacing="2">
+                  <TextBlock Text="今日作业" FontSize="22" FontWeight="SemiBold" Foreground="{DynamicResource BoardTextBrush}" />
+                  <TextBlock x:Name="BoardModeHint" FontSize="12" Foreground="{DynamicResource BoardTextMutedBrush}"
+                             Text="所有文字和笔迹都完整显示在磁贴上" />
+                </StackPanel>
+                <Border Grid.Column="1" Padding="11,6" VerticalAlignment="Center" CornerRadius="8"
+                        Background="{DynamicResource BoardBackgroundBrush}">
+                  <TextBlock x:Name="SubjectCountText" FontSize="12" Foreground="{DynamicResource BoardTextSecondaryBrush}" />
+                </Border>
+              </Grid>
+            </Border>
+            <ScrollViewer x:Name="BoardScroller" Grid.Row="1" HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Disabled" HorizontalContentAlignment="Left" VerticalContentAlignment="Top">
+              <Grid x:Name="BoardViewport" Background="Transparent" SizeChanged="BoardViewport_SizeChanged">
+                <Grid x:Name="BoardSurface" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent">
+                  <Canvas x:Name="GridCanvas" IsHitTestVisible="False" />
+                  <Canvas x:Name="BoardCanvas" />
+                  <Canvas x:Name="AlignmentCanvas" IsHitTestVisible="False" />
+                </Grid>
+              </Grid>
+            </ScrollViewer>
+          </Grid>
+        </Grid>
+      </Grid>
+      <Canvas x:Name="FreeWidgetsCanvas" />
+      <Canvas x:Name="FreeLayoutHandles" IsHitTestVisible="False" />
+      <!-- 自动填充候选浮层的宿主；浮层本身是独立窗口，这里只提供可视树挂点。 -->
+      <Canvas x:Name="PopupHost" IsHitTestVisible="False" />
+      <!-- 图片导出整页覆盖层；打开时承载 ExportView。 -->
+      <Grid x:Name="ExportOverlay" IsVisible="False" ZIndex="200"
+            Background="{DynamicResource BoardBackgroundBrush}" />
+
+      <!-- 没有项目时的引导面板。 -->
+      <StackPanel x:Name="EmptyProjectPanel" HorizontalAlignment="Center" VerticalAlignment="Center"
+                  Spacing="16" IsVisible="False">
+        <TextBlock Text="创建或导入一个作业项目" FontSize="24" HorizontalAlignment="Center"
+                   Foreground="{DynamicResource BoardTextBrush}" />
+        <Button Content="新建项目" Click="NewProject_Click" HorizontalAlignment="Center" />
+        <Button Content="导入 .pch" Click="ImportProject_Click" HorizontalAlignment="Center" />
+      </StackPanel>
+
+      <!-- 存储与项目操作的结果提示。 -->
+      <Border x:Name="StorageInfoBar" VerticalAlignment="Top" Margin="24,12" Padding="16,12" CornerRadius="10"
+              Background="{DynamicResource BoardSurfaceBrush}" BorderBrush="{DynamicResource BoardLineBrush}"
+              BorderThickness="1" ZIndex="150" IsVisible="False">
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+          <StackPanel Spacing="3">
+            <TextBlock x:Name="StorageInfoTitle" FontSize="14" FontWeight="SemiBold"
+                       Foreground="{DynamicResource BoardTextBrush}" />
+            <TextBlock x:Name="StorageInfoMessage" FontSize="12" TextWrapping="Wrap" MaxWidth="720"
+                       Foreground="{DynamicResource BoardTextSecondaryBrush}" />
+          </StackPanel>
+          <Button x:Name="StorageInfoCloseButton" Grid.Column="1" Content="关闭" Click="StorageInfoClose_Click"
+                  VerticalAlignment="Center" />
+        </Grid>
+      </Border>
+    </Grid>
+
+    <!-- 设置页：左侧分类导航 + 右侧可滚动内容，分类随迁移进度逐项接入。 -->
+    <Grid x:Name="SettingsRoot" Grid.Row="1" IsVisible="False" ColumnDefinitions="240,*,Auto"
+          Background="{DynamicResource BoardBackgroundBrush}">
+      <Border Background="{DynamicResource BoardSurfaceBrush}" BorderBrush="{DynamicResource BoardLineBrush}"
+              BorderThickness="0,0,1,0">
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+          <StackPanel x:Name="SettingsNavigation" Margin="12,20,12,20" Spacing="4" />
+        </ScrollViewer>
+      </Border>
+      <ScrollViewer x:Name="SettingsContentScrollViewer" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
+        <StackPanel Margin="32,28,32,100" Spacing="22">
+          <StackPanel Spacing="8">
+            <TextBlock x:Name="SettingsPageTitle" FontSize="32" Foreground="{DynamicResource BoardTextBrush}" />
+            <TextBlock x:Name="SettingsPageDescription" FontSize="14" TextWrapping="Wrap"
+                       Foreground="{DynamicResource BoardTextSecondaryBrush}" />
+          </StackPanel>
+          <StackPanel x:Name="SettingsContent" Spacing="22" />
+        </StackPanel>
+      </ScrollViewer>
+      <!-- 磁贴外观页在窗口够宽时把预览固定在这里：向下滚动改选项时预览始终可见。 -->
+      <Border x:Name="SettingsPreviewHost" Grid.Column="2" IsVisible="False" Width="480"
+              Margin="16,28,24,28" CornerRadius="12" BorderThickness="1"
+              BorderBrush="{DynamicResource BoardLineBrush}" Background="{DynamicResource BoardSurfaceBrush}"
+              ClipToBounds="True" />
+    </Grid>
+
+    <!-- 主操作集中在屏幕下方，触屏时不需要跨越整块大屏。 -->
+    <!--
+      浮岛画布：画笔栏与作业板缩放岛都由代码按控制窗的实际位置贴合摆放，
+      因此放在同一块覆盖整个窗口的画布上，而不是各自写死对齐方式。
+    -->
+    <Canvas x:Name="IslandCanvas" Grid.RowSpan="2" ZIndex="104">
+      <!-- 富文本悬浮岛：编辑作业文字时贴在控制窗另一侧，承载字体与格式工具。 -->
+      <Border x:Name="RichTextIsland" Padding="7"
+              Background="{DynamicResource BoardSurfaceBrush}" BorderBrush="{DynamicResource BoardLineBrush}"
+              BorderThickness="1" CornerRadius="14" IsVisible="False">
+        <Panel>
+          <controls:BackdropBlurLayer x:Name="RichTextIslandBackdrop" />
+          <Border x:Name="RichTextIslandTint" />
+          <ScrollViewer x:Name="RichTextIslandScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+            <StackPanel x:Name="RichTextIslandItems" Orientation="Horizontal" Spacing="4" />
+          </ScrollViewer>
+        </Panel>
+      </Border>
+
+      <!-- 画笔栏：开启画笔后贴在控制窗旁，提供工具、颜色、粗细与清空。 -->
+      <Border x:Name="PenToolbar" Padding="7"
+              Background="{DynamicResource BoardSurfaceBrush}" BorderBrush="{DynamicResource BoardLineBrush}"
+              BorderThickness="1" CornerRadius="14" IsVisible="False">
+        <Panel>
+          <controls:BackdropBlurLayer x:Name="PenToolbarBackdrop" />
+          <Border x:Name="PenToolbarTint" />
+          <ScrollViewer x:Name="PenToolbarScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+            <StackPanel x:Name="PenToolbarItems" Orientation="Horizontal" Spacing="4" />
+          </ScrollViewer>
+        </Panel>
+      </Border>
+
+      <!-- 作业板缩放岛：编辑模式下贴在控制窗另一侧，查看模式保留缩放结果但不占屏幕。 -->
+      <Border x:Name="ZoomIsland" Padding="7"
+              Background="{DynamicResource BoardSurfaceBrush}" BorderBrush="{DynamicResource BoardLineBrush}"
+              BorderThickness="1" CornerRadius="14" IsVisible="False">
+        <Panel>
+          <controls:BackdropBlurLayer x:Name="ZoomIslandBackdrop" />
+          <Border x:Name="ZoomIslandTint" />
+          <ScrollViewer x:Name="ZoomIslandScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+            <StackPanel x:Name="ZoomIslandItems" Orientation="Horizontal" Spacing="4" />
+          </ScrollViewer>
+        </Panel>
+      </Border>
+    </Canvas>
+
+    <Border x:Name="FloatingToolbar" Grid.RowSpan="2" Margin="0,0,0,24" Padding="7"
+            HorizontalAlignment="Center" VerticalAlignment="Bottom"
+            Background="{DynamicResource BoardSurfaceBrush}" BorderBrush="{DynamicResource BoardLineBrush}"
+            BorderThickness="1" CornerRadius="14" ZIndex="100">
+      <!-- 颜色层与毛玻璃层分开：毛玻璃只作用于背衬，颜色层保持清晰（与旧版一致）。 -->
+      <Panel>
+        <controls:BackdropBlurLayer x:Name="ToolbarBackdrop" />
+        <Border x:Name="ToolbarTint" />
+        <ScrollViewer x:Name="MainToolbarScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+          <StackPanel x:Name="ToolbarItems" Orientation="Horizontal" Spacing="4">
+            <ToggleButton x:Name="GlobalPenButton" Width="44" Height="44" Padding="10" Background="Transparent"
+                          BorderThickness="0" IsVisible="False" AutomationProperties.Name="画笔"
+                          IsCheckedChanged="GlobalPen_Changed">
+              <controls:FluentIcon Symbol="Pen" />
+            </ToggleButton>
+            <Button x:Name="BackToBoardButton" Click="BackToBoardButton_Click" IsVisible="False" AutomationProperties.Name="返回看板"
+                    Padding="10" MinWidth="44" MinHeight="44" Background="Transparent" BorderThickness="0">
+              <controls:FluentIcon Symbol="Back" />
+            </Button>
+            <Button x:Name="AddSubjectButton" Click="AddSubjectButton_Click" IsVisible="False" AutomationProperties.Name="添加科目"
+                    Padding="10" MinWidth="44" MinHeight="44" Background="Transparent" BorderThickness="0">
+              <controls:FluentIcon Symbol="Add" />
+            </Button>
+            <Button x:Name="AutoArrangeButton" Click="AutoArrangeButton_Click" IsVisible="False" AutomationProperties.Name="自动排列磁贴"
+                    Padding="10" MinWidth="44" MinHeight="44" Background="Transparent" BorderThickness="0">
+              <controls:FluentIcon Symbol="Layout" />
+            </Button>
+            <ToggleButton x:Name="GridSnapToggleButton" Width="44" Height="44" Padding="10" Background="Transparent"
+                          BorderThickness="0" IsChecked="True" IsVisible="False" AutomationProperties.Name="网格吸附"
+                          IsCheckedChanged="GridSnapToggleButton_Changed">
+              <controls:FluentIcon FontSize="18" Symbol="Grid" />
+            </ToggleButton>
+            <Button x:Name="SettingsButton" Click="SettingsButton_Click" AutomationProperties.Name="设置"
+                    Padding="10" MinWidth="44" MinHeight="44" Background="Transparent" BorderThickness="0">
+              <controls:FluentIcon Symbol="Settings" />
+            </Button>
+            <Button x:Name="FullScreenButton" Click="FullScreenButton_Click" AutomationProperties.Name="进入全屏"
+                    Padding="10" MinWidth="44" MinHeight="44" Background="Transparent" BorderThickness="0">
+              <controls:FluentIcon x:Name="FullScreenIcon" Symbol="FullScreen" />
+            </Button>
+            <Button x:Name="DiscardEditButton" Click="DiscardEditButton_Click" IsVisible="False" AutomationProperties.Name="放弃修改"
+                    Padding="10" MinWidth="44" MinHeight="44" Background="Transparent" BorderThickness="0">
+              <controls:FluentIcon Symbol="Dismiss" />
+            </Button>
+            <Button x:Name="EditBoardButton" Click="EditBoardButton_Click" AutomationProperties.Name="编辑看板"
+                    Padding="10" MinWidth="44" MinHeight="44" Background="Transparent" BorderThickness="0">
+              <controls:FluentIcon x:Name="EditBoardIcon" Symbol="Edit" />
+            </Button>
+          </StackPanel>
+        </ScrollViewer>
+      </Panel>
+    </Border>
+
+    <!-- 轻量对话框：确认与提示共用同一块浮层，避免依赖平台原生对话框。 -->
+    <Grid x:Name="DialogOverlay" Grid.RowSpan="2" IsVisible="False" ZIndex="300"
+          Background="#88000000">
+      <Border MaxWidth="560" Padding="24" CornerRadius="12"
+              HorizontalAlignment="Center" VerticalAlignment="Center"
+              Background="{DynamicResource BoardSurfaceBrush}"
+              BorderBrush="{DynamicResource BoardLineBrush}" BorderThickness="1">
+        <StackPanel Spacing="16">
+          <TextBlock x:Name="DialogTitle" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap"
+                     Foreground="{DynamicResource BoardTextBrush}" />
+          <TextBlock x:Name="DialogMessage" TextWrapping="Wrap" MaxWidth="500"
+                     Foreground="{DynamicResource BoardTextSecondaryBrush}" />
+          <!-- 需要复选项或输入框的对话框把内容放进这里。 -->
+          <ContentControl x:Name="DialogContentHost" IsVisible="False" />
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10">
+            <Button x:Name="DialogCloseButton" Click="DialogClose_Click" />
+            <Button x:Name="DialogSecondaryButton" Click="DialogSecondary_Click" IsVisible="False" />
+            <Button x:Name="DialogPrimaryButton" Click="DialogPrimary_Click" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </Grid>
+</Window>

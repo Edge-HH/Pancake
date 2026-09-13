@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- 平台抽象层：只描述能力，不包含任何平台实现；引用 Avalonia 是为了让窗口与文件选择接口使用统一类型。 -->
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Pancake.Platforms.Abstraction</RootNamespace>
+    <AssemblyName>Pancake.Platforms.Abstractions</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pancake.Core\Pancake.Core.csproj" />
+    <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
+  </ItemGroup>
+
+  <Import Project="../../Global.props" />
+  <Import Project="../../AvaloniaShared.props" />
+</Project>

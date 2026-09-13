@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- 可执行入口：目标框架与平台工程由 CrossPlatformProps.props 按当前系统或发布参数决定。 -->
+    <BaseFramework>net8.0</BaseFramework>
+    <RootNamespace>Pancake.Desktop</RootNamespace>
+    <AssemblyName>Pancake</AssemblyName>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pancake\Pancake.csproj" />
+    <ProjectReference Include="..\Pancake.Core\Pancake.Core.csproj" />
+    <ProjectReference Include="..\Pancake.Platforms.Abstractions\Pancake.Platforms.Abstractions.csproj" />
+    <ProjectReference Include="..\Pancake.Platforms.Shared\Pancake.Platforms.Shared.csproj" />
+    <PackageReference Include="Avalonia.Desktop" Version="$(AvaloniaVersion)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Platforms_Windows)' == 'true'">
+    <ProjectReference Include="..\platforms\Pancake.Platforms.Windows\Pancake.Platforms.Windows.csproj" />
+    <!-- Windows 随包分发 libvlc，用户无需自行安装播放器。 -->
+    <PackageReference Include="VideoLAN.LibVLC.Windows" Version="3.0.23.1" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Platforms_Linux)' == 'true'">
+    <ProjectReference Include="..\platforms\Pancake.Platforms.Linux\Pancake.Platforms.Linux.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Platforms_MacOs)' == 'true'">
+    <ProjectReference Include="..\platforms\Pancake.Platforms.MacOs\Pancake.Platforms.MacOs.csproj" />
+    <PackageReference Include="VideoLAN.LibVLC.Mac" Version="3.1.3.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 核心层数据文件不随库传递，这里显式复制到程序目录，和旧版路径保持一致。 -->
+    <Content Include="..\Pancake.Core\Assets\Pinyin\**\*"
+             Link="Assets\Pinyin\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\Pancake.Core\Assets\xiaomi_weather_cities.json"
+             Link="Assets\xiaomi_weather_cities.json"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Platforms_MacOs)' == 'true'">
+    <!-- 打包脚本据此组装 Pancake.app/Contents/Info.plist。 -->
+    <None Include="Info.plist" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Import Project="../../Global.props" />
+  <Import Project="../../AvaloniaShared.props" />
+  <Import Project="../../CrossPlatformProps.props" />
+</Project>

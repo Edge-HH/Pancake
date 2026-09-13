@@ -1,409 +1,244 @@
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Shapes;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Media;
 using Pancake.Services;
-using Pancake.ViewModels;
-using Windows.Foundation;
-using Windows.System;
 
 namespace Pancake.Controls;
 
-/// <summary>一条补全候选：正文、可选补充说明与可选的学科色点。</summary>
-public sealed class AutofillEntry
-{
-    public required string Text { get; init; }
-    public string? Detail { get; init; }
-    public string? ColorHex { get; init; }
-    public object? Payload { get; init; }
-}
-
 /// <summary>
-/// 补全候选浮层。Popup 挂在窗口根面板上，因此不会被磁贴裁剪或缩放影响；
-/// 候选行不参与焦点，鼠标与触摸点击都不会打断输入框的编辑状态。
+/// 自动填充候选浮层：贴在输入控件下方，最多显示五条，可滚动。
+/// 鼠标点击与键盘（上下键、Tab、回车、Esc）都由调用方通过本类的方法驱动。
 /// </summary>
 public sealed class AutofillPopup
 {
-    /// <summary>空标题时展示的推荐学科条数，浮层内部可滚动。</summary>
-    public const int RecommendationLimit = 12;
-    /// <summary>浮层一次最多显示几行候选，多出来的在浮层内滚动。</summary>
-    public const int VisibleRowLimit = 5;
-    /// <summary>浮层宽度范围：既要能一行放下常见学科名，也不能在窄窗口里溢出。</summary>
-    public const double MinimumWidth = 240;
-    public const double MaximumWidth = 520;
+    /// <summary>与旧版一致：一次最多显示五条候选。</summary>
+    public const int MaxVisibleItems = 5;
 
-    private readonly Popup _popup = new() { IsLightDismissEnabled = false };
-    private readonly StackPanel _rows = new() { Spacing = 2 };
-    private readonly ScrollViewer _scroll;
+    private readonly ListBox _list = new();
+    private readonly Popup _popup = new();
     private readonly Border _frame;
-    private readonly List<AutofillEntry> _entries = [];
-    private readonly List<Border> _visuals = [];
-    private Brush _rowTextBrush = BoardTheme.TextBrush;
-    private bool _light;
-    private bool _themed;
-    private int _highlight = -1;
-    private object? _owner;
-    private Action<AutofillEntry>? _chosen;
-    private FrameworkElement? _anchor;
-    private Rect? _caret;
 
     public AutofillPopup()
     {
-        // 长候选列表在浮层内部滚动，一次最多五行，滚动到窗口外也不会顶到磁贴。
-        _scroll = new ScrollViewer
-        {
-            Content = _rows,
-            MaxHeight = 320,
-            // 透明背景让行间空隙也落在滚动容器上，触屏滑动不会在缝隙处失效。
-            Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            VerticalScrollMode = ScrollMode.Enabled,
-            // 触屏拖动需要滚动容器自己处理平移，候选行因此只用 Tapped 选中，不吞掉指针按下。
-            ManipulationMode = ManipulationModes.System,
-            // 候选窗不接收焦点：点击后按键仍归输入框，且关闭时不会把焦点留在浮层里。
-            IsTabStop = false
-        };
+        _list.MaxHeight = 240;
+        _list.MinWidth = 240;
+        _list.Background = new SolidColorBrush(BoardTheme.SurfaceColor.ToColor());
+        _list.BorderThickness = new Thickness(0);
+        _list.PointerReleased += (_, _) => AcceptSelected();
         _frame = new Border
         {
-            CornerRadius = new CornerRadius(8),
+            Child = _list,
+            Background = new SolidColorBrush(BoardTheme.SurfaceColor.ToColor()),
+            BorderBrush = new SolidColorBrush(BoardTheme.LineColor.ToColor()),
             BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(8),
             Padding = new Thickness(4),
-            MinWidth = MinimumWidth,
-            MaxWidth = MaximumWidth,
-            Child = _scroll,
-            IsTabStop = false
+            MaxHeight = 260
         };
-        // 浮层是代码创建的控件，不会跟随主题资源引用自动换色，构造后先按当前主题取一次色。
-        ApplyTheme(BoardTheme.IsLight ? ElementTheme.Light : ElementTheme.Dark);
-        // 万一焦点落进浮层（触摸或辅助功能），按键也由浮层自己处理。
-        _frame.KeyDown += (_, args) => HandleKey(args);
         _popup.Child = _frame;
+        _popup.Placement = PlacementMode.Bottom;
+        _popup.IsLightDismissEnabled = false;
     }
+
+    /// <summary>候选被采纳时触发，参数为选中的候选项。</summary>
+    public event Action<object>? Accepted;
 
     public bool IsOpen => _popup.IsOpen;
 
-    public int Count => _entries.Count;
+    public object? SelectedItem => _list.SelectedItem;
 
-    public AutofillEntry? Highlighted => _highlight >= 0 && _highlight < _entries.Count ? _entries[_highlight] : null;
+    /// <summary>验证脚本用：当前候选数量。</summary>
+    internal int ItemCountForVerification => _list.ItemCount;
 
-    /// <summary>浮层当前是否由指定输入框打开；共用同一个浮层时必须先判断归属。</summary>
-    public bool IsOwnedBy(object owner) => IsOpen && ReferenceEquals(_owner, owner);
-
-    /// <summary>把浮层挂到窗口根面板；Popup 自身不参与排版，只按偏移量绘制。</summary>
-    public void AttachTo(Panel host)
+    /// <summary>把浮层挂到窗口的宿主画布上；Avalonia 的弹出层需要处于可视树中。</summary>
+    public void Attach(Panel host)
     {
-        host.Children.Add(_popup);
-        if (host is Grid grid) Grid.SetRowSpan(_popup, Math.Max(1, grid.RowDefinitions.Count));
+        if (!host.Children.Contains(_popup)) host.Children.Add(_popup);
     }
 
-    /// <param name="preserveHighlight">
-    /// 输入法组合期间候选会随着组合文本反复刷新，列表变化时保留用户已经移动过的选中项，
-    /// 避免选中跳回第一条；普通输入（组合已结束）仍然回到最佳匹配。
-    /// </param>
-    public void Show(object owner, FrameworkElement anchor, IReadOnlyList<AutofillEntry> entries, Action<AutofillEntry> chosen, Rect? caret = null, bool preserveHighlight = false)
+    public void Show(Control anchor, IReadOnlyList<object> items)
     {
-        if (entries.Count == 0 || anchor.XamlRoot is null)
+        if (items.Count == 0)
         {
             Hide();
             return;
         }
 
-        // 浮层可能跨主题复用，每次显示都按锚点当前实际主题重新取色。
-        ApplyTheme(anchor.ActualTheme);
+        _list.ItemsSource = items;
+        _list.SelectedIndex = 0;
+        _popup.PlacementTarget = anchor;
+        _popup.IsOpen = true;
+        _frame.MinWidth = Math.Clamp(anchor.Bounds.Width, 240, 520);
+    }
 
-        // 相同来源、相同候选时只重新定位，避免每次按键都重建列表而闪烁。
-        if (IsOpen && ReferenceEquals(_owner, owner) && SameEntries(entries))
+    public void Hide() => _popup.IsOpen = false;
+
+    /// <summary>上下移动选中项并保持可见。</summary>
+    public void MoveSelection(int delta)
+    {
+        int count = _list.ItemCount;
+        if (count == 0) return;
+        int index = Math.Clamp(_list.SelectedIndex + delta, 0, count - 1);
+        _list.SelectedIndex = index;
+        if (_list.ContainerFromIndex(index) is Control container) container.BringIntoView();
+    }
+
+    public void AcceptSelected()
+    {
+        object? selected = _list.SelectedItem;
+        Hide();
+        if (selected is not null) Accepted?.Invoke(selected);
+    }
+}
+
+/// <summary>
+/// 把自动填充挂到输入框上：只在编辑态、有输入时给出候选，
+/// 键盘由隧道阶段拦截，保证上下键、Tab 与回车优先用于选择候选而不是移动光标。
+/// </summary>
+public sealed class AutofillController
+{
+    private readonly AutofillService _service;
+    private readonly TextBox _input;
+    private readonly AutofillPopup _popup;
+    private readonly bool _isSubject;
+    private readonly Func<string?> _subjectName;
+    private readonly Action<SubjectSuggestion>? _applySubject;
+    private readonly Action? _contentChanged;
+    private readonly Func<bool> _ready;
+    private bool _suppress;
+    private string _lastRecorded = string.Empty;
+
+    private AutofillController(
+        AutofillService service,
+        TextBox input,
+        AutofillPopup popup,
+        bool isSubject,
+        Func<string?> subjectName,
+        Func<bool> ready,
+        Action<SubjectSuggestion>? applySubject,
+        Action? contentChanged)
+    {
+        _service = service;
+        _input = input;
+        _popup = popup;
+        _isSubject = isSubject;
+        _subjectName = subjectName;
+        _ready = ready;
+        _applySubject = applySubject;
+        _contentChanged = contentChanged;
+        _popup.Accepted += OnAccepted;
+        _input.TextChanged += (_, _) => Refresh();
+        _input.LostFocus += (_, _) => { _popup.Hide(); Settle(); };
+        _input.AddHandler(InputElement.KeyDownEvent, OnPreviewKeyDown, RoutingStrategies.Tunnel);
+    }
+
+    /// <summary>挂接学科标题补全；采纳后同时套用该学科的颜色。</summary>
+    public static AutofillController AttachSubject(
+        AutofillService service,
+        TextBox input,
+        AutofillPopup popup,
+        Func<bool> ready,
+        Action<SubjectSuggestion> applySubject) =>
+        new(service, input, popup, isSubject: true, () => null, ready, applySubject, null);
+
+    /// <summary>挂接作业内容补全；内容稳定后按阈值统计是否收录。</summary>
+    public static AutofillController AttachHomework(
+        AutofillService service,
+        TextBox input,
+        AutofillPopup popup,
+        Func<string?> subjectName,
+        Func<bool> ready,
+        Action contentChanged) =>
+        new(service, input, popup, isSubject: false, subjectName, ready, null, contentChanged);
+
+    /// <summary>按当前输入刷新候选；没有候选时收起浮层。</summary>
+    public void Refresh()
+    {
+        if (_suppress || !_ready()) return;
+        string typed = _input.Text ?? string.Empty;
+        if (typed.Length == 0 || typed.Length > AutofillService.MaxQueryLength)
         {
-            _chosen = chosen;
-            ApplyHighlight();
-            Place(anchor, caret);
+            _popup.Hide();
             return;
         }
 
-        _owner = owner;
-        _chosen = chosen;
-        _anchor = anchor;
-        _caret = caret;
-        string? keep = preserveHighlight ? Highlighted?.Text : null;
-        _entries.Clear();
-        _entries.AddRange(entries);
-        BuildRows();
-        _highlight = keep is null ? -1 : _entries.FindIndex(entry => entry.Text == keep);
-        if (_highlight < 0) _highlight = 0;
-        ApplyHighlight();
-        _popup.XamlRoot ??= anchor.XamlRoot;
-        _popup.IsOpen = true;
-        Place(anchor, caret);
+        if (_isSubject)
+        {
+            IReadOnlyList<SubjectSuggestion> matches = _service.MatchSubjects(typed, AutofillPopup.MaxVisibleItems);
+            _popup.Show(_input, matches.Cast<object>().ToArray());
+            return;
+        }
+
+        IReadOnlyList<HomeworkSuggestion> homework = _service.MatchHomework(typed, _subjectName(), AutofillPopup.MaxVisibleItems);
+        _popup.Show(_input, homework.Cast<object>().ToArray());
     }
 
-    private bool SameEntries(IReadOnlyList<AutofillEntry> entries)
+    /// <summary>结算一次输入：作业内容按阈值统计，学科标题不参与收录。</summary>
+    public void Settle()
     {
-        if (_entries.Count != entries.Count) return false;
-        for (int index = 0; index < entries.Count; index++)
-            if (!ReferenceEquals(_entries[index].Payload, entries[index].Payload)) return false;
-        return true;
+        if (_isSubject || !_ready()) return;
+        string content = _input.Text ?? string.Empty;
+        if (content == _lastRecorded || content.Length == 0) return;
+        _lastRecorded = content;
+        if (_service.RecordHomework(content, _subjectName())) _contentChanged?.Invoke();
     }
 
-    public void Hide()
+    public void Hide() => _popup.Hide();
+
+    private void OnAccepted(object item)
+    {
+        _suppress = true;
+        try
+        {
+            switch (item)
+            {
+                case SubjectSuggestion subject:
+                    _input.Text = subject.Name;
+                    _input.CaretIndex = subject.Name.Length;
+                    _service.NotifySubjectCompleted(subject);
+                    _applySubject?.Invoke(subject);
+                    break;
+                case HomeworkSuggestion homework:
+                    _input.Text = homework.Text;
+                    _input.CaretIndex = homework.Text.Length;
+                    _service.NotifyHomeworkCompleted(homework);
+                    _contentChanged?.Invoke();
+                    break;
+            }
+        }
+        finally
+        {
+            _suppress = false;
+        }
+    }
+
+    /// <summary>隧道阶段拦截导航键：有候选时上下键、Tab、回车与 Esc 都先交给浮层。</summary>
+    private void OnPreviewKeyDown(object? sender, KeyEventArgs e)
     {
         if (!_popup.IsOpen) return;
-        _popup.IsOpen = false;
-        _entries.Clear();
-        _visuals.Clear();
-        _rows.Children.Clear();
-        _highlight = -1;
-        _owner = null;
-        _chosen = null;
-        _anchor = null;
-        _caret = null;
-    }
-
-    public void HideIfOwnedBy(object owner)
-    {
-        if (IsOwnedBy(owner)) Hide();
-    }
-
-    /// <summary>看板滚动后把浮层重新贴回输入位置；锚点已被移除时直接收起。</summary>
-    public void Reposition()
-    {
-        if (!IsOpen) return;
-        if (_anchor is null || _anchor.XamlRoot is null)
+        switch (e.Key)
         {
-            Hide();
-            return;
-        }
-
-        // 浮层显示期间切换主题时也要跟上，避免深色底配浅色字或反过来。
-        ApplyTheme(_anchor.ActualTheme);
-        Place(_anchor, _caret);
-    }
-
-    public void MoveHighlight(int delta)
-    {
-        if (_entries.Count == 0) return;
-        _highlight = (_highlight + delta + _entries.Count) % _entries.Count;
-        ApplyHighlight();
-    }
-
-    public bool ChooseHighlighted()
-    {
-        if (Highlighted is not { } entry) return false;
-        Choose(entry);
-        return true;
-    }
-
-    public void Choose(AutofillEntry entry)
-    {
-        Action<AutofillEntry>? chosen = _chosen;
-        Hide();
-        chosen?.Invoke(entry);
-    }
-
-    /// <summary>浮层自身的键盘处理，与窗口根面板共用同一套动作。</summary>
-    public bool HandleKey(KeyRoutedEventArgs args)
-    {
-        if (!IsOpen) return false;
-        switch (args.Key)
-        {
-            case VirtualKey.Up:
-                MoveHighlight(-1);
+            case Key.Down:
+                _popup.MoveSelection(1);
+                e.Handled = true;
                 break;
-            case VirtualKey.Down:
-                MoveHighlight(1);
+            case Key.Up:
+                _popup.MoveSelection(-1);
+                e.Handled = true;
                 break;
-            case VirtualKey.Tab:
-            case VirtualKey.Enter:
-                if (!ChooseHighlighted()) return false;
+            case Key.Tab:
+            case Key.Enter:
+                _popup.AcceptSelected();
+                e.Handled = true;
                 break;
-            case VirtualKey.Escape:
-                Hide();
+            case Key.Escape:
+                _popup.Hide();
+                e.Handled = true;
                 break;
-            default:
-                return false;
         }
-
-        args.Handled = true;
-        return true;
-    }
-
-    private void BuildRows()
-    {
-        _rows.Children.Clear();
-        _visuals.Clear();
-        foreach (AutofillEntry entry in _entries)
-        {
-            Grid content = new() { ColumnSpacing = 8 };
-            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-            if (entry.ColorHex is { Length: > 0 } hex)
-            {
-                Ellipse dot = new()
-                {
-                    Width = 10, Height = 10, VerticalAlignment = VerticalAlignment.Center,
-                    Fill = MainViewModel.BrushFromHex(ColorPalette.Resolve(hex))
-                };
-                content.Children.Add(dot);
-            }
-
-            TextBlock text = new()
-            {
-                Text = entry.Text,
-                FontSize = 15,
-                Foreground = _rowTextBrush,
-                VerticalAlignment = VerticalAlignment.Center,
-                TextTrimming = TextTrimming.CharacterEllipsis
-            };
-            Grid.SetColumn(text, 1);
-            content.Children.Add(text);
-
-            if (!string.IsNullOrEmpty(entry.Detail))
-            {
-                TextBlock detail = new()
-                {
-                    Text = entry.Detail,
-                    FontSize = 12,
-                    Opacity = .7,
-                    Foreground = _rowTextBrush,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                Grid.SetColumn(detail, 2);
-                content.Children.Add(detail);
-            }
-
-            Border row = new()
-            {
-                CornerRadius = new CornerRadius(6),
-                Padding = new Thickness(10, 6, 10, 6),
-                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
-                Child = content,
-                Tag = entry
-            };
-            int index = _visuals.Count;
-            row.PointerEntered += (_, _) =>
-            {
-                _highlight = index;
-                ApplyHighlight();
-            };
-            // 用 Tapped 而不是 PointerPressed 选中：按下就选中会让触屏拖动被当成点击，
-            // 也没法把平移交给滚动容器，候选列表在触屏上就滑不动。
-            row.Tapped += (_, args) =>
-            {
-                args.Handled = true;
-                Choose(entry);
-            };
-            _visuals.Add(row);
-            _rows.Children.Add(row);
-        }
-
-        LimitVisibleRows();
-    }
-
-    /// <summary>
-    /// 按真实行高限制浮层高度：一次最多露出 VisibleRowLimit 行，其余在浮层内部滚动。
-    /// 行高由字号和内边距决定，这里量真实行而不是写死数字，改字体或缩放后同样成立。
-    /// </summary>
-    private void LimitVisibleRows()
-    {
-        _rows.Measure(new Size(MaximumWidth, double.PositiveInfinity));
-        int count = Math.Min(VisibleRowLimit, _rows.Children.Count);
-        double height = Math.Max(0, count - 1) * _rows.Spacing;
-        for (int index = 0; index < count; index++)
-        {
-            height += _rows.Children[index].DesiredSize.Height;
-        }
-
-        _scroll.MaxHeight = Math.Max(1, height);
-    }
-
-    private void ApplyHighlight()
-    {
-        for (int index = 0; index < _visuals.Count; index++)
-        {
-            _visuals[index].Background = new SolidColorBrush(index == _highlight ? HighlightColor() : Microsoft.UI.Colors.Transparent);
-        }
-    }
-
-    /// <summary>
-    /// 按实际主题解析浮层配色。代码创建的控件不会随主题资源引用自动换色，
-    /// 因此主题变化后必须重新取色，否则浅色模式会保留深色背景而文字已经变黑。
-    /// </summary>
-    private void ApplyTheme(ElementTheme theme)
-    {
-        bool light = theme == ElementTheme.Light;
-        if (_themed && _light == light) return;
-        _themed = true;
-        _light = light;
-        _frame.Background = ThemedBrush("BoardSurfaceElevatedBrush", light, BoardTheme.SurfaceColorFor(light));
-        _frame.BorderBrush = ThemedBrush("BoardLineBrush", light, BoardTheme.LineColorFor(light));
-        _rowTextBrush = ThemedBrush("BoardTextBrush", light, BoardTheme.TextColorFor(light));
-        // 候选行已经生成时同步换色，避免主题切换后新旧颜色混在一起。
-        foreach (Border row in _visuals)
-        {
-            if (row.Child is Grid content)
-            {
-                foreach (TextBlock text in content.Children.OfType<TextBlock>())
-                {
-                    text.Foreground = _rowTextBrush;
-                }
-            }
-        }
-    }
-
-    private void Place(FrameworkElement anchor, Rect? caret)
-    {
-        if (_popup.Parent is not UIElement parent || anchor.XamlRoot is null) return;
-        Rect bounds = new(0, 0, Math.Max(1, anchor.ActualWidth), Math.Max(1, anchor.ActualHeight));
-        if (caret is { } caretRect && caretRect.Width >= 0 && caretRect.Height > 0)
-            bounds = new Rect(caretRect.X, caretRect.Y, Math.Max(1, caretRect.Width), caretRect.Height);
-        Point origin = anchor.TransformToVisual(parent).TransformPoint(new Point(bounds.X, bounds.Y));
-
-        _frame.Measure(new Size(MaximumWidth, double.PositiveInfinity));
-        double parentWidth = parent is FrameworkElement element ? element.ActualWidth : MaximumWidth;
-        double parentHeight = parent is FrameworkElement host ? host.ActualHeight : 0;
-        // 候选名较长时放宽到 MaxWidth；窗口比浮层还窄时再收窄到可用宽度，避免被裁掉。
-        double width = Math.Clamp(_frame.DesiredSize.Width, MinimumWidth, MaximumWidth);
-        width = Math.Min(width, Math.Max(MinimumWidth, parentWidth - 16));
-        double height = Math.Max(1, _frame.DesiredSize.Height);
-        double x = Math.Clamp(origin.X, 8, Math.Max(8, parentWidth - width - 8));
-        double below = origin.Y + bounds.Height + 6;
-        double above = origin.Y - height - 6;
-        double y = below + height > parentHeight - 8 && above >= 8 ? above : below;
-        _popup.HorizontalOffset = x;
-        _popup.VerticalOffset = Math.Max(8, Math.Min(y, Math.Max(8, parentHeight - height - 8)));
-    }
-
-    private Windows.UI.Color HighlightColor() => _light
-        ? Windows.UI.Color.FromArgb(255, 232, 232, 251)
-        : Windows.UI.Color.FromArgb(255, 42, 43, 88);
-
-    /// <summary>主题字典里的画笔本身随主题切换，必须显式指定要取哪套，不能依赖控件自身的资源引用。</summary>
-    private static Brush ThemedBrush(string key, bool light, Windows.UI.Color fallback)
-    {
-        return LookupThemedBrush(Application.Current.Resources, key, light ? "Light" : "Dark")
-            ?? new SolidColorBrush(fallback);
-    }
-
-    // 主题字典位于合并的资源字典里（Themes/ThemeResources.xaml），必须递归查找才能按主题取到画笔。
-    private static Brush? LookupThemedBrush(ResourceDictionary dictionary, string key, string themeKey)
-    {
-        if (dictionary.ThemeDictionaries.TryGetValue(themeKey, out object? value) &&
-            value is ResourceDictionary themes &&
-            themes.TryGetValue(key, out object? entry) &&
-            entry is Brush brush)
-        {
-            return brush;
-        }
-
-        foreach (ResourceDictionary merged in dictionary.MergedDictionaries)
-        {
-            if (LookupThemedBrush(merged, key, themeKey) is { } found) return found;
-        }
-
-        return null;
     }
 }

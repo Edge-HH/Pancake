@@ -6,20 +6,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../src/Pancake/Services/BackgroundPlaylist.cs" Link="BackgroundPlaylist.cs" />
-    <Compile Include="../../src/Pancake/Services/MediaLibrary.cs" Link="MediaLibrary.cs" />
-    <Compile Include="../../src/Pancake/Services/WallpaperEngineLibrary.cs" Link="WallpaperEngineLibrary.cs" />
-    <Compile Include="../../src/Pancake/Services/ColorPalette.cs" Link="ColorPalette.cs" />
-    <Compile Include="../../src/Pancake/Services/XiaomiWeatherService.cs" Link="XiaomiWeatherService.cs" />
-    <Compile Include="../../src/Pancake/Services/DefaultContentColors.cs" Link="DefaultContentColors.cs" />
-    <Compile Include="../../src/Pancake/Services/NoiseAlertGate.cs" Link="NoiseAlertGate.cs" />
-    <Compile Include="../../src/Pancake/Services/NoiseAlertTone.cs" Link="NoiseAlertTone.cs" />
-    <Compile Include="../../src/Pancake/Services/ProjectState.cs" Link="ProjectState.cs" />
-    <Compile Include="../../src/Pancake/Services/PinyinIndex.cs" Link="PinyinIndex.cs" />
-    <Compile Include="../../src/Pancake/Services/AutofillService.cs" Link="AutofillService.cs" />
-    <Compile Include="../../src/Pancake/Services/ToolbarAutoHidePolicy.cs" Link="ToolbarAutoHidePolicy.cs" />
-    <Content Include="../../src/Pancake/Assets/Pinyin/pinyin.txt" Link="Assets/Pinyin/pinyin.txt" CopyToOutputDirectory="PreserveNewest" />
-    <Compile Include="../../src/Pancake/Services/WidgetLayout.cs" Link="WidgetLayout.cs" />
-    <Compile Include="../../src/Pancake/Services/GitHubUpdateService.cs" Link="GitHubUpdateService.cs" />
+    <ProjectReference Include="..\..\src\Pancake.Core\Pancake.Core.csproj" />
+    <Content Include="..\..\src\Pancake.Core\Assets\Pinyin\pinyin.txt"
+             Link="Assets\Pinyin\pinyin.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

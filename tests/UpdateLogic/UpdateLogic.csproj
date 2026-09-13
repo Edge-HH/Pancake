@@ -4,11 +4,11 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../src/Pancake/Services/PortableUpdateService.cs" Link="PortableUpdateService.cs" />
-    <Compile Include="../../src/Pancake/Services/GitHubUpdateService.cs" Link="GitHubUpdateService.cs" />
-    <Compile Include="../../src/Pancake/Services/ReleaseUpdateService.cs" Link="ReleaseUpdateService.cs" />
-    <Compile Include="../../src/Pancake/Services/SplitUpdatePackage.cs" Link="SplitUpdatePackage.cs" />
-    <Content Include="../../src/Pancake/Tools/7zip/**/*" Link="Tools/7zip/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="../../src/Pancake/ApplyUpdate.ps1" Link="ApplyUpdate.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <ProjectReference Include="..\..\src\Pancake.Core\Pancake.Core.csproj" />
+    <!-- 覆盖式更新依赖 7-Zip 与 PowerShell 脚本，这两项资源只随 Windows 平台工程分发。 -->
+    <Content Include="..\..\src\platforms\Pancake.Platforms.Windows\Tools\7zip\**\*"
+             Link="Tools\7zip\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\src\platforms\Pancake.Platforms.Windows\ApplyUpdate.ps1"
+             Link="ApplyUpdate.ps1" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

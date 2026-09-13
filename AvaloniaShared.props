@@ -1,0 +1,6 @@
+<Project>
+	<!-- Avalonia 版本集中在此，保证共用界面与各平台工程始终引用同一版本。 -->
+	<PropertyGroup>
+		<AvaloniaVersion>11.3.17</AvaloniaVersion>
+	</PropertyGroup>
+</Project>

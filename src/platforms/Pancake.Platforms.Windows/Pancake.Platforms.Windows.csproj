@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Windows 平台实现：注册表、Mica、覆盖式更新等只在 Windows 包内生效。 -->
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>Pancake.Platforms.Windows</RootNamespace>
+    <AssemblyName>Pancake.Platforms.Windows</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Pancake.Platforms.Abstractions\Pancake.Platforms.Abstractions.csproj" />
+    <!-- 网页壁纸使用系统 WebView2 运行时，不打包 Chromium，也不引入商业授权依赖。 -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3351.48" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 便携更新所需的解压工具与覆盖脚本只随 Windows 包分发。 -->
+    <Content Include="Tools\7zip\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="ApplyUpdate.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Import Project="../../../Global.props" />
+  <Import Project="../../../AvaloniaShared.props" />
+</Project>

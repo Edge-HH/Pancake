@@ -1,0 +1,57 @@
+<Project>
+	<!--
+	  平台选择规则（参考 ClassIsland 的 CrossPlatformProps.props）：
+	  - 日常开发：按当前操作系统自动选择平台工程与目标框架。
+	  - 正式发布：由 CI 传入 PublishBuilding=true 与 PublishPlatform=windows|linux|macos，
+	    这样可以在任意一台构建机上交叉产出其它平台的包。
+	-->
+	<PropertyGroup>
+		<BaseFramework Condition="'$(BaseFramework)' == ''">net8.0</BaseFramework>
+		<Os_IsWindows>$([System.OperatingSystem]::IsWindows())</Os_IsWindows>
+		<Os_IsLinux>$([System.OperatingSystem]::IsLinux())</Os_IsLinux>
+		<Os_IsMacOs>$([System.OperatingSystem]::IsMacOs())</Os_IsMacOs>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(PublishBuilding)' == 'true' Or '$(PublishPlatform)' != ''">
+		<Platforms_Windows Condition="'$(PublishPlatform)' == 'windows'">true</Platforms_Windows>
+		<Platforms_Linux Condition="'$(PublishPlatform)' == 'linux'">true</Platforms_Linux>
+		<Platforms_MacOs Condition="'$(PublishPlatform)' == 'macos'">true</Platforms_MacOs>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(PublishBuilding)' != 'true' And '$(PublishPlatform)' == ''">
+		<Platforms_Windows Condition="'$(Os_IsWindows)' == 'true'">true</Platforms_Windows>
+		<Platforms_Linux Condition="'$(Os_IsLinux)' == 'true'">true</Platforms_Linux>
+		<Platforms_MacOs Condition="'$(Os_IsMacOs)' == 'true'">true</Platforms_MacOs>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<!-- 兜底：发布参数写错时退化为当前系统，避免出现没有任何平台被选中的空构建。 -->
+		<Platforms_Windows Condition="'$(Platforms_Windows)' != 'true' And '$(Platforms_Linux)' != 'true' And '$(Platforms_MacOs)' != 'true' And '$(Os_IsWindows)' == 'true'">true</Platforms_Windows>
+		<Platforms_Linux Condition="'$(Platforms_Windows)' != 'true' And '$(Platforms_Linux)' != 'true' And '$(Platforms_MacOs)' != 'true' And '$(Os_IsLinux)' == 'true'">true</Platforms_Linux>
+		<Platforms_MacOs Condition="'$(Platforms_Windows)' != 'true' And '$(Platforms_Linux)' != 'true' And '$(Platforms_MacOs)' != 'true' And '$(Os_IsMacOs)' == 'true'">true</Platforms_MacOs>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<TargetFramework>$(BaseFramework)</TargetFramework>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(Platforms_Windows)' == 'true'">
+		<TargetFramework>$(BaseFramework)-windows10.0.19041.0</TargetFramework>
+		<DefineConstants>$(DefineConstants);Platforms_Windows</DefineConstants>
+		<OutputType>WinExe</OutputType>
+		<!-- DPI 感知与 Windows 版本声明只对 Windows 目标生效。 -->
+		<ApplicationManifest>app.manifest</ApplicationManifest>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(Platforms_MacOs)' == 'true'">
+		<TargetFramework>$(BaseFramework)</TargetFramework>
+		<DefineConstants>$(DefineConstants);Platforms_MacOs</DefineConstants>
+		<OutputType>Exe</OutputType>
+	</PropertyGroup>
+	<PropertyGroup Condition="'$(Platforms_Linux)' == 'true'">
+		<TargetFramework>$(BaseFramework)</TargetFramework>
+		<DefineConstants>$(DefineConstants);Platforms_Linux</DefineConstants>
+		<OutputType>Exe</OutputType>
+	</PropertyGroup>
+
+	<Target Name="PrintPlatformInfo" BeforeTargets="Build;ProcessFrameworkReferences">
+		<Message Text="Pancake 平台: TFM=$(TargetFramework) RID=$(RuntimeIdentifier) Platform=$(Platforms_Windows)$(Platforms_Linux)$(Platforms_MacOs)" Importance="high" />
+	</Target>
+</Project>

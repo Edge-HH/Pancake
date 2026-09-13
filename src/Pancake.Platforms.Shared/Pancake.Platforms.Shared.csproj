@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- 三端共用的平台实现：目前只有音频，全部基于 SoundFlow(MiniAudio)，自带各平台原生库。 -->
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Pancake.Platforms.Shared</RootNamespace>
+    <AssemblyName>Pancake.Platforms.Shared</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Pancake.Platforms.Abstractions\Pancake.Platforms.Abstractions.csproj" />
+    <PackageReference Include="SoundFlow" Version="1.4.1" />
+  </ItemGroup>
+
+  <Import Project="../../Global.props" />
+</Project>

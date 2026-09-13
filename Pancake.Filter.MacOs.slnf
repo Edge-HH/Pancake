@@ -1,0 +1,14 @@
+{
+  "solution": {
+    "path": "Pancake.slnx",
+    "projects": [
+      "src\\Pancake.Desktop\\Pancake.Desktop.csproj",
+      "src\\Pancake\\Pancake.csproj",
+      "src\\Pancake.Core\\Pancake.Core.csproj",
+      "src\\Pancake.Platforms.Abstractions\\Pancake.Platforms.Abstractions.csproj",
+      "src\\platforms\\Pancake.Platforms.MacOs\\Pancake.Platforms.MacOs.csproj",
+      "tests\\ProjectLogic\\ProjectLogic.csproj",
+      "tests\\SettingsLogic\\SettingsLogic.csproj"
+    ]
+  }
+}

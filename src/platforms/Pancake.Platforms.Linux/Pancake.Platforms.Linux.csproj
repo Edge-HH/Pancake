@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Linux 平台实现：数据目录遵循 XDG，更新只提示不覆盖。 -->
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Pancake.Platforms.Linux</RootNamespace>
+    <AssemblyName>Pancake.Platforms.Linux</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Pancake.Platforms.Abstractions\Pancake.Platforms.Abstractions.csproj" />
+  </ItemGroup>
+
+  <Import Project="../../../Global.props" />
+  <Import Project="../../../AvaloniaShared.props" />
+</Project>

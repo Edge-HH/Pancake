@@ -4,10 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../src/Pancake/Services/ProjectState.cs" Link="ProjectState.cs" />
-    <Compile Include="../../src/Pancake/Services/ProjectStore.cs" Link="ProjectStore.cs" />
-    <Compile Include="../../src/Pancake/Services/ExportLayout.cs" Link="ExportLayout.cs" />
-    <Compile Include="../../src/Pancake/Services/BoardLayout.cs" Link="BoardLayout.cs" />
-    <Compile Include="../../src/Pancake/Services/InkGeometry.cs" Link="InkGeometry.cs" />
+    <!-- 逻辑已抽取到 Pancake.Core，测试改为引用工程，三端都能直接运行。 -->
+    <ProjectReference Include="..\..\src\Pancake.Core\Pancake.Core.csproj" />
   </ItemGroup>
 </Project>

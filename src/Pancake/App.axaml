@@ -1,0 +1,18 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Pancake.App"
+             xmlns:fa="using:FluentAvalonia.Styling"
+             RequestedThemeVariant="Dark">
+  <Application.Styles>
+    <!-- FluentAvaloniaTheme 提供与 WinUI 对应的主题、强调色与控件样式。 -->
+    <fa:FluentAvaloniaTheme PreferSystemTheme="False" />
+  </Application.Styles>
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceInclude Source="avares://Pancake.Ui/Themes/ThemeResources.axaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
+</Application>

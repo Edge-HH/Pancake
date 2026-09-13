@@ -1,47 +1,38 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
-    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <!-- 三端共用的 Avalonia 界面库；目标框架保持平台无关，由桌面入口决定具体平台。 -->
+    <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>Pancake</RootNamespace>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Platforms>x64</Platforms>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <SelfContained>false</SelfContained>
-    <WindowsPackageType>None</WindowsPackageType>
-    <UseWinUI>true</UseWinUI>
-    <!-- 生成并发布 XBF/PRI 资源；缺少工具链时 publish 会漏掉主窗口及控件主题。 -->
-    <EnableMsixTooling>true</EnableMsixTooling>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <LangVersion>latest</LangVersion>
-    <Version>2.0.6</Version>
-    <SatelliteResourceLanguages>zh-Hans;zh-Hant;en</SatelliteResourceLanguages>
+    <AssemblyName>Pancake.Ui</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- 仅引用界面组件，避免元包引入未使用的 AI、ML 和 Widgets 运行时。 -->
-    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
-    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260803003" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
-    <PackageReference Include="NAudio.Wasapi" Version="2.4.0" />
-    <PackageReference Include="NAudio.WinMM" Version="2.4.0" />
+    <ProjectReference Include="..\Pancake.Core\Pancake.Core.csproj" />
+    <ProjectReference Include="..\Pancake.Platforms.Abstractions\Pancake.Platforms.Abstractions.csproj" />
+    <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Skia" Version="$(AvaloniaVersion)" />
+    <!-- FluentAvaloniaUI 提供 NavigationView、InfoBar、NumberBox 等 WinUI 对应控件，界面按原版 Fluent 风格重写。 -->
+    <PackageReference Include="FluentAvaloniaUI" Version="2.4.1" />
+    <!-- 视频背景：LibVLCSharp 提供托管绑定与 Avalonia 的 VideoView 控件（LGPL-2.1+）。 -->
+    <PackageReference Include="LibVLCSharp.Avalonia" Version="3.10.1" />
+    <!-- 统一 FluentAvalonia 传递依赖的 Avalonia 组件版本，避免与主包版本不一致。 -->
+    <PackageReference Include="Avalonia.Controls.ColorPicker" Version="$(AvaloniaVersion)" />
+    <!-- DataGrid 使用独立的版本线，11.3.13 是 11.x 系列的最新版。 -->
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.13" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="Assets\Settings\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="Assets\Fonts\**\*" Exclude="Assets\Fonts\*.json" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Assets\Pinyin\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="ApplyUpdate.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="Tools\7zip\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="Assets\xiaomi_weather_cities.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 字体与设置页配图随界面库一起编译为 Avalonia 资源，避免依赖系统字体。 -->
+    <AvaloniaResource Include="Assets\Fonts\**" />
+    <AvaloniaResource Include="Assets\Settings\**" />
   </ItemGroup>
+
   <PropertyGroup Condition="'$(EnableUiVerification)' == 'true'">
+    <!-- 与旧版一致：只有验证构建才带上界面自检入口，正式包不含这些代码。 -->
     <DefineConstants>$(DefineConstants);PANCAKE_UI_TESTS</DefineConstants>
   </PropertyGroup>
-  <ItemGroup Condition="'$(EnableUiVerification)' == 'true'">
-    <Compile Include="../../tests/UiVerification.cs" Link="UiVerification.cs" />
-    <Compile Include="../../tests/MediaUiVerification.cs" Link="MediaUiVerification.cs" />
-    <Compile Include="../../tests/MediaPerformanceVerification.cs" Link="MediaPerformanceVerification.cs" />
-  </ItemGroup>
+
+  <Import Project="../../Global.props" />
+  <Import Project="../../AvaloniaShared.props" />
 </Project>

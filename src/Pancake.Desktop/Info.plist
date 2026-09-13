@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>Pancake</string>
+	<key>CFBundleExecutable</key>
+	<string>Pancake</string>
+	<key>CFBundleIdentifier</key>
+	<string>cn.pancake.app</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Pancake</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>3.0.0</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<!-- 噪音检测需要麦克风；未声明时 macOS 会在申请权限阶段直接失败。 -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pancake 使用麦克风实时估算教室噪音水平，不录音也不保存音频。</string>
+</dict>
+</plist>

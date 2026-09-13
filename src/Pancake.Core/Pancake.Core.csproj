@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- 纯逻辑层：不允许引用任何界面框架或操作系统专属 API，保证三端与单元测试都能直接加载。 -->
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Pancake</RootNamespace>
+    <AssemblyName>Pancake.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\Pinyin\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\xiaomi_weather_cities.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Import Project="../../Global.props" />
+</Project>

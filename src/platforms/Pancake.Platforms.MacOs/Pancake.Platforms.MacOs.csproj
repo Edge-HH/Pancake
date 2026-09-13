@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- macOS 平台实现：数据目录遵循 Application Support 约定。 -->
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Pancake.Platforms.MacOs</RootNamespace>
+    <AssemblyName>Pancake.Platforms.MacOs</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Pancake.Platforms.Abstractions\Pancake.Platforms.Abstractions.csproj" />
+  </ItemGroup>
+
+  <Import Project="../../../Global.props" />
+  <Import Project="../../../AvaloniaShared.props" />
+</Project>

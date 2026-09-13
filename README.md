@@ -1,12 +1,53 @@
 # Pancake
 
-> 面向教室大屏与触控设备的 Windows 班级作业看板。
+> 面向教室大屏与触控设备的班级作业看板，支持 Windows、Linux 与 macOS。
 
-![Platform](https://img.shields.io/badge/platform-Windows-0078D4?logo=windows11&logoColor=white)
+![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-0078D4)
 ![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white)
-![WinUI](https://img.shields.io/badge/UI-WinUI%203-0078D4)
+![Avalonia](https://img.shields.io/badge/UI-Avalonia%2011-8B44AC)
 
-Pancake 将时间、日期、天气、教室噪音和各科作业集中在一块适合远距离阅读的深色看板中。它使用 WinUI 3 构建，支持鼠标、触控笔与触摸操作，并为教室大屏提供默认全屏展示。
+Pancake 将时间、日期、天气、教室噪音和各科作业集中在一块适合远距离阅读的深色看板中。它使用 Avalonia 构建一套三端共用界面，支持鼠标、触控笔与触摸操作，并为教室大屏提供默认全屏展示。
+
+## 🚧 迁移状态
+
+本分支（`avalonia`）正在把原来的 WinUI 3 版本迁移为三端共用的 Avalonia 实现，`main` 分支上的 2.x WinUI 版本保持可用并继续发布。
+
+| 能力 | 状态 |
+| --- | --- |
+| 分层结构（Core / 平台抽象 / 各平台实现 / 共用界面） | 已完成 |
+| 三端构建与发布流水线 | 已完成 |
+| 项目数据与应用设置 | 已完成：自动迁移旧数据，数据损坏时备份原文件并继续启动 |
+| 看板显示 | 已完成：分屏／仅作业／仅时钟／自由布局、网格与点阵、区域背景（颜色与图片）、时钟与组件栏、磁贴与笔迹渲染 |
+| 控制窗外观 | 已完成：位置、缩放、圆角、边距、背景颜色与透明度、无字模式 |
+| 磁贴编辑 | 已完成：拖动、八方向缩放、网格吸附与对齐辅助线、改名、增删作业、删除科目；拖动把手自带最小模板，命中区域不依赖系统主题（否则 Thumb 拿不到模板就会「看得见点不到」） |
+| 富文本 | 已完成：与界面无关的富文本模型、RTF 读写与旧存档迁移、字体／加粗／斜体／下划线／文字颜色／高光的编辑与显示，颜色与高光支持跟随色系；字体按片段保存，本机缺失的字体显示时退回随包字体但保留原名 |
+| 图片附件 | 已完成：添加图片（复制进项目资源目录并登记最近使用）、点击选中后拖动、八点缩放、裁切模式、顺／逆时针旋转、复位与删除；附件控件跟随磁贴的编辑态，查看模式只显示画面、编辑模式才允许选中与拖动 |
+| 手写 | 已完成：画笔与橡皮擦、颜色与三档粗细预设、撤销、按磁贴或全部清空；仅时钟模式下可在整块屏幕书写并随项目保存 |
+| 项目与文件 | 已完成：最近项目切换、新建（保留布局／完全重置）、重命名、删除、导入与保存 `.pch`、存储失败提示；没有项目时显示引导面板而不是自动新建 |
+| 天气 | 已完成：看板显示温度／天气／预警、十分钟自动刷新、地区搜索选择与预警开关 |
+| 噪音检测 | 已完成：三端共用的 SoundFlow(MiniAudio) 麦克风采集与提示音播放、检测间隔、设备选择、吵闹阈值、三声提示音、音量、目标音量校准与最小化暂停 |
+| 自动填充 | 已完成：学科补全（中文／全拼／首字母、随机配色、可增删改）与作业补全（按阈值学习、全局或分学科隔离、屏蔽／删除／清空、过期规则），候选浮层最多五条并支持键盘与点击采纳 |
+| 背景与磁贴外观 | 已完成：跨区底图、时钟区与作业板区域底图、磁贴底图的颜色层（含独立透明度与清除）、图片、三种显示模式与毛玻璃；磁贴标题字号 |
+| 图片导出 | 已完成：画布比例与自定义像素尺寸、标题（显示／文本／位置／字号）、导出背景色与背景图片、磁贴背景透明度与模糊、拖动排版与选中缩放、重叠／越界校验，输出 PNG 且不修改看板 |
+| 作业板缩放与无限作业板 | 已完成：20%–400% 缩放（缩放岛缩小／当前比例／连续滑条／放大）、Ctrl + 滚轮按指针位置缩放、鼠标中键平移、放大后自动启用滚动条；无限作业板随磁贴向外扩展画布 |
+| 浮岛与控制窗动画 | 已完成：富文本格式悬浮岛（聚焦作业文字时出现，与画笔栏互斥）、画笔栏与缩放岛按控制窗实际位置贴合（横置时左／右，竖置时上／下）；查看模式无操作达到设定时长后淡出或飞出，任何指针或键盘操作立即恢复 |
+| 自动更新 | 已完成：启动时按设置自动检查（可关闭）、手动检查、真实下载 Release 资产、ZIP／7z／分卷校验与解压，确认后保存项目、退出、覆盖并重启；非 Windows 平台只提示新版本并打开发布页 |
+| 背景媒体进阶 | 已完成：最近使用的图像（八个入口共用一份历史）、背景播放队列（增删与上下移、顺序循环／随机、定时切换与间隔）、Wallpaper Engine 视频壁纸导入（导入窗口按旧版显示预览图、标题与「视频壁纸／网页壁纸」类型，没有预览图时占位；复制到数据目录后不再依赖 WE 运行） |
+| 视频背景 | 已完成：用 LibVLC 播放视频背景（静音、可循环、可选「播放完成时切换下一项」）；Windows 与 macOS 随包分发原生库，Linux 使用发行版 libvlc 并在缺失时自动降级为图片背景 |
+| 网页壁纸 | 已完成：Windows 上用系统 WebView2 渲染本地网页项目（虚拟主机映射、禁止跨源导航／弹窗／下载／权限请求，不注入原生对象），可从 Wallpaper Engine 导入网页壁纸；其他平台隐藏该入口 |
+| 设置页 | 已完成：布局、外观（主题／磁贴／网格／控制窗／背景板）、组件（天气／噪音检测）、自动填充（学科／作业）与关于共 11 个分类 |
+| 控制窗与浮岛外观 | 已完成：控制窗的停靠位置、缩放、圆角、颜色层、毛玻璃背衬与无字模式在启动时按设置应用；三块浮岛（画笔栏、缩放岛、富文本岛）跟随同一套外观并随之缩放；左右居中停靠时控制窗与浮岛改为竖排 |
+| 颜色与导出色系 | 已完成：颜色面板提供预设色与取色器，另有「清除背景颜色」「恢复主题背景色」与「应用颜色」；导出的图片可以选择色系，只重算导出副本的预设主题色与富文本预设色 |
+| 自动填充页操作 | 已完成：已收录条目可改生效范围（全局或任选学科）、改名、屏蔽与删除；被屏蔽的词单独列出并可恢复收录；可手动添加作业类型（名称 + 生效范围） |
+| 查看模式提示 | 已完成：全屏查看时在看板上拖动会短暂高亮并显示「退出全屏」；网格吸附按钮的气泡显示当前吸附状态与网格步长 |
+| 设置页实时预览 | 已完成：布局页预览四个示例磁贴的真实自动排列结果与网格，磁贴页预览示例磁贴与底图，背景板页预览跨区／时钟区／作业板三层底图，网格页对比查看与编辑两种模式，控制窗页预览控制窗的停靠、缩放、圆角与无字模式 |
+| 自动排列按内容收紧 | 已完成：自动排列会测量标题与每条作业的内容，先横排满一行再换行，必要时按列宽收窄磁贴让文字换行，仍然放不下才等比缩小；关闭「自动调整磁贴大小」时保持用户设置的尺寸 |
+| 窗口材质（Windows） | 已完成：按 Mica → AcrylicBlur → Blur → None 的顺序申请系统材质，材质真正生效时设置页半透明透出材质、窗口底色透明；其它平台或系统没有可用材质时保持纯色背景，看板区域始终由自己的背景层覆盖 |
+| 控制窗自动隐藏的例外 | 已完成：打开菜单、取色浮层或输入候选浮层期间，以及按住指针拖动（磁贴以外的分隔条、滚动条等）期间都不会隐藏控制窗；窗口失焦时清空按下的指针状态 |
+| 浮岛与控制窗的截面尺寸 | 已完成：富文本岛与缩放岛在横置控制窗下与控制窗等高、竖版控制窗下等宽（与旧版一致，画笔栏因内容更高保持自然尺寸）；切换停靠方向后布局稳定时会自动重新对齐 |
+| 磁贴预览的固定区 | 已完成：窗口够宽时磁贴外观页的预览固定在设置页右侧、向下滚动改选项时始终可见；宽度不足时自动回到「标题大小」上方的页内位置，两种位置共用同一个预览场景 |
+
+本文档后半部分的设置与交互说明描述的是完整产品行为；与 2.x 版本仍有差异的地方集中列在「当前限制」里。
 
 ## ✨ 功能
 
@@ -64,31 +105,39 @@ Pancake 将时间、日期、天气、教室噪音和各科作业集中在一块
 
 ### 环境要求
 
-- Windows 10 1809（版本 17763）或更高版本
-- x64 设备
 - [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- Visual Studio 2022（推荐），并安装“使用 .NET 的 Windows 应用 SDK”相关工作负载
-- .NET 8 Runtime（直接运行框架依赖产物时需要）；正式便携包自带 .NET 与 Windows App SDK 所需运行资源
+- Windows 10 1809（版本 17763）或更高版本、Ubuntu 22.04 及以上的 X11/Wayland(XWayland) 桌面、macOS 11 及以上
+- x64 或 arm64 设备
+- 直接运行框架依赖产物时需要 .NET 8 Runtime；正式便携包自带运行环境，无需另外安装
+- Linux 需要系统提供 X11 相关库（`libx11-6`、`libice6`、`libsm6`）与 `fontconfig`
 
 ### 命令行
 
 ```powershell
 git clone https://github.com/Edge-HH/Pancake.git
 cd Pancake
-dotnet restore .\src\Pancake\Pancake.csproj
-dotnet build .\src\Pancake\Pancake.csproj -c Release -p:Platform=x64
-dotnet run --project .\src\Pancake\Pancake.csproj -c Release -p:Platform=x64
+dotnet build .\Pancake.slnx -c Release
+dotnet run --project .\src\Pancake.Desktop\Pancake.Desktop.csproj -c Release
 ```
 
-也可以使用 Visual Studio 打开 `Pancake.slnx`，选择 `x64` 后启动 `Pancake` 项目。
+命令行默认按当前操作系统选择平台实现；用 Visual Studio、Rider 或 VS Code 打开 `Pancake.slnx` 后直接启动 `Pancake.Desktop` 即可。
+
+交叉发布其它平台的免安装包（以 Linux x64 为例）：
+
+```powershell
+dotnet publish .\src\Pancake.Desktop\Pancake.Desktop.csproj -c Release -r linux-x64 --self-contained true -p:PublishPlatform=linux -o .\artifacts\linux-x64
+```
+
+可用的 `PublishPlatform` 为 `windows`、`linux`、`macos`，运行标识为 `win-x64`、`linux-x64`、`linux-arm64`、`osx-x64`、`osx-arm64`。
+
+同一个工作目录里交叉发布会按 `PublishPlatform` 改写还原结果。发布过其它平台之后回到本机平台构建，请先执行一次 `dotnet restore`（或不要给 `dotnet build` 加 `--no-restore`），否则会报 `NETSDK1005：资产文件没有 net8.0-windows… 目标`。
 
 ### 自动构建与发布
 
-- 推送 `v主版本.次版本.修订版本` 格式的标签（例如 `v1.2.3`）时，GitHub Actions 会执行 Release x64 构建、设置和排版逻辑测试、更新覆盖/回滚测试以及静态交互契约检查。
-- 工作流名称为“📦 构建与发布”，各步骤均使用前置 emoji 的中文名称。
-- 发布包包含 .NET 与必要的 WinUI 运行时，精简未使用的 AI、ML、Widgets、WinForms 依赖，仅保留简体中文、繁体中文和英语语言回退资源。
-- 精简之后压缩 ZIP，再解压成品并在临时副本中实际加载主窗口，确认正常退出才创建 GitHub Release；`EnableMsixTooling` 保证主窗口与控件主题的 PRI/XBF 资源进入发布包。
-- 在 Actions 页手动运行该工作流只会生成 ZIP 产物供检查，不会创建 GitHub Release。
+- 推送 `v主版本.次版本.修订版本` 格式的标签（例如 `v1.2.3`）时，GitHub Actions 会在 Windows、Linux、macOS 三种运行器上分别构建，并运行核心逻辑测试。
+- 工作流名称为“📦 构建与发布”，每个平台各自产出免安装包，最后汇总到同一个 GitHub Release。
+- 产物命名：`Pancake-win-x64-<版本>.zip`、`Pancake-linux-x64-<版本>.tar.gz`、`Pancake-linux-arm64-<版本>.tar.gz`、`Pancake-macos-arm64-<版本>.zip`、`Pancake-macos-x64-<版本>.zip`（macOS 包内为 `Pancake.app`）。
+- 在 Actions 页手动运行该工作流只会生成压缩包产物供检查，不会创建 GitHub Release。
 
 正式发布示例：
 
@@ -97,19 +146,23 @@ git tag v1.0.0
 git push origin v1.0.0
 ```
 
-请等待“📦 构建与发布”工作流成功后再分发 Release 地址。用户完整解压 ZIP 后运行 `Pancake.exe` 即可，不能只复制单个 EXE；项目数据保存在程序旁的 `data` 目录。
+请等待“📦 构建与发布”工作流成功后再分发 Release 地址。用户完整解压压缩包后运行其中的可执行文件即可，不能只复制单个文件。
 
-应用内确认更新后会自动解压并覆盖旧文件，再重新启动。更新不会覆盖 `data`，文件备份和执行日志保存在 `data/updates/<随机标识>/backup` 和 `update.log`，覆盖失败时尝试回滚。请先关闭同一目录中其他 Pancake 实例；如果安装目录不可写，更新会在退出前报告错误。旧版无法启动或尚不支持自动覆盖时，需要首次手动解压新版，保留原 `data` 目录。
+Windows 版本在应用内确认更新后会自动解压并覆盖旧文件，再重新启动；更新不会覆盖项目数据，备份与日志保存在数据目录的 `updates` 子目录，覆盖失败时尝试回滚。Linux 与 macOS 版本只提示新版本并打开发布页，由用户自行下载替换。
 
-本地验证同样的发布流程：
+macOS 包目前没有代码签名与公证，首次打开需要右键选择“打开”，或执行 `xattr -dr com.apple.quarantine Pancake.app`。
 
-```powershell
-dotnet publish .\src\Pancake\Pancake.csproj -c Release -r win-x64 --self-contained true -p:Platform=x64 -p:WindowsAppSDKSelfContained=true -o .\artifacts\publish
-.\installer\Optimize-Publish.ps1 -PublishDirectory .\artifacts\publish
-.\tests\verify-release-startup.ps1 -PublishDirectory .\artifacts\publish
-```
+### 数据目录
 
-精简脚本仅处理没有用户 `data` 的独立发布目录，保留运行库、字体和许可证。
+程序按以下顺序决定数据位置，升级与换机时把整个数据目录复制走即可：
+
+1. **便携模式**：程序目录旁已存在 `data` 目录且可写时直接使用它（与 2.x 版本行为一致）。
+2. **用户目录**：
+   - Windows：`%LOCALAPPDATA%\Pancake`
+   - macOS：`~/Library/Application Support/Pancake`
+   - Linux：`$XDG_DATA_HOME/pancake`，未设置时为 `~/.local/share/pancake`
+
+首次以用户目录模式启动时，如果程序目录旁的旧 `data` 目录里有内容，会自动复制到新位置，不会删除旧数据。
 
 ### 启动参数
 
@@ -123,7 +176,7 @@ dotnet publish .\src\Pancake\Pancake.csproj -c Release -r win-x64 --self-contain
 例如：
 
 ```powershell
-dotnet run --project .\src\Pancake\Pancake.csproj -- --windowed --view=editor
+dotnet run --project .\src\Pancake.Desktop\Pancake.Desktop.csproj -- --windowed
 ```
 
 ## 🌤️ 天气配置
@@ -143,35 +196,80 @@ dotnet run --project .\src\Pancake\Pancake.csproj -- --windowed --view=editor
 
 ```text
 Pancake/
-├─ src/Pancake/
-│  ├─ Assets/         # 内置字体、图标与拼音数据（含许可说明）
-│  ├─ Controls/       # 科目磁贴、拖动、缩放与手写交互
-│  ├─ Models/         # 看板、作业、图片与笔迹模型
-│  ├─ Services/       # 项目、作业包、导出排版、字体、自动填充、噪音、天气与更新
-│  ├─ Themes/         # WinUI 主题资源
-│  ├─ ViewModels/     # 主看板状态与编辑快照
-│  └─ MainWindow.*    # 主界面与窗口交互
-├─ tests/             # 项目逻辑、隔离 UI 渲染与交互契约验证
-├─ design-qa.md       # 设计验收记录
+├─ Global.props                 # 新工程共用的编译设置
+├─ CrossPlatformProps.props     # 按系统或发布参数选择目标框架与平台工程
+├─ AvaloniaShared.props         # Avalonia 版本集中管理
+├─ Pancake.Filter.*.slnf        # Windows / Linux / macOS 解决方案筛选器
+├─ src/
+│  ├─ Pancake.Core/             # 纯 net8.0：模型、布局、项目文件、富文本、自动填充、音量换算
+│  ├─ Pancake.Platforms.Abstractions/  # 平台能力接口与 Stub 默认实现
+│  ├─ Pancake/                  # Avalonia 共用界面（主题、控件、视图、视图模型）
+│  ├─ Pancake.Desktop/          # 可执行入口：注册平台服务并启动 Avalonia
+│  └─ platforms/                # Windows / Linux / macOS 各自的能力实现
+├─ legacy/Pancake.WinUI/        # 迁移参考用的 WinUI 2.x 快照，不参与新解决方案构建
+├─ tests/                       # 核心逻辑回归测试
+├─ design-qa.md                 # 设计验收记录
 └─ Pancake.slnx
 ```
 
 ## 🧪 验证
 
-运行静态交互契约检查：
+Avalonia 版本的核心逻辑回归（三个平台都能跑）：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\verify-interaction-contract.ps1
+dotnet run --project .\tests\ProjectLogic\ProjectLogic.csproj -c Release
+dotnet run --project .\tests\RichTextLogic\RichTextLogic.csproj -c Release
+dotnet run --project .\tests\SettingsLogic\SettingsLogic.csproj -c Release
+dotnet run --project .\tests\UpdateLogic\UpdateLogic.csproj -c Release   # 依赖 7-Zip 与 PowerShell，只在 Windows 运行
 ```
 
-该脚本检查触控交互、网格吸附、全局手写工具栏和全屏退出提示等关键实现是否存在。项目与 `.pch` 往返测试可运行 `dotnet run --project tests/ProjectLogic/ProjectLogic.csproj -c Release`，也覆盖紧密网格排版、区域中轴和相邻磁贴吸附。更新测试运行 `dotnet run --project tests/UpdateLogic/UpdateLogic.csproj -c Release`，在临时目录检查解压、覆盖、数据保留、锁定文件回滚和危险路径拒绝。仓库还包含按条件编译的隔离 WinUI 渲染测试，用于验证内置字体、长富文本、图片、笔迹、多比例 PNG、图标、底栏顺序和实际点击后的色卡选中状态；它不会随正式构建进入应用。
+界面自检需要以验证开关发布，再按需要传入下列参数；每个自检都会把结果写到程序目录的同名 txt 文件，并在退出时把验证前的项目与设置原样写回：
+
+```powershell
+dotnet publish .\src\Pancake.Desktop\Pancake.Desktop.csproj -c Release -r win-x64 --self-contained true -p:EnableUiVerification=true -o .\artifacts\ui-check
+.\artifacts\ui-check\Pancake.exe --windowed --verify-settings-pages   # 11 个设置分类能否真实构建，并渲染每块实时预览
+.\artifacts\ui-check\Pancake.exe --windowed --verify-export           # 导出 PNG、标题字体与导出色系
+.\artifacts\ui-check\Pancake.exe --windowed --verify-zoom             # 作业板缩放与滚动范围
+.\artifacts\ui-check\Pancake.exe --windowed --verify-islands          # 浮岛定位、外观跟随、毛玻璃与自动隐藏
+.\artifacts\ui-check\Pancake.exe --windowed --verify-autolayout       # 自动排列的内容收紧、换行与尺寸保持
+.\artifacts\ui-check\Pancake.exe --windowed --verify-richtext-island  # 富文本格式悬浮岛
+.\artifacts\ui-check\Pancake.exe --windowed --verify-playlist         # 播放队列轮播
+.\artifacts\ui-check\Pancake.exe --windowed --verify-web              # 网页壁纸宿主
+.\artifacts\ui-check\Pancake.exe --windowed --verify-video            # 视频解码（需设置 PANCAKE_VIDEO_PATH）
+.\artifacts\ui-check\Pancake.exe --windowed --verify-update           # 更新检查（可选真实下载）
+```
+
+这些自检由 `.github/workflows/release.yml` 在 `windows-latest` 上执行；Linux 与 macOS 运行器只跑上面的核心逻辑回归。2.x 版本遗留下来的 WinUI 脚本与渲染测试作为参考快照保存在 `legacy/Pancake.WinUI/tests`，不参与 Avalonia 版本的构建，也不能作为跨平台验收证据。
+
+界面构建与交互还可以用 Avalonia Headless 测试在**三个平台**上验证（不需要显示设备，Linux 与 macOS 也能跑，CI 的每个平台都会执行）：
+
+```powershell
+dotnet run --project .\tests\UiHeadless\UiHeadless.csproj -c Release -p:EnableUiVerification=true
+```
+
+它覆盖：主窗口与全部设置分类能否真实构建、深色／浅色来回切换后主题色与画刷是否同步、磁贴尺寸与模型是否一致、磁贴是否越出作业板、命中测试在磁贴内外是否落在正确的元素上、**同一份布局在 100%／125%／150%／200% 像素密度下渲染**（像素尺寸按比例变化、布局尺寸不变、同一 DIP 坐标在各档位命中同一个控件、控制窗按钮命中区域不小于 40 DIP）、富文本字体链路（套用系统字体、缺失字体回退、输入层跟随光标、RTF 往返）、**手写链路**（真实指针落笔进模型、颜色与粗细跟随画笔栏、越界不落笔、撤销只撤最后一笔、橡皮擦整条删除、清空生效，以及从设置页回到看板后磁贴仍可命中）、**看板拖动类交互**（磁贴拖动并吸附到网格、拖右边缘缩放、分隔条改比例并拖到端点切换单区）、**自由布局组件**（拖动移动层与缩放手柄后设置里的位置尺寸变化）、**图片附件**（点击选中、拖手柄缩放、拖动画面、工具条旋转、裁切模式下改取景偏移，以及裁切退出），**自动填充的键盘导航**（输入全拼后候选浮层出现、上下键切换、Esc 只收起、回车与 Tab 采纳并套用学科颜色），以及用真实输入管线驱动的全屏退出提示与「按住指针时不自动隐藏」。Wallpaper Engine 的导入窗口会用临时目录里的假安装（一个带预览图、一个没有）驱动真实入口，验证列表的缩略图、占位与类型标签——因此这条 Windows 专属界面路径在三个平台上都能被验证。检查过程中会把各档位的看板截图与设置页截图写到 `tests/UiHeadless/bin/<配置>/<框架>/headless-evidence`，CI 在失败时上传这些截图。定时器驱动的部分（提示自动收起、空闲自动隐藏）在 Windows 的真实窗口自检里覆盖，因为 Headless 环境不推进调度器定时器。
+
+更新自检在 GitHub 对匿名请求按 IP 限流（HTTP 403 + rate limit）时会写出 `UPDATE_SKIPPED_RATE_LIMIT` 并让 CI 跳过该步骤，其它任何失败仍然判为失败——限流是外部配额问题，不会把网络错误误报成「已是最新版本」。
+
+程序化自检覆盖不到的部分（真实输入法组合态、触屏与触控笔手感、系统缩放、麦克风授权与音质、媒体观感、原生文件对话框、覆盖式更新）整理成了三端人工验收清单，见 [`design-qa.md`](design-qa.md) 末尾的「三端人工验收清单」，按清单逐项记录结果即可。
 
 ## 🚧 当前限制
 
+- Wallpaper Engine 导入、网页壁纸与覆盖式自动更新属于 Windows 专属能力：非 Windows 平台会隐藏对应入口，更新改为提示新版本并打开发布页。
 - Release 中优先选择 x64 便携版 ZIP 自动更新，也支持 7z 和上述分卷格式；`.exe`、`.msix` 和 `.msixbundle` 仍按安装包启动。更新包需与便携版一致，将 `Pancake.exe` 等文件放在压缩包根目录。文件被占用或目录不可写时可能无法更新，可查看保留的备份和日志。
+- 更新资产按平台与架构筛选：Windows 只接受 `win`、Linux 只接受 `linux`、macOS 只接受 `macos`，不会把其它平台的包推荐给当前用户。
+- 控制窗与浮岛的毛玻璃是把作业板拍成快照后模糊（约 0.8 秒刷新一次），不是逐帧实时背衬：视频背景下的背衬会略有延迟，作业板被设置页遮挡时会暂时撤下并在返回看板时重建。
+- 窗口标题栏：2.x 把内容延伸到标题栏并用顶栏作为拖动区（自绘标题栏）。Avalonia 版本保留系统标题栏，窗口模式下由系统负责拖动、缩放与窗口按钮；全屏展示不受影响。
+- 应用图标沿用系统默认：2.x 也没有随包分发应用图标（仓库里只有界面用的字体与示例图片），因此 Windows 可执行文件与 macOS `.app` 都不带自定义图标；将来补图标时需要同时准备 Windows 的 `.ico` 与 macOS 的 `.icns`。
+- 富文本编辑器用「透明输入层 + 格式显示层」实现（复用系统输入法、剪贴板与撤销）。字体、加粗等格式会改变字宽，因此同一段里混用多种字体或粗细时，光标位置可能与渲染文字有轻微偏差；单一格式的段落不受影响。旧版用 RichEditBox 原生渲染，不存在这个问题。
+- 导出图片的「色系」只重算预设主题色与富文本里的预设色，自定义颜色保持原值（与看板切换色系的语义一致）；竖版控制窗下富文本岛与缩放岛会改成竖排并与控制窗等宽（横置时等高），画笔栏因为调色板会换行、与旧版一样保持自然尺寸。
+- 设置页预览里的控制窗只显示颜色层与边框：毛玻璃背衬取自看板快照，预览里没有可采样的背板，实际毛玻璃效果请以看板上的控制窗为准。
+- 预览会随设置即时重建示例磁贴与背景层；如果背景选的是视频，多块预览会各自创建播放器，与 2.x 的行为一致（离开设置页时自动释放）。
+- 覆盖式更新的最后一步（退出程序、脚本替换文件并重启）只验证到生成覆盖配置，请在可丢弃的副本目录里实测一次再长期依赖。
+- Linux 上播放视频背景需要发行版安装 libvlc（例如 `vlc-plugin-base`），未安装时自动降级为图片背景；macOS 产物未签名未公证，首次打开需要右键打开或执行 `xattr -dr com.apple.quarantine`。
 - 小米天气来自第三方整理的非正式接口文档，服务端兼容性不由本项目控制。
 - 噪音数值是基于 PCM 电平和校准偏移的估算值，不等同于经过认证的声级计读数。
-- 原生触屏手势、触控笔压感和目标教室大屏的视觉比例仍需在实际设备上完成最终验收。
+- 原生触屏手势、触控笔压感和目标教室大屏的视觉比例仍需在实际设备上完成最终验收；WSL 中启动成功不能代替真实 Linux 桌面环境的验收。
 
 ## 🤝 参与开发
 

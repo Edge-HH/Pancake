@@ -1,18 +1,18 @@
-using Pancake.Services;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.Layout;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Pancake.Models;
-using Windows.Foundation;
-using Windows.Storage;
+using Pancake.Services;
 
 namespace Pancake.Controls;
 
 /// <summary>
-/// 图片框编辑控件：选中后显示八点边框和图标工具栏。
+/// 图片框：选中后显示八点边框和图标工具栏。
 /// 普通模式拖中央移动、拖边角等比缩放；裁切模式复用同一套拖拽框调整取景区域。
 /// </summary>
 public sealed class AttachmentImageControl : Grid
@@ -21,6 +21,20 @@ public sealed class AttachmentImageControl : Grid
     private const double MinimumHeight = 72;
     private const double MaximumWidth = 640;
     private const double MaximumHeight = 520;
+    // 工具栏占用的高度；控件总高 = 取景框高 + 该值。
+    private const double ToolbarHeight = 40;
+
+    private enum ResizeHandle
+    {
+        TopLeft,
+        Top,
+        TopRight,
+        Left,
+        Right,
+        BottomLeft,
+        Bottom,
+        BottomRight
+    }
 
     private readonly AttachmentItem _attachment;
     private readonly Action _deleteAttachment;
@@ -28,70 +42,63 @@ public sealed class AttachmentImageControl : Grid
     private readonly Action<bool> _interactionChanged;
     private readonly Grid _imageFrame;
     private readonly Grid _overlay;
-    private readonly Image _image;
+    private readonly Image _image = new()
+    {
+        Stretch = Stretch.UniformToFill,
+        RenderTransformOrigin = RelativePoint.Center
+    };
     private readonly Border _selectionBorder;
     private readonly StackPanel _toolbar;
-    private readonly CompositeTransform _imageTransform = new();
     private readonly TranslateTransform _frameTransform = new();
     private readonly List<(Thumb Thumb, ResizeHandle Handle)> _resizeHandles = [];
     private bool _isEditing;
     private bool _isSelected;
     private bool _isCropping;
     private bool _isInteracting;
-    private uint? _pointerId;
+    private IPointer? _pointer;
     private Point _lastPointerPosition;
     private double _resizeStartWidth;
     private double _resizeStartHeight;
     private double _resizeStartX;
     private double _resizeStartY;
-    private ResizeHandle _activeResizeHandle;
+    private ResizeHandle _activeHandle;
     private double _imageAspect;
-    private readonly TaskCompletionSource<bool> _imageReady = new();
-    public Task<bool> ImageReady => _imageReady.Task;
 
-    public AttachmentImageControl(AttachmentItem attachment, Action deleteAttachment, Action contentChanged, Action<bool> interactionChanged)
+    public AttachmentImageControl(
+        AttachmentItem attachment,
+        Action deleteAttachment,
+        Action contentChanged,
+        Action<bool> interactionChanged)
     {
         _attachment = attachment;
         _deleteAttachment = deleteAttachment;
         _contentChanged = contentChanged;
         _interactionChanged = interactionChanged;
 
-        Width = Math.Clamp(attachment.FrameWidth, MinimumWidth, MaximumWidth);
+        Width = Math.Clamp(attachment.FrameWidth <= 0 ? 360 : attachment.FrameWidth, MinimumWidth, MaximumWidth);
         double initialHeight = attachment.AspectRatio > 0 ? Width / attachment.AspectRatio : 240;
-        Height = initialHeight + 40;
+        Height = initialHeight + ToolbarHeight;
         HorizontalAlignment = HorizontalAlignment.Left;
         RenderTransform = _frameTransform;
-        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        RowDefinitions = new RowDefinitions("Auto,Auto");
 
         _imageFrame = new Grid
         {
             Width = Width,
             Height = initialHeight,
-            Background = BoardTheme.SurfaceBrush,
-            Clip = new RectangleGeometry(),
-            ManipulationMode = ManipulationModes.None
+            Background = new SolidColorBrush(BoardTheme.SurfaceColor.ToColor()),
+            ClipToBounds = true
         };
+        _imageFrame.Children.Add(_image);
         _overlay = new Grid();
         _overlay.Children.Add(_imageFrame);
         Children.Add(_overlay);
-        _imageFrame.SizeChanged += (_, e) => ((RectangleGeometry)_imageFrame.Clip).Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height);
-        _image = new Image
-        {
-            Stretch = Stretch.UniformToFill,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch,
-            RenderTransformOrigin = new Point(0.5, 0.5),
-            RenderTransform = _imageTransform
-        };
-        _imageFrame.Children.Add(_image);
 
         _selectionBorder = new Border
         {
-            Name = "SelectionBorder",
-            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 96, 165, 250)),
+            BorderBrush = new SolidColorBrush(BoardColor.FromRgb(96, 165, 250).ToColor()),
             BorderThickness = new Thickness(2),
-            Visibility = Visibility.Collapsed,
+            IsVisible = false,
             IsHitTestVisible = false
         };
         _overlay.Children.Add(_selectionBorder);
@@ -111,88 +118,92 @@ public sealed class AttachmentImageControl : Grid
             Spacing = 2,
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 5, 0, 2),
-            Visibility = Visibility.Collapsed
+            IsVisible = false
         };
-        _toolbar.Children.Add(CreateIconButton(FluentGlyphs.Crop, "裁切", (_, _) => ToggleCropMode()));
-        _toolbar.Children.Add(CreateIconButton(FluentGlyphs.Rotate, "逆时针旋转", (_, _) => RotateImage(-90), true));
-        _toolbar.Children.Add(CreateIconButton(FluentGlyphs.Rotate, "顺时针旋转", (_, _) => RotateImage(90)));
-        _toolbar.Children.Add(CreateIconButton(FluentGlyphs.Reset, "复位", (_, _) => ResetImage()));
-        _toolbar.Children.Add(CreateIconButton(FluentGlyphs.Delete, "删除", (_, _) => _deleteAttachment()));
+        _toolbar.Children.Add(CreateIconButton(nameof(FluentGlyphs.Crop), "裁切", (_, _) => ToggleCropMode()));
+        _toolbar.Children.Add(CreateIconButton(nameof(FluentGlyphs.Rotate), "逆时针旋转", (_, _) => RotateImage(-90), mirrored: true));
+        _toolbar.Children.Add(CreateIconButton(nameof(FluentGlyphs.Rotate), "顺时针旋转", (_, _) => RotateImage(90)));
+        _toolbar.Children.Add(CreateIconButton(nameof(FluentGlyphs.Reset), "复位", (_, _) => ResetImage()));
+        _toolbar.Children.Add(CreateIconButton(nameof(FluentGlyphs.Delete), "删除", (_, _) => _deleteAttachment()));
         Grid.SetRow(_toolbar, 1);
         Children.Add(_toolbar);
 
         _imageFrame.PointerPressed += ImageFrame_PointerPressed;
         _imageFrame.PointerMoved += ImageFrame_PointerMoved;
         _imageFrame.PointerReleased += ImageFrame_PointerReleased;
-        _imageFrame.PointerCanceled += ImageFrame_PointerReleased;
         _imageFrame.PointerCaptureLost += ImageFrame_PointerCaptureLost;
-        _imageFrame.ManipulationStarted += (_, _) => BeginInteraction();
-        _imageFrame.ManipulationDelta += ImageFrame_ManipulationDelta;
-        _imageFrame.ManipulationCompleted += (_, _) => EndInteraction();
         ApplyTransforms();
-        Loaded += async (_, _) => await LoadImageAsync();
+        if (!string.IsNullOrWhiteSpace(attachment.Path)) _ = LoadImageAsync(attachment.Path);
     }
 
+    /// <summary>编辑态下允许选中与拖动；查看态只显示画面。</summary>
     public void SetEditing(bool editing)
     {
         _isEditing = editing;
         _imageFrame.IsHitTestVisible = editing;
-        _imageFrame.ManipulationMode = editing ? ManipulationModes.TranslateX | ManipulationModes.TranslateY : ManipulationModes.None;
-        if (!editing) { _isSelected = false; _isCropping = false; }
+        if (!editing)
+        {
+            _isSelected = false;
+            _isCropping = false;
+        }
+
         UpdateSelectionVisuals();
     }
 
-    private async Task LoadImageAsync()
+    /// <summary>验证脚本用：当前是否处于编辑态、是否已选中（手柄与工具条的可见性来源）。</summary>
+    internal (bool Editing, bool Selected) SelectionStateForVerification => (_isEditing, _isSelected);
+
+    /// <summary>验证脚本用：是否处于裁切模式（裁切时拖动改的是取景偏移而不是图片框位置）。</summary>
+    internal bool IsCroppingForVerification => _isCropping;
+
+    private async Task LoadImageAsync(string path)
     {
         try
         {
-            StorageFile file = await StorageFile.GetFileFromPathAsync(_attachment.Path);
-            using var stream = await file.OpenReadAsync();
-            BitmapImage bitmap = new();
-            await bitmap.SetSourceAsync(stream);
+            Bitmap bitmap = await Task.Run(() => new Bitmap(path));
             _image.Source = bitmap;
-            if (bitmap.PixelWidth > 0 && bitmap.PixelHeight > 0)
+            if (bitmap.PixelSize.Width > 0 && bitmap.PixelSize.Height > 0)
             {
-                _imageAspect = (double)bitmap.PixelWidth / bitmap.PixelHeight;
+                _imageAspect = (double)bitmap.PixelSize.Width / bitmap.PixelSize.Height;
                 if (_attachment.AspectRatio <= 0)
                 {
                     _attachment.AspectRatio = _imageAspect;
                     _imageFrame.Width = Width;
                     _imageFrame.Height = Width / _attachment.AspectRatio;
-                    Height = _imageFrame.Height + 40;
+                    Height = _imageFrame.Height + ToolbarHeight;
                     _contentChanged();
                 }
             }
-            _imageReady.TrySetResult(true);
         }
-        catch
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            _imageReady.TrySetResult(false);
-            _imageFrame.Children.Insert(1, new TextBlock
+            _imageFrame.Children.Add(new TextBlock
             {
                 Text = $"无法读取图片：{_attachment.Name}",
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(12),
-                Foreground = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 244, 114, 114))
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = new SolidColorBrush(BoardColor.FromRgb(244, 114, 114).ToColor())
             });
         }
     }
 
     private void AddResizeHandle(HorizontalAlignment horizontal, VerticalAlignment vertical, ResizeHandle handleType)
     {
-        Thumb thumb = new()
+        // 与磁贴把手一样：裸 Thumb 拿不到主题模板就不渲染也收不到指针，必须套最小模板。
+        Thumb thumb = ThumbVisuals.Apply(new Thumb
         {
             Width = handleType is ResizeHandle.Left or ResizeHandle.Right ? 16 : 20,
             Height = handleType is ResizeHandle.Top or ResizeHandle.Bottom ? 16 : 20,
             HorizontalAlignment = horizontal,
             VerticalAlignment = vertical,
-            Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 250, 250, 250)),
-            BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 37, 99, 235)),
+            Background = new SolidColorBrush(BoardColor.FromRgb(250, 250, 250).ToColor()),
+            BorderBrush = new SolidColorBrush(BoardColor.FromRgb(37, 99, 235).ToColor()),
             BorderThickness = new Thickness(2),
             Tag = handleType,
-            Visibility = Visibility.Collapsed
-        };
+            IsVisible = false
+        });
         thumb.DragStarted += ResizeStarted;
         thumb.DragDelta += ResizeDelta;
         thumb.DragCompleted += (_, _) => EndInteraction();
@@ -200,10 +211,10 @@ public sealed class AttachmentImageControl : Grid
         _overlay.Children.Add(thumb);
     }
 
-    private void ResizeStarted(object sender, DragStartedEventArgs e)
+    private void ResizeStarted(object? sender, VectorEventArgs e)
     {
-        if (!_isSelected) return;
-        _activeResizeHandle = (ResizeHandle)((Thumb)sender).Tag;
+        if (!_isSelected || sender is not Thumb thumb) return;
+        _activeHandle = (ResizeHandle)thumb.Tag!;
         _resizeStartWidth = _imageFrame.Width;
         _resizeStartHeight = _imageFrame.Height;
         _resizeStartX = _attachment.PositionX;
@@ -211,12 +222,16 @@ public sealed class AttachmentImageControl : Grid
         BeginInteraction();
     }
 
-    private void ResizeDelta(object sender, DragDeltaEventArgs e)
+    /// <summary>
+    /// 缩放取景框。普通模式四角等比、四边按比例联动；裁切模式允许自由改变取景框比例，
+    /// 并补偿画面位移，让没有拖动的一侧保持不动。
+    /// </summary>
+    private void ResizeDelta(object? sender, VectorEventArgs e)
     {
         if (!_isSelected) return;
-        double dx = e.HorizontalChange;
-        double dy = e.VerticalChange;
-        bool corner = _activeResizeHandle is ResizeHandle.TopLeft or ResizeHandle.TopRight or ResizeHandle.BottomLeft or ResizeHandle.BottomRight;
+        double dx = e.Vector.X;
+        double dy = e.Vector.Y;
+        bool corner = _activeHandle is ResizeHandle.TopLeft or ResizeHandle.TopRight or ResizeHandle.BottomLeft or ResizeHandle.BottomRight;
         double newWidth = _resizeStartWidth;
         double newHeight = _resizeStartHeight;
         double oldFrameWidth = _imageFrame.Width;
@@ -225,113 +240,113 @@ public sealed class AttachmentImageControl : Grid
 
         if (_isCropping)
         {
-            if (_activeResizeHandle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft) newWidth = Math.Clamp(_resizeStartWidth - dx, MinimumWidth, MaximumWidth);
-            if (_activeResizeHandle is ResizeHandle.Right or ResizeHandle.TopRight or ResizeHandle.BottomRight) newWidth = Math.Clamp(_resizeStartWidth + dx, MinimumWidth, MaximumWidth);
-            if (_activeResizeHandle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight) newHeight = Math.Clamp(_resizeStartHeight - dy, MinimumHeight, MaximumHeight);
-            if (_activeResizeHandle is ResizeHandle.Bottom or ResizeHandle.BottomLeft or ResizeHandle.BottomRight) newHeight = Math.Clamp(_resizeStartHeight + dy, MinimumHeight, MaximumHeight);
+            if (_activeHandle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft)
+                newWidth = Math.Clamp(_resizeStartWidth - dx, MinimumWidth, MaximumWidth);
+            if (_activeHandle is ResizeHandle.Right or ResizeHandle.TopRight or ResizeHandle.BottomRight)
+                newWidth = Math.Clamp(_resizeStartWidth + dx, MinimumWidth, MaximumWidth);
+            if (_activeHandle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight)
+                newHeight = Math.Clamp(_resizeStartHeight - dy, MinimumHeight, MaximumHeight);
+            if (_activeHandle is ResizeHandle.Bottom or ResizeHandle.BottomLeft or ResizeHandle.BottomRight)
+                newHeight = Math.Clamp(_resizeStartHeight + dy, MinimumHeight, MaximumHeight);
         }
         else if (corner)
         {
-            double signedWidthDelta = _activeResizeHandle is ResizeHandle.TopLeft or ResizeHandle.BottomLeft ? -dx : dx;
-            double signedHeightDelta = _activeResizeHandle is ResizeHandle.TopLeft or ResizeHandle.TopRight ? -dy : dy;
+            double signedWidthDelta = _activeHandle is ResizeHandle.TopLeft or ResizeHandle.BottomLeft ? -dx : dx;
+            double signedHeightDelta = _activeHandle is ResizeHandle.TopLeft or ResizeHandle.TopRight ? -dy : dy;
             double aspect = GetAspectRatio();
             double widthFromX = _resizeStartWidth + signedWidthDelta;
             double widthFromY = _resizeStartWidth + signedHeightDelta * aspect;
-            newWidth = Math.Clamp(Math.Abs(widthFromX - _resizeStartWidth) > Math.Abs(widthFromY - _resizeStartWidth) ? widthFromX : widthFromY, MinimumWidth, MaximumWidth);
+            newWidth = Math.Clamp(
+                Math.Abs(widthFromX - _resizeStartWidth) > Math.Abs(widthFromY - _resizeStartWidth) ? widthFromX : widthFromY,
+                MinimumWidth,
+                MaximumWidth);
             newHeight = newWidth / aspect;
         }
-        else if (_activeResizeHandle is ResizeHandle.Left or ResizeHandle.Right)
+        else if (_activeHandle is ResizeHandle.Left or ResizeHandle.Right)
         {
-            double signedWidthDelta = _activeResizeHandle == ResizeHandle.Left ? -dx : dx;
+            double signedWidthDelta = _activeHandle == ResizeHandle.Left ? -dx : dx;
             newWidth = Math.Clamp(_resizeStartWidth + signedWidthDelta, MinimumWidth, MaximumWidth);
             newHeight = newWidth / GetAspectRatio();
         }
         else
         {
-            double signedHeightDelta = _activeResizeHandle == ResizeHandle.Top ? -dy : dy;
+            double signedHeightDelta = _activeHandle == ResizeHandle.Top ? -dy : dy;
             newHeight = Math.Clamp(_resizeStartHeight + signedHeightDelta, MinimumHeight, MaximumHeight);
             newWidth = newHeight * GetAspectRatio();
         }
 
         Width = newWidth;
-        Height = newHeight + 40;
+        Height = newHeight + ToolbarHeight;
         _imageFrame.Width = newWidth;
         _imageFrame.Height = newHeight;
         _attachment.FrameWidth = newWidth;
         _attachment.ViewportHeight = newHeight;
-        if (_activeResizeHandle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft)
-            _attachment.PositionX = _resizeStartX + _resizeStartWidth - newWidth;
-        else _attachment.PositionX = _resizeStartX;
-        if (_activeResizeHandle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight)
-            _attachment.PositionY = _resizeStartY + _resizeStartHeight - newHeight;
-        else _attachment.PositionY = _resizeStartY;
+        _attachment.PositionX = _activeHandle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft
+            ? _resizeStartX + _resizeStartWidth - newWidth
+            : _resizeStartX;
+        _attachment.PositionY = _activeHandle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight
+            ? _resizeStartY + _resizeStartHeight - newHeight
+            : _resizeStartY;
         if (_isCropping)
         {
             // 取景框比例随裁切结果更新并持久化，避免退出裁切或重启后按原图比例弹回。
             _attachment.AspectRatio = newWidth / newHeight;
-            // 补偿取景框尺寸变化造成的画面滑动，让静止一侧的画面保持不动。
             (double contentWidth, double contentHeight) = GetVisualContentSize();
-            if (_activeResizeHandle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft)
+            if (_activeHandle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft)
                 _attachment.OffsetX += (newWidth - oldFrameWidth) / 2 + (oldContentWidth - contentWidth) / 2;
-            else if (_activeResizeHandle is ResizeHandle.Right or ResizeHandle.TopRight or ResizeHandle.BottomRight)
+            else if (_activeHandle is ResizeHandle.Right or ResizeHandle.TopRight or ResizeHandle.BottomRight)
                 _attachment.OffsetX += (oldFrameWidth - newWidth) / 2 + (contentWidth - oldContentWidth) / 2;
-            if (_activeResizeHandle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight)
+            if (_activeHandle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight)
                 _attachment.OffsetY += (newHeight - oldFrameHeight) / 2 + (oldContentHeight - contentHeight) / 2;
-            else if (_activeResizeHandle is ResizeHandle.Bottom or ResizeHandle.BottomLeft or ResizeHandle.BottomRight)
+            else if (_activeHandle is ResizeHandle.Bottom or ResizeHandle.BottomLeft or ResizeHandle.BottomRight)
                 _attachment.OffsetY += (oldFrameHeight - newHeight) / 2 + (contentHeight - oldContentHeight) / 2;
             ClampCropOffsets();
         }
+
         ApplyTransforms();
     }
 
-    private void ImageFrame_PointerPressed(object sender, PointerRoutedEventArgs e)
+    private void ImageFrame_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (!_isEditing || e.Pointer.PointerDeviceType != Microsoft.UI.Input.PointerDeviceType.Mouse) return;
-        var point = e.GetCurrentPoint(_imageFrame);
+        if (!_isEditing) return;
+        PointerPoint point = e.GetCurrentPoint(_imageFrame);
         if (!point.Properties.IsLeftButtonPressed) return;
         _isSelected = true;
         UpdateSelectionVisuals();
-        _pointerId = e.Pointer.PointerId;
+        _pointer = e.Pointer;
         _lastPointerPosition = point.Position;
-        _imageFrame.CapturePointer(e.Pointer);
+        e.Pointer.Capture(_imageFrame);
         BeginInteraction();
         e.Handled = true;
     }
 
-    private void ImageFrame_PointerMoved(object sender, PointerRoutedEventArgs e)
+    private void ImageFrame_PointerMoved(object? sender, PointerEventArgs e)
     {
-        if (_pointerId != e.Pointer.PointerId) return;
+        if (_pointer is null || !ReferenceEquals(e.Pointer, _pointer)) return;
         Point position = e.GetCurrentPoint(_imageFrame).Position;
         MoveBy(position.X - _lastPointerPosition.X, position.Y - _lastPointerPosition.Y);
         _lastPointerPosition = position;
         e.Handled = true;
     }
 
-    private void ImageFrame_PointerReleased(object sender, PointerRoutedEventArgs e)
+    private void ImageFrame_PointerReleased(object? sender, PointerEventArgs e)
     {
-        if (_pointerId != e.Pointer.PointerId) return;
-        _imageFrame.ReleasePointerCapture(e.Pointer);
-        _pointerId = null;
+        if (_pointer is null || !ReferenceEquals(e.Pointer, _pointer)) return;
+        e.Pointer.Capture(null);
+        _pointer = null;
         EndInteraction();
         e.Handled = true;
     }
 
-    private void ImageFrame_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    /// <summary>指针被其它控件抢走时也要结束交互并结算内容，避免卡在按住状态。</summary>
+    private void ImageFrame_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
     {
-        if (_pointerId != e.Pointer.PointerId) return;
-        _pointerId = null;
+        if (_pointer is null) return;
+        _pointer = null;
         EndInteraction();
     }
 
-    private void ImageFrame_ManipulationDelta(object sender, ManipulationDeltaRoutedEventArgs e)
-    {
-        if (!_isEditing) return;
-        _isSelected = true;
-        UpdateSelectionVisuals();
-        MoveBy(e.Delta.Translation.X, e.Delta.Translation.Y);
-        e.Handled = true;
-    }
-
+    /// <summary>裁切模式移动画面取景，普通模式移动整个图片框。</summary>
     private void MoveBy(double x, double y)
     {
         if (_isCropping)
@@ -345,11 +360,17 @@ public sealed class AttachmentImageControl : Grid
             _attachment.PositionX += x;
             _attachment.PositionY += y;
         }
+
         ApplyTransforms();
     }
 
-    private void ToggleCropMode() { _isCropping = !_isCropping; UpdateSelectionVisuals(); }
+    private void ToggleCropMode()
+    {
+        _isCropping = !_isCropping;
+        UpdateSelectionVisuals();
+    }
 
+    /// <summary>旋转 90 度时同步交换取景框宽高与比例，保证画面始终铺满。</summary>
     private void RotateImage(double degrees)
     {
         _attachment.Rotation = (_attachment.Rotation + degrees + 360) % 360;
@@ -357,7 +378,7 @@ public sealed class AttachmentImageControl : Grid
         _attachment.AspectRatio = 1 / ratio;
         _imageFrame.Width = Width;
         _imageFrame.Height = Width / GetAspectRatio();
-        Height = _imageFrame.Height + 40;
+        Height = _imageFrame.Height + ToolbarHeight;
         _attachment.ViewportHeight = _imageFrame.Height;
         ClampCropOffsets();
         ApplyTransforms();
@@ -378,20 +399,18 @@ public sealed class AttachmentImageControl : Grid
     private void UpdateSelectionVisuals()
     {
         bool visible = _isSelected && _isEditing;
-        _selectionBorder.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        _toolbar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var item in _resizeHandles)
-            item.Thumb.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        _selectionBorder.BorderBrush = new SolidColorBrush(_isCropping
-            ? Windows.UI.Color.FromArgb(255, 250, 204, 21)
-            : Windows.UI.Color.FromArgb(255, 96, 165, 250));
+        _selectionBorder.IsVisible = visible;
+        _toolbar.IsVisible = visible;
+        foreach ((Thumb thumb, _) in _resizeHandles) thumb.IsVisible = visible;
+        _selectionBorder.BorderBrush = new SolidColorBrush(
+            _isCropping ? BoardColor.FromRgb(250, 204, 21).ToColor() : BoardColor.FromRgb(96, 165, 250).ToColor());
     }
 
     private double GetAspectRatio() => _attachment.AspectRatio > 0 ? _attachment.AspectRatio : 4d / 3d;
 
+    /// <summary>画面按 UniformToFill 填充（含旋转）后超出取景框的部分即可移动范围。</summary>
     private void ClampCropOffsets()
     {
-        // 可移动范围 = 画面按 UniformToFill 填充（含旋转）后超出取景框的部分，保证画面始终覆盖取景框。
         (double contentWidth, double contentHeight) = GetVisualContentSize();
         double maxX = Math.Max(0, (contentWidth - _imageFrame.Width) / 2);
         double maxY = Math.Max(0, (contentHeight - _imageFrame.Height) / 2);
@@ -404,36 +423,59 @@ public sealed class AttachmentImageControl : Grid
         double frameWidth = _imageFrame.Width;
         double frameHeight = _imageFrame.Height;
         if (frameWidth <= 0 || frameHeight <= 0) return (0, 0);
-        // 图片未加载成功时按无溢出处理，此时裁切拖动中央不产生位移。
+        // 图片没加载成功时按无溢出处理，此时裁切拖动不会产生位移。
         double imageAspect = _imageAspect > 0 ? _imageAspect : frameWidth / frameHeight;
         bool widthOverflow = imageAspect >= frameWidth / frameHeight;
         double fillWidth = widthOverflow ? frameHeight * imageAspect : frameWidth;
         double fillHeight = widthOverflow ? frameHeight : frameWidth / imageAspect;
         bool rotated = _attachment.Rotation % 180 is not 0;
+        double scale = _attachment.Scale <= 0 ? 1 : _attachment.Scale;
         return rotated
-            ? (fillHeight * _attachment.Scale, fillWidth * _attachment.Scale)
-            : (fillWidth * _attachment.Scale, fillHeight * _attachment.Scale);
+            ? (fillHeight * scale, fillWidth * scale)
+            : (fillWidth * scale, fillHeight * scale);
     }
 
     private void ApplyTransforms()
     {
         _frameTransform.X = _attachment.PositionX;
         _frameTransform.Y = _attachment.PositionY;
-        _imageTransform.ScaleX = _attachment.Scale;
-        _imageTransform.ScaleY = _attachment.Scale;
-        _imageTransform.TranslateX = _attachment.OffsetX;
-        _imageTransform.TranslateY = _attachment.OffsetY;
-        _imageTransform.Rotation = _attachment.Rotation;
+        _image.RenderTransform = new TransformGroup
+        {
+            Children =
+            {
+                new ScaleTransform(_attachment.Scale <= 0 ? 1 : _attachment.Scale, _attachment.Scale <= 0 ? 1 : _attachment.Scale),
+                new RotateTransform(_attachment.Rotation),
+                new TranslateTransform(_attachment.OffsetX, _attachment.OffsetY)
+            }
+        };
     }
 
-    private void BeginInteraction() { if (!_isInteracting) { _isInteracting = true; _interactionChanged(true); } }
-    private void EndInteraction() { if (_isInteracting) { _isInteracting = false; _interactionChanged(false); _contentChanged(); } }
-
-    private static Button CreateIconButton(string glyph, string tooltip, RoutedEventHandler click, bool mirrored = false)
+    private void BeginInteraction()
     {
-        FontIcon icon = new() { Glyph = glyph, FontSize = 16, RenderTransformOrigin = new Point(0.5, 0.5) };
-        if (mirrored) icon.RenderTransform = new ScaleTransform { ScaleX = -1, ScaleY = 1 };
-        Button button = new Button
+        if (_isInteracting) return;
+        _isInteracting = true;
+        _interactionChanged(true);
+    }
+
+    private void EndInteraction()
+    {
+        if (!_isInteracting) return;
+        _isInteracting = false;
+        _interactionChanged(false);
+        _contentChanged();
+    }
+
+    /// <summary>图片工具栏按钮；symbol 使用 FluentGlyphs 的语义名。</summary>
+    private static Button CreateIconButton(string symbol, string tooltip, EventHandler<RoutedEventArgs> click, bool mirrored = false)
+    {
+        FluentIcon icon = new() { Symbol = symbol, FontSize = 16 };
+        if (mirrored)
+        {
+            icon.RenderTransform = new ScaleTransform(-1, 1);
+            icon.RenderTransformOrigin = RelativePoint.Center;
+        }
+
+        Button button = new()
         {
             Width = 36,
             Height = 34,
@@ -442,14 +484,13 @@ public sealed class AttachmentImageControl : Grid
             Margin = new Thickness(1, 0, 1, 0),
             HorizontalContentAlignment = HorizontalAlignment.Center,
             VerticalContentAlignment = VerticalAlignment.Center,
-            Background = BoardTheme.SurfaceBrush,
+            Background = new SolidColorBrush(BoardTheme.SurfaceColor.ToColor()),
             BorderThickness = new Thickness(0),
-            Foreground = BoardTheme.TextBrush,
+            Foreground = new SolidColorBrush(BoardTheme.TextColor.ToColor()),
             Content = icon
         };
-        ToolTipService.SetToolTip(button, tooltip);
+        ToolTip.SetTip(button, tooltip);
         button.Click += click;
         return button;
     }
-    private enum ResizeHandle { TopLeft, Top, TopRight, Left, Right, BottomLeft, Bottom, BottomRight }
 }

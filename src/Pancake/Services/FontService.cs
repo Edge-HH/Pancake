@@ -1,174 +1,63 @@
-using System.Runtime.InteropServices;
-using System.Runtime.CompilerServices;
-using System.Collections.Concurrent;
-using Microsoft.UI.Text;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Media;
+using Avalonia.Media;
+using Pancake.Platforms.Abstraction;
 
 namespace Pancake.Services;
 
-/// <summary>字体显示名和应用资源路径集中解析；RTF 对外保存标准家族名。</summary>
+/// <summary>
+/// 字体显示名与随包字体资源集中解析。三端都使用内置的 HarmonyOS Sans 与 Fluent System Icons，
+/// 避免不同系统默认字体导致中文换行和图标位置出现差异。
+/// </summary>
 public static class FontService
 {
     public const string FamilyName = "HarmonyOS Sans SC";
-    public const string ResourceName = "ms-appx:///Assets/Fonts/HarmonyOS_Sans_SC_Regular.ttf#HarmonyOS Sans SC";
-    public static FontFamily DefaultFamily { get; } = new(ResourceName);
-    private static readonly Lazy<string[]> Fonts = new(EnumerateFonts);
-    private static readonly ConditionalWeakTable<RichEditBox, List<(ITextRange Range, string Family)>> Fallbacks = new();
 
-    public static IReadOnlyList<string> AvailableFamilies => Fonts.Value;
+    public const string IconFamilyName = "FluentSystemIcons-Resizable";
 
-    private static readonly ConcurrentDictionary<string, bool> InstalledCache = new(StringComparer.CurrentCultureIgnoreCase);
+    public static FontFamily DefaultFamily { get; } =
+        new($"avares://Pancake.Ui/Assets/Fonts/HarmonyOS_Sans_SC_Regular.ttf#{FamilyName}");
+
+    public static FontFamily MediumFamily { get; } =
+        new($"avares://Pancake.Ui/Assets/Fonts/HarmonyOS_Sans_SC_Medium.ttf#{FamilyName}");
+
+    public static FontFamily BoldFamily { get; } =
+        new($"avares://Pancake.Ui/Assets/Fonts/HarmonyOS_Sans_SC_Bold.ttf#{FamilyName}");
+
+    public static FontFamily IconFamily { get; } =
+        new($"avares://Pancake.Ui/Assets/Fonts/FluentSystemIcons-Resizable.ttf#{IconFamilyName}");
+
+    /// <summary>触发一次访问，确保内置字体在首帧前完成注册。</summary>
+    public static void RegisterBundledFonts()
+    {
+        _ = DefaultFamily;
+        _ = IconFamily;
+        PlatformServices.FontCatalog = new AvaloniaFontCatalogService();
+    }
+
+    /// <summary>判断富文本里保存的字体家族在当前系统是否可用；随包字体始终视为可用。</summary>
+    public static bool IsInstalledFamily(string name) =>
+        !string.IsNullOrWhiteSpace(name) &&
+        (name.Equals(FamilyName, StringComparison.OrdinalIgnoreCase) || PlatformServices.FontCatalog.IsInstalledFamily(name));
 
     /// <summary>
-    /// 家族名是否为系统已安装字体。RTF 保存会把本地化名写成英文名（如“微软雅黑”写成“Microsoft YaHei”），
-    /// 所以除了比对枚举结果，还要用 GDI 字体映射把别名解析回已安装家族，避免把真实字体误判为缺失。
+    /// 把富文本里保存的字体家族解析成实际用来渲染的家族。
+    /// 空值表示跟随默认（随包字体）；随包字体与系统已安装的字体按名字使用；
+    /// 本机没有安装的字体退回随包字体，避免出现缺字方框——原始家族名仍保留在富文本里，
+    /// 换到装有该字体的机器上会按原名显示（旧版用 FontFallbacks 记录原始名，Avalonia 版本直接存在格式里）。
     /// </summary>
-    public static bool IsInstalledFamily(string name)
+    public static FontFamily? ResolveRichTextFamily(string? family)
     {
-        if (string.IsNullOrWhiteSpace(name)) return false;
-        if (Fonts.Value.Contains(name, StringComparer.CurrentCultureIgnoreCase)) return true;
-        return InstalledCache.GetOrAdd(name, key => ResolveFamilyName(key) is { Length: > 0 } resolved &&
-            Fonts.Value.Contains(resolved, StringComparer.CurrentCultureIgnoreCase));
+        if (string.IsNullOrWhiteSpace(family)) return null;
+        if (family.Equals(FamilyName, StringComparison.OrdinalIgnoreCase)) return DefaultFamily;
+        return PlatformServices.FontCatalog.IsInstalledFamily(family) ? new FontFamily(family) : DefaultFamily;
     }
 
-    /// <summary>GDI 字体映射返回的家族名。不存在的名字也会被映射到替身字体，因此不能单独用来判断存在性。</summary>
-    internal static string? ResolveFamilyName(string name)
+    /// <summary>可选字体家族：随包字体排在最前，其余按当前区域排序。</summary>
+    public static IReadOnlyList<string> SelectableFamilies()
     {
-        nint dc = CreateCompatibleDC(0);
-        if (dc == 0) return null;
-        try
-        {
-            LogFont request = new() { CharSet = 1, FaceName = name };
-            string? matched = null;
-            FontCallback callback = (font, _, _, _) => { matched ??= Marshal.PtrToStringUni(font + 28); return 0; };
-            EnumFontFamiliesEx(dc, ref request, callback, 0, 0);
-            GC.KeepAlive(callback);
-            return matched;
-        }
-        finally { DeleteDC(dc); }
+        List<string> families = [FamilyName];
+        families.AddRange(PlatformServices.FontCatalog.AvailableFamilies
+            .Where(name => !string.Equals(name, FamilyName, StringComparison.CurrentCultureIgnoreCase))
+            .OrderBy(name => name, StringComparer.CurrentCulture));
+        return families;
     }
-
-    public static string NormalizeRtf(string rtf) => rtf.Replace(ResourceName, FamilyName, StringComparison.OrdinalIgnoreCase);
-
-    public static void RebindBundledFont(RichEditBox editor, IReadOnlyList<FontFallbackState>? savedFallbacks = null)
-    {
-        editor.FontFamily = DefaultFamily;
-        Fallbacks.Remove(editor);
-        var fallbacks = Fallbacks.GetOrCreateValue(editor);
-        ITextRange all = editor.Document.GetRange(0, int.MaxValue);
-        int end = all.EndPosition;
-        foreach (FontFallbackState saved in savedFallbacks ?? [])
-        {
-            if (saved.Start < 0 || saved.Length <= 0 || saved.Start >= end - 1) continue;
-            ITextRange range = editor.Document.GetRange(saved.Start, Math.Min(end - 1, saved.Start + saved.Length));
-            if (IsInstalledFamily(saved.Family)) range.CharacterFormat.Name = saved.Family;
-            else { range.CharacterFormat.Name = ResourceName; fallbacks.Add((range, saved.Family)); }
-        }
-        int position = 0;
-        while (position < end)
-        {
-            ITextRange run = editor.Document.GetRange(position, position);
-            run.MoveEnd(TextRangeUnit.CharacterFormat, 1);
-            if (run.EndPosition <= position) run.EndPosition = position + 1;
-            string name = run.CharacterFormat.Name;
-            if (name.Contains("HarmonyOS", StringComparison.OrdinalIgnoreCase))
-                run.CharacterFormat.Name = ResourceName;
-            else if (!string.IsNullOrWhiteSpace(name) && !IsInstalledFamily(name))
-            {
-                fallbacks.Add((editor.Document.GetRange(run.StartPosition, run.EndPosition), name));
-                run.CharacterFormat.Name = ResourceName;
-            }
-            position = run.EndPosition;
-        }
-    }
-
-    public static List<FontFallbackState> CaptureFallbacks(RichEditBox editor)
-    {
-        int end = editor.Document.GetRange(0, int.MaxValue).EndPosition - 1;
-        return Fallbacks.GetOrCreateValue(editor).Where(item => item.Range.EndPosition > item.Range.StartPosition && item.Range.StartPosition < end)
-            .Select(item => new FontFallbackState { Start = item.Range.StartPosition, Length = Math.Min(end, item.Range.EndPosition) - item.Range.StartPosition, Family = item.Family }).ToList();
-    }
-
-    private static void ForgetFallbacks(RichEditBox editor, int start, int end)
-    {
-        var originals = Fallbacks.GetOrCreateValue(editor);
-        foreach (var item in originals.ToArray())
-        {
-            int left = item.Range.StartPosition, right = item.Range.EndPosition;
-            if (right <= start || left >= end) continue;
-            originals.Remove(item);
-            if (left < start) originals.Add((editor.Document.GetRange(left, start), item.Family));
-            if (right > end) originals.Add((editor.Document.GetRange(end, right), item.Family));
-        }
-    }
-
-    public static FrameworkElement CreateFontPicker(RichEditBox editor, Action changed)
-    {
-        AutoSuggestBox input = new() { Width = 180, PlaceholderText = "字体", Text = FamilyName, ItemsSource = Fonts.Value, MaxSuggestionListHeight = 300 };
-        int start = 0, end = 0;
-        void Remember() { start = editor.Document.Selection.StartPosition; end = editor.Document.Selection.EndPosition; }
-        Remember();
-        editor.SelectionChanged += (_, _) => { if (editor.FocusState != FocusState.Unfocused) Remember(); };
-        input.GettingFocus += (_, _) => Remember();
-        input.TextChanged += (_, args) =>
-        {
-            if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
-                input.ItemsSource = Fonts.Value.Where(f => f.Contains(input.Text, StringComparison.CurrentCultureIgnoreCase)).Take(80).ToArray();
-        };
-        void Apply(string name)
-        {
-            if (!IsInstalledFamily(name)) return;
-            editor.Focus(FocusState.Programmatic);
-            editor.Document.Selection.SetRange(start, end);
-            ForgetFallbacks(editor, start, end);
-            // 折叠选区设置插入格式，不扩展到整条作业。
-            editor.Document.Selection.CharacterFormat.Name = name == FamilyName ? ResourceName : name;
-            changed();
-        }
-        input.QuerySubmitted += (_, args) => Apply(args.ChosenSuggestion as string ?? args.QueryText);
-        input.SuggestionChosen += (_, args) => { input.Text = (string)args.SelectedItem; Apply(input.Text); };
-#if PANCAKE_UI_TESTS
-        // 真实点击不好在自动化里稳定触发，暴露同一段 Apply 供回归检查调用。
-        input.Tag = (Action<string>)Apply;
-#endif
-        return input;
-    }
-
-    private static string[] EnumerateFonts()
-    {
-        HashSet<string> names = new(StringComparer.CurrentCultureIgnoreCase) { FamilyName };
-        nint dc = CreateCompatibleDC(0);
-        if (dc != 0)
-        {
-            try
-            {
-                LogFont request = new() { CharSet = 1, FaceName = "" };
-                FontCallback callback = (font, _, _, _) =>
-                {
-                    string? name = Marshal.PtrToStringUni(font + 28);
-                    if (!string.IsNullOrWhiteSpace(name) && !name.StartsWith('@')) names.Add(name);
-                    return 1;
-                };
-                EnumFontFamiliesEx(dc, ref request, callback, 0, 0);
-                GC.KeepAlive(callback);
-            }
-            finally { DeleteDC(dc); }
-        }
-        return names.OrderBy(n => n != FamilyName).ThenBy(n => n, StringComparer.CurrentCultureIgnoreCase).ToArray();
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    private struct LogFont
-    {
-        public int Height, Width, Escapement, Orientation, Weight;
-        public byte Italic, Underline, StrikeOut, CharSet, OutPrecision, ClipPrecision, Quality, PitchAndFamily;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string FaceName;
-    }
-    private delegate int FontCallback(nint logFont, nint metric, uint type, nint parameter);
-    [DllImport("gdi32.dll")] private static extern nint CreateCompatibleDC(nint dc);
-    [DllImport("gdi32.dll")] private static extern bool DeleteDC(nint dc);
-    [DllImport("gdi32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, EntryPoint = "EnumFontFamiliesExW")]
-    private static extern int EnumFontFamiliesEx(nint dc, ref LogFont font, FontCallback callback, nint parameter, uint flags);
 }

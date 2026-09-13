@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>Pancake</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <WindowsPackageType>None</WindowsPackageType>
+    <UseWinUI>true</UseWinUI>
+    <!-- 生成并发布 XBF/PRI 资源；缺少工具链时 publish 会漏掉主窗口及控件主题。 -->
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Version>2.0.6</Version>
+    <SatelliteResourceLanguages>zh-Hans;zh-Hant;en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 仅引用界面组件，避免元包引入未使用的 AI、ML 和 Widgets 运行时。 -->
+    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="1.8.260803003" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.4.0" />
+    <PackageReference Include="NAudio.WinMM" Version="2.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\Settings\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\Fonts\**\*" Exclude="Assets\Fonts\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Assets\Pinyin\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="ApplyUpdate.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Tools\7zip\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\xiaomi_weather_cities.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(EnableUiVerification)' == 'true'">
+    <DefineConstants>$(DefineConstants);PANCAKE_UI_TESTS</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(EnableUiVerification)' == 'true'">
+    <Compile Include="../../tests/UiVerification.cs" Link="UiVerification.cs" />
+    <Compile Include="../../tests/MediaUiVerification.cs" Link="MediaUiVerification.cs" />
+    <Compile Include="../../tests/MediaPerformanceVerification.cs" Link="MediaPerformanceVerification.cs" />
+  </ItemGroup>
+</Project>

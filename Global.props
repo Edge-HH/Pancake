@@ -1,0 +1,19 @@
+<Project>
+	<!-- 仓库内所有新工程共用的基础编译设置；通过显式 Import 引入，避免影响 legacy 下的旧 WinUI 工程。 -->
+	<PropertyGroup>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<EnableWindowsTargeting>true</EnableWindowsTargeting>
+		<ErrorOnDuplicatePublishOutputFiles>False</ErrorOnDuplicatePublishOutputFiles>
+		<!--
+		  WebView2 包同时携带 WPF 与 WinForms 程序集，与 .NET 的 WindowsBase 引用程序集存在版本冲突警告；
+		  本项目只使用它的核心 API，因此把该警告降级为消息，保持构建零警告输出。
+		-->
+		<MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
+	</PropertyGroup>
+
+	<PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+	</PropertyGroup>
+</Project>

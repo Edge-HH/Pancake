@@ -1,0 +1,42 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!--
+    与控制窗、磁贴、背景层共用的颜色令牌。
+    深色与浅色各定义一份，界面统一通过 DynamicResource 引用，切换主题时无需重建控件。
+  -->
+  <ResourceDictionary.ThemeDictionaries>
+    <ResourceDictionary x:Key="Dark">
+      <SolidColorBrush x:Key="BoardBackgroundBrush" Color="#0E0E12" />
+      <SolidColorBrush x:Key="BoardSurfaceBrush" Color="#16161E" />
+      <SolidColorBrush x:Key="BoardSurfaceSecondaryBrush" Color="#1E1E28" />
+      <SolidColorBrush x:Key="BoardTextBrush" Color="#F0F0F5" />
+      <SolidColorBrush x:Key="BoardTextSecondaryBrush" Color="#A4A4B4" />
+      <SolidColorBrush x:Key="BoardTextMutedBrush" Color="#737386" />
+      <SolidColorBrush x:Key="BoardLineBrush" Color="#2A2A35" />
+      <SolidColorBrush x:Key="BoardBrandBrush" Color="#6D70F6" />
+      <SolidColorBrush x:Key="BoardSuccessBrush" Color="#4ADE80" />
+      <SolidColorBrush x:Key="BoardWarningBrush" Color="#FBBF24" />
+      <SolidColorBrush x:Key="BoardDangerBrush" Color="#F87171" />
+      <SolidColorBrush x:Key="BoardGridLineBrush" Color="#6956565C" />
+    </ResourceDictionary>
+    <ResourceDictionary x:Key="Light">
+      <SolidColorBrush x:Key="BoardBackgroundBrush" Color="#F5F5FA" />
+      <SolidColorBrush x:Key="BoardSurfaceBrush" Color="#FFFFFF" />
+      <SolidColorBrush x:Key="BoardSurfaceSecondaryBrush" Color="#ECECF4" />
+      <SolidColorBrush x:Key="BoardTextBrush" Color="#1E1E28" />
+      <SolidColorBrush x:Key="BoardTextSecondaryBrush" Color="#555568" />
+      <SolidColorBrush x:Key="BoardTextMutedBrush" Color="#747486" />
+      <SolidColorBrush x:Key="BoardLineBrush" Color="#D9D9E6" />
+      <SolidColorBrush x:Key="BoardBrandBrush" Color="#5457DB" />
+      <SolidColorBrush x:Key="BoardSuccessBrush" Color="#15803D" />
+      <SolidColorBrush x:Key="BoardWarningBrush" Color="#B45309" />
+      <SolidColorBrush x:Key="BoardDangerBrush" Color="#DC2626" />
+      <SolidColorBrush x:Key="BoardGridLineBrush" Color="#6956565C" />
+    </ResourceDictionary>
+  </ResourceDictionary.ThemeDictionaries>
+
+  <!-- 工具栏与控制窗共用的圆角与间距，避免各页面各写一套数值。 -->
+  <x:Double x:Key="BoardControlRadius">14</x:Double>
+  <CornerRadius x:Key="BoardTileCornerRadius">14</CornerRadius>
+  <CornerRadius x:Key="BoardControlCornerRadius">14</CornerRadius>
+</ResourceDictionary>
