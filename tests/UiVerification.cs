@@ -1654,6 +1654,9 @@ public sealed partial class MainWindow
         check(snapToggle.IsOn, "board snap button turns the auto layout snap switch back on");
         await SaveVisualAsync(_appearancePreviews["Layout"], Path.Combine(output, "layout-preview.png"), 640, 300);
         ShowSettingsPage("AppearanceTile");
+        // 前面的默认正文样式探测会改掉只读预览；这里重建样例，检查的是设计稿而不是探测残留。
+        _previewScenes.Remove("Tile");
+        RefreshAppearancePreviews();
         await NextLayoutAsync();
         var originalTile = FindVisuals<SubjectTileControl>(_appearancePreviews["Tile"]).Single();
         var titleSlider = FindVisuals<Slider>(_settingsPages["AppearanceTile"].Content).Single(slider => Equals(slider.Header, "标题大小"));

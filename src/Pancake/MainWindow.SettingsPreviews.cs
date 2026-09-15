@@ -238,9 +238,9 @@ public sealed partial class MainWindow
         tile.Loaded += (_, _) =>
         {
             DisablePreviewTabStops(tile);
-            // 子级 RichEditBox 的文档必须完成 Loaded 后才能写入 CharacterFormat；
-            // 推迟到当前 Loaded 事件之后，避免设置页初始化时 WinRT 拒绝字体格式操作。
-            tile.DispatcherQueue.TryEnqueue(() => tile.ApplyBodyDefaults(_settings, overrideFormatted: true));
+            // 子级 RichEditBox 的文档必须完成 Loaded 后才能写入 CharacterFormat。
+            // 这里只给没有保存过格式的正文套默认样式，不能覆盖磁贴预览样例里已经写好的加粗和高光。
+            tile.DispatcherQueue.TryEnqueue(() => tile.ApplyBodyDefaults(_settings));
         };
         tile.ApplyAppearance(_settings);
         // 拖动网格/间隔时只刷新外观外壳，正文默认样式由 Loaded 和磁贴页专门处理。
