@@ -228,19 +228,40 @@
                             <Grid x:Name="RepositorySettingsCard" ColumnSpacing="24">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                 <TextBlock Text="项目仓库" VerticalAlignment="Center" />
-                                <HyperlinkButton Grid.Column="1" NavigateUri="https://github.com/Edge-HH/Pancake" Background="{ThemeResource BoardSurfaceSecondaryBrush}" CornerRadius="8" Padding="14,8">
-                                    <StackPanel Orientation="Horizontal" Spacing="12">
-                                        <Viewbox Width="24" Height="24" VerticalAlignment="Center">
-                                            <Path
-                                                Width="98"
-                                                Height="96"
-                                                Fill="{ThemeResource GitHubIconBrush}"
-                                                Stretch="Uniform"
-                                                Data="M48.854,0 C21.839,0 0,22 0,49.217 C0,70.973 13.993,89.389 33.405,95.902 C35.832,96.352 36.72,94.843 36.72,93.546 C36.72,92.382 36.675,88.513 36.654,84.407 C23.064,87.379 20.193,78.602 20.193,78.602 C17.97,72.892 14.765,71.372 14.765,71.372 C10.322,68.315 15.099,68.377 15.099,68.377 C20.011,68.725 22.599,73.455 22.599,73.455 C26.966,80.995 34.049,78.815 36.842,77.555 C37.282,74.365 38.55,72.195 39.95,70.965 C29.102,69.721 17.699,65.485 17.699,46.578 C17.699,41.192 19.615,36.788 22.767,33.332 C22.256,32.085 20.572,27.076 23.243,20.292 C23.243,20.292 27.38,18.96 36.791,25.352 C40.712,24.255 44.933,23.705 49.122,23.685 C53.311,23.705 57.532,24.255 61.472,25.352 C70.873,18.96 75.005,20.292 75.005,20.292 C77.682,27.076 75.999,32.085 75.488,33.332 C78.646,36.788 80.55,41.192 80.55,46.578 C80.55,65.533 69.125,69.708 58.25,70.93 C60.006,72.455 61.568,75.449 61.568,80.035 C61.568,86.615 61.511,91.905 61.511,93.532 C61.511,94.838 62.386,96.359 64.848,95.882 C84.013,89.36 98,70.95 98,49.217 C98,22 76.161,0 48.854,0 Z" />
-                                        </Viewbox>
-                                        <StackPanel><TextBlock Text="Edge-HH/Pancake" FontWeight="SemiBold" /><TextBlock Text="在 GitHub 中打开" FontSize="12" Foreground="{ThemeResource BoardTextSecondaryBrush}" /></StackPanel>
-                                    </StackPanel>
-                                </HyperlinkButton>
+                                <StackPanel Grid.Column="1" Spacing="12">
+                                    <HyperlinkButton NavigateUri="https://github.com/Edge-HH/Pancake" Background="{ThemeResource BoardSurfaceSecondaryBrush}" Foreground="{ThemeResource BoardTextBrush}" CornerRadius="8" Padding="14,8">
+                                        <StackPanel Orientation="Horizontal" Spacing="12">
+                                            <Viewbox Width="24" Height="24" VerticalAlignment="Center">
+                                                <Path
+                                                    Width="98"
+                                                    Height="96"
+                                                    Fill="{ThemeResource GitHubIconBrush}"
+                                                    Stretch="Uniform"
+                                                    Data="M48.854,0 C21.839,0 0,22 0,49.217 C0,70.973 13.993,89.389 33.405,95.902 C35.832,96.352 36.72,94.843 36.72,93.546 C36.72,92.382 36.675,88.513 36.654,84.407 C23.064,87.379 20.193,78.602 20.193,78.602 C17.97,72.892 14.765,71.372 14.765,71.372 C10.322,68.315 15.099,68.377 15.099,68.377 C20.011,68.725 22.599,73.455 22.599,73.455 C26.966,80.995 34.049,78.815 36.842,77.555 C37.282,74.365 38.55,72.195 39.95,70.965 C29.102,69.721 17.699,65.485 17.699,46.578 C17.699,41.192 19.615,36.788 22.767,33.332 C22.256,32.085 20.572,27.076 23.243,20.292 C23.243,20.292 27.38,18.96 36.791,25.352 C40.712,24.255 44.933,23.705 49.122,23.685 C53.311,23.705 57.532,24.255 61.472,25.352 C70.873,18.96 75.005,20.292 75.005,20.292 C77.682,27.076 75.999,32.085 75.488,33.332 C78.646,36.788 80.55,41.192 80.55,46.578 C80.55,65.533 69.125,69.708 58.25,70.93 C60.006,72.455 61.568,75.449 61.568,80.035 C61.568,86.615 61.511,91.905 61.511,93.532 C61.511,94.838 62.386,96.359 64.848,95.882 C84.013,89.36 98,70.95 98,49.217 C98,22 76.161,0 48.854,0 Z" />
+                                            </Viewbox>
+                                            <StackPanel>
+                                                <TextBlock Text="Edge-HH/Pancake" FontWeight="SemiBold" Foreground="{ThemeResource BoardTextBrush}" />
+                                                <TextBlock Text="在 GitHub 中打开" FontSize="12" Foreground="{ThemeResource BoardTextBrush}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </HyperlinkButton>
+                                    <HyperlinkButton NavigateUri="https://gitee.com/EdgeHH/pancake/" Background="{ThemeResource BoardSurfaceSecondaryBrush}" Foreground="{ThemeResource BoardTextBrush}" CornerRadius="8" Padding="14,8">
+                                        <StackPanel Orientation="Horizontal" Spacing="12">
+                                            <Viewbox Width="24" Height="24" VerticalAlignment="Center">
+                                                <Path
+                                                    Width="24"
+                                                    Height="24"
+                                                    Fill="#C71D23"
+                                                    Stretch="Uniform"
+                                                    Data="M11.984 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.016 0zm6.09 5.333c.328 0 .593.266.592.593v1.482a.594.594 0 0 1-.593.592H9.777c-.982 0-1.778.796-1.778 1.778v5.63c0 .327.266.592.593.592h5.63c.982 0 1.778-.796 1.778-1.778v-.296a.593.593 0 0 0-.592-.593h-4.15a.592.592 0 0 1-.592-.592v-1.482a.593.593 0 0 1 .593-.592h6.815c.327 0 .593.265.593.592v3.408a4 4 0 0 1-4 4H5.926a.593.593 0 0 1-.593-.593V9.778a4.444 4.444 0 0 1 4.445-4.444h8.296Z" />
+                                            </Viewbox>
+                                            <StackPanel>
+                                                <TextBlock Text="EdgeHH/pancake" FontWeight="SemiBold" Foreground="{ThemeResource BoardTextBrush}" />
+                                                <TextBlock Text="在 Gitee 中打开" FontSize="12" Foreground="{ThemeResource BoardTextBrush}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </HyperlinkButton>
+                                </StackPanel>
                             </Grid>
                         </StackPanel>
                     </Border>

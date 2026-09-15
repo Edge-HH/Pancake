@@ -162,7 +162,7 @@ public sealed class ExportImageView : Grid
             var subjects = AppDataStore.RestoreSubjects(_project.Subjects.OrderBy(s => s.Y).ThenBy(s => s.X));
             foreach (var subject in subjects)
             {
-                ExportTileVisual tile = new(subject, _background, _project.Palette, _settings.TileTitleSize);
+                ExportTileVisual tile = new(subject, _background, _project.Palette, _settings);
                 _tiles.Add(tile); _canvas.Children.Add(tile);
             }
             foreach (ExportTileVisual tile in _tiles) await tile.PrepareAsync();

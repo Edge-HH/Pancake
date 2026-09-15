@@ -347,6 +347,7 @@ public sealed partial class MainWindow : Window
             SetTileInteractionActive,
             AddAttachmentAsync,
             ScheduleSave,
+            _settings,
             _autofill,
             _autofillPopup)
         {
@@ -739,6 +740,9 @@ public sealed partial class MainWindow : Window
         BoardTheme.IsLight = RootShell.ActualTheme == ElementTheme.Light;
         if (!_isLoaded) return;
         ApplyExtendedSettings();
+        // 设置页里代码生成的学科/作业列表用的是当前主题画笔，切浅色后必须重建，否则会留下深色模式下的白字。
+        _refreshSubjectAutofill?.Invoke();
+        _refreshHomeworkAutofill?.Invoke();
         RefreshInkPalette();
         // 已有笔迹保留原始颜色；富文本在加载和保存时进行默认内容色转换。
         BuildTiles();

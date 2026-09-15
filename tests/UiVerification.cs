@@ -126,6 +126,13 @@ public sealed partial class MainWindow
                 Check(backdropExceptions.Count == 0, "Mica configuration does not throw while window focus changes");
                 ShowSettings();
                 await NextLayoutAsync();
+                var settingsPreviewEditors = FindVisuals<RichEditBox>(_appearancePreviews["Tile"]).ToList();
+                Check(settingsPreviewEditors.Count > 0 && settingsPreviewEditors.All(editor => editor.IsReadOnly),
+                    "opening settings loads read-only tile preview editors");
+                _tileAppearancePreview!.ApplyBodyDefaults(_settings, overrideFormatted: true);
+                Check(settingsPreviewEditors.All(editor => editor.IsReadOnly) &&
+                    settingsPreviewEditors.All(editor => !string.IsNullOrWhiteSpace(editor.Document.GetRange(0, 1).CharacterFormat.Name)),
+                    "body defaults can update a read-only settings preview and restore its state");
                 var initiallySelectedSettingsItems = SettingsRoot.MenuItems.Concat(SettingsRoot.FooterMenuItems)
                     .OfType<NavigationViewItem>()
                     .SelectMany(item => item.MenuItems.OfType<NavigationViewItem>().DefaultIfEmpty(item))
@@ -203,6 +210,18 @@ public sealed partial class MainWindow
                     fontPicker = FindVisuals<AutoSuggestBox>(RichTextToolbarHost).FirstOrDefault();
                 }
                 Check(fontPicker is not null, "font picker is hosted next to the focused homework editor");
+                NumberBox fontSizePicker = FindVisuals<NumberBox>(RichTextToolbarHost)
+                    .Single(input => Equals(ToolTipService.GetToolTip(input), "字号"));
+                editor.Document.Selection.SetRange(0, 2);
+                editor.Document.Selection.CharacterFormat.Size = 31;
+                fontSizePicker.Focus(FocusState.Programmatic);
+                await NextLayoutAsync();
+                Check(Math.Abs(fontSizePicker.Value - 31) < .01,
+                    "font size picker synchronizes the selected text size without reentrant focus");
+                ((Action<double>)fontSizePicker.Tag)(35);
+                await NextLayoutAsync();
+                Check(Math.Abs(editor.Document.GetRange(0, 2).CharacterFormat.Size - 35) < .01,
+                    "font size picker applies changes without stealing focus");
                 fontPicker!.Focus(FocusState.Programmatic);
                 await NextLayoutAsync();
                 evidence.Add("font picker selection: " + editor.Document.Selection.StartPosition + ".." + editor.Document.Selection.EndPosition);
@@ -1507,6 +1526,24 @@ public sealed partial class MainWindow
             FindVisuals<Border>(_settingsPages["About"].Content).Contains(VersionSettingsCard) &&
             FindVisuals<Border>(_settingsPages["About"].Content).Contains(UpdateSettingsCard) &&
             FindVisuals<Grid>(_settingsPages["About"].Content).Contains(RepositorySettingsCard), "About combines version repositories and updates on one page");
+        List<HyperlinkButton> repoLinks = FindVisuals<HyperlinkButton>(RepositorySettingsCard).ToList();
+        check(repoLinks.Count == 2 &&
+            repoLinks.Any(link => link.NavigateUri?.Host == "github.com") &&
+            repoLinks.Any(link => link.NavigateUri?.Host == "gitee.com"),
+            "About lists GitHub and Gitee repository cards");
+        ElementTheme originalAboutTheme = RootShell.RequestedTheme;
+        RootShell.RequestedTheme = ElementTheme.Light;
+        await NextLayoutAsync();
+        List<Windows.UI.Color> repoText = repoLinks
+            .SelectMany(link => FindVisuals<TextBlock>(link))
+            .Where(text => text.Text is "Edge-HH/Pancake" or "EdgeHH/pancake" or "在 GitHub 中打开" or "在 Gitee 中打开")
+            .Select(text => (text.Foreground as SolidColorBrush)?.Color ?? Windows.UI.Color.FromArgb(0, 0, 0, 0))
+            .ToList();
+        check(repoLinks.All(link => (link.Background as SolidColorBrush)?.Color == Windows.UI.Color.FromArgb(255, 255, 255, 255)) &&
+            repoText.Count == 4 && repoText.All(color => color == Windows.UI.Color.FromArgb(255, 0, 0, 0)),
+            "repository cards keep a light surface and black labels in light mode");
+        RootShell.RequestedTheme = originalAboutTheme;
+        await NextLayoutAsync();
         foreach (string page in new[] { "AppearanceTile", "AppearanceBackground", "AppearanceGrid", "AppearanceToolbar" })
         {
             ShowSettingsPage(page); await NextLayoutAsync();
@@ -1787,6 +1824,16 @@ public sealed partial class MainWindow
             "every subject row keeps its own enable switch");
         check(FindVisuals<Button>(_settingsPages["AutofillSubject"].Content).Any(button => Equals(button.Content, "刷新列表")),
             "subject page offers a list refresh button");
+        ElementTheme originalSubjectTheme = RootShell.RequestedTheme;
+        RootShell.RequestedTheme = ElementTheme.Light;
+        await NextLayoutAsync();
+        TextBlock chineseName = FindVisuals<Grid>(_settingsPages["AutofillSubject"].Content)
+            .SelectMany(row => FindVisuals<TextBlock>(row))
+            .First(text => text.Text == "语文");
+        check((chineseName.Foreground as SolidColorBrush)?.Color == Windows.UI.Color.FromArgb(255, 0, 0, 0),
+            "subject names stay black and visible after switching to light mode");
+        RootShell.RequestedTheme = originalSubjectTheme;
+        await NextLayoutAsync();
         await SaveVisualAsync(RootShell, Path.Combine(output, "autofill-subject.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
 
         // 行内色卡必须显示当前色系下的学科颜色，切换色系后立即重算，而不是停留在构建时的颜色。

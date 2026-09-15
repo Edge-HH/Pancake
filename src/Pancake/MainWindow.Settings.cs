@@ -59,6 +59,12 @@ public sealed partial class MainWindow
         StackPanel tile = SettingsStack();
         tile.Children.Add(CreateAppearancePreview("Tile"));
         tile.Children.Add(Range("标题大小", 16, 72, _settings.TileTitleSize, value => _settings.TileTitleSize = value, TileTitleSizeChanged));
+        tile.Children.Add(Range("正文默认字号", 12, 72, _settings.TileBodyFontSize, value => _settings.TileBodyFontSize = value, TileBodyStyleChanged));
+        tile.Children.Add(DefaultBodyFontPicker());
+        tile.Children.Add(Toggle("正文默认粗体", _settings.TileBodyBold, value => _settings.TileBodyBold = value, TileBodyStyleChanged));
+        tile.Children.Add(Toggle("正文默认斜体", _settings.TileBodyItalic, value => _settings.TileBodyItalic = value, TileBodyStyleChanged));
+        tile.Children.Add(Toggle("仅粘贴纯文本", _settings.PastePlainTextOnly, value => _settings.PastePlainTextOnly = value));
+        tile.Children.Add(Note("默认正文样式用于新建和尚未单独设置格式的正文；已有的局部字体、粗体、斜体、颜色与高光不会被覆盖。开启纯文本粘贴后，Ctrl+V 和右键粘贴都会移除来源格式。"));
         tile.Children.Add(BackgroundEditor(_settings.TileBackground, () => true, () => true, surface: true));
         StackPanel backgrounds = SettingsStack();
         backgrounds.Children.Add(CreateAppearancePreview("Shared"));
@@ -114,44 +120,14 @@ public sealed partial class MainWindow
         AutofillSettingsPanel.Children.Clear();
         RegisterSettingsPage("AutofillSubject", AutofillSettingsPanel, SubjectAutofillSettings(), "学科补全", "设置可补全的学科、默认颜色与匹配严格度。");
         RegisterSettingsPage("AutofillHomework", AutofillSettingsPanel, HomeworkAutofillSettings(), "作业补全", "记录常输入的作业名称，并按学科范围提示补全。");
-        var versionContent = (StackPanel)VersionSettingsCard.Child;
-        versionContent.Children.Remove(RepositorySettingsCard);
-        RepositorySettingsCard.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        RepositorySettingsCard.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        RepositorySettingsCard.ColumnDefinitions.Clear();
-        RepositorySettingsCard.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var githubLink = RepositorySettingsCard.Children.OfType<HyperlinkButton>().Single();
-        Grid.SetColumn(githubLink, 0); Grid.SetRow(githubLink, 1);
-        githubLink.Margin = new Thickness(0, 12, 0, 0);
-        StackPanel repositories = SettingsStack();
-        repositories.Children.Add(RepositorySettingsCard);
-        HyperlinkButton gitee = new()
-        {
-            NavigateUri = new Uri("https://gitee.com/EdgeHH/pancake/"),
-            Background = (Brush)Application.Current.Resources["BoardSurfaceSecondaryBrush"],
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(14, 8, 14, 8)
-        };
-        StackPanel link = new() { Orientation = Orientation.Horizontal, Spacing = 12 };
-        link.Children.Add(new Viewbox { Width = 24, Height = 24, Child = new Microsoft.UI.Xaml.Shapes.Path
-        {
-            Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 199, 29, 35)),
-            Data = (Geometry)Microsoft.UI.Xaml.Markup.XamlBindingHelper.ConvertValue(typeof(Geometry),
-                "M11.984 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.016 0zm6.09 5.333c.328 0 .593.266.592.593v1.482a.594.594 0 0 1-.593.592H9.777c-.982 0-1.778.796-1.778 1.778v5.63c0 .327.266.592.593.592h5.63c.982 0 1.778-.796 1.778-1.778v-.296a.593.593 0 0 0-.592-.593h-4.15a.592.592 0 0 1-.592-.592v-1.482a.593.593 0 0 1 .593-.592h6.815c.327 0 .593.265.593.592v3.408a4 4 0 0 1-4 4H5.926a.593.593 0 0 1-.593-.593V9.778a4.444 4.444 0 0 1 4.445-4.444h8.296Z"),
-            Width = 24, Height = 24
-        } });
-        StackPanel giteeText = new();
-        giteeText.Children.Add(new TextBlock { Text = "EdgeHH/pancake", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-        giteeText.Children.Add(new TextBlock { Text = "在 Gitee 中打开", FontSize = 12 });
-        link.Children.Add(giteeText);
-        gitee.Content = link;
-        repositories.Children.Add(gitee);
-        var updateCard = AboutSettingsPanel.Children.Last();
-        AboutSettingsPanel.Children.Clear();
+        // 仓库卡片已在 XAML 中声明 GitHub / Gitee 两个链接，并绑定主题色，切浅色时背景和文字一起换。
         StackPanel about = SettingsStack();
-        about.Children.Add(VersionSettingsCard);
-        about.Children.Add(repositories);
-        about.Children.Add(updateCard);
+        while (AboutSettingsPanel.Children.Count > 0)
+        {
+            UIElement child = AboutSettingsPanel.Children[0];
+            AboutSettingsPanel.Children.RemoveAt(0);
+            about.Children.Add(child);
+        }
         RegisterSettingsPage("About", AboutSettingsPanel, about, "关于", "查看版本、访问仓库与检查更新。");
         UpdateSourceComboBox.SelectedIndex = _settings.UpdateSource == "Gitee" ? 1 : 0;
         UpdateSourceComboBox.SelectionChanged += async (_, _) =>
@@ -283,6 +259,7 @@ public sealed partial class MainWindow
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
         StackPanel label = new() { Spacing = 2, VerticalAlignment = VerticalAlignment.Center };
+        // 学科名按当前主题取色；切浅色时 ApplyActualTheme 会重建列表，避免留下启动时的白字。
         label.Children.Add(new TextBlock { Text = item.Name, FontSize = 15, Foreground = BoardTheme.TextBrush });
         label.Children.Add(new TextBlock
         {
@@ -862,10 +839,10 @@ public sealed partial class MainWindow
         ScheduleSave();
     }
 
-    private ToggleSwitch Toggle(string label, bool value, Action<bool> update)
+    private ToggleSwitch Toggle(string label, bool value, Action<bool> update, Action? changed = null)
     {
         ToggleSwitch toggle = new() { Header = label, IsOn = value };
-        toggle.Toggled += (_, _) => { update(toggle.IsOn); SettingChanged(); };
+        toggle.Toggled += (_, _) => { update(toggle.IsOn); (changed ?? SettingChanged)(); };
         return toggle;
     }
 
@@ -875,6 +852,47 @@ public sealed partial class MainWindow
         foreach (SubjectTileControl tile in BoardCanvas.Children.OfType<SubjectTileControl>())
             tile.ApplyTitleSize(_settings.TileTitleSize);
         _tileAppearancePreview?.ApplyTitleSize(_settings.TileTitleSize);
+        ScheduleSave();
+    }
+
+    private FrameworkElement DefaultBodyFontPicker()
+    {
+        AutoSuggestBox input = new()
+        {
+            Header = "正文默认字体",
+            Text = FontService.NormalizeFamilyName(_settings.TileBodyFontFamily),
+            ItemsSource = FontService.AvailableFamilies,
+            MaxSuggestionListHeight = 300,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        input.TextChanged += (_, args) =>
+        {
+            if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+                input.ItemsSource = FontService.AvailableFamilies
+                    .Where(font => font.Contains(input.Text, StringComparison.CurrentCultureIgnoreCase)).Take(80).ToArray();
+        };
+        void Apply(string? family)
+        {
+            string normalized = FontService.NormalizeFamilyName(family);
+            input.Text = normalized;
+            if (_settings.TileBodyFontFamily == normalized) return;
+            _settings.TileBodyFontFamily = normalized;
+            TileBodyStyleChanged();
+        }
+        input.QuerySubmitted += (_, args) => Apply(args.ChosenSuggestion as string ?? args.QueryText);
+        input.SuggestionChosen += (_, args) => Apply(args.SelectedItem as string);
+#if PANCAKE_UI_TESTS
+        input.Tag = (Action<string?>)Apply;
+#endif
+        return input;
+    }
+
+    private void TileBodyStyleChanged()
+    {
+        // 改默认样式只触碰未单独格式化的正文；预览是独立示例，可以整体展示当前默认值。
+        foreach (SubjectTileControl tile in BoardCanvas.Children.OfType<SubjectTileControl>())
+            tile.ApplyBodyDefaults(_settings);
+        _tileAppearancePreview?.ApplyBodyDefaults(_settings, overrideFormatted: true);
         ScheduleSave();
     }
 

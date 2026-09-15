@@ -363,6 +363,17 @@ public sealed partial class MainWindow
                 ApplyFontPickerAppearance(toolbar, fontPicker, vertical, scale, padding, contentSize);
                 continue;
             }
+            if (child is NumberBox fontSizePicker)
+            {
+                fontSizePicker.MinHeight = 0;
+                fontSizePicker.Width = vertical ? contentSize : Math.Max(70, 86 * scale);
+                fontSizePicker.Height = Math.Min(contentSize, 32 * scale);
+                fontSizePicker.FontSize = 14 * scale;
+                fontSizePicker.SpinButtonPlacementMode = vertical
+                    ? NumberBoxSpinButtonPlacementMode.Hidden
+                    : NumberBoxSpinButtonPlacementMode.Compact;
+                continue;
+            }
             if (child is Button fontButton && _fontPickerButton is not null && ReferenceEquals(fontButton, _fontPickerButton))
             {
                 // 竖版下承载字体选择框的图标按钮，样式与其它浮岛按钮一致；

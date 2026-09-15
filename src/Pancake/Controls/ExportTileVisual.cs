@@ -29,10 +29,11 @@ public sealed class ExportTileVisual : Grid
     private readonly double _originalWidth, _originalHeight;
     private Color _background;
     private string _palette;
+    private readonly BoardSettingsState _settings;
 
-    public ExportTileVisual(SubjectBoard subject, Color background, string palette, double titleSize = 29)
+    public ExportTileVisual(SubjectBoard subject, Color background, string palette, BoardSettingsState settings)
     {
-        _subject = subject; _background = background; _palette = palette;
+        _subject = subject; _background = background; _palette = palette; _settings = settings;
         _originalWidth = subject.TileWidth; _originalHeight = subject.TileHeight;
         Width = subject.TileWidth;
         _surface.Children.Add(_backdrop); _surface.Children.Add(_tint);
@@ -42,7 +43,7 @@ public sealed class ExportTileVisual : Grid
         StackPanel content = new() { Spacing = 8, Padding = new Thickness(14, 10, 10, 10) };
         _frame = new Border { BorderThickness = new Thickness(3), CornerRadius = new CornerRadius(3), Child = content };
         _layout.Children.Add(_frame);
-        _name = new TextBlock { Text = subject.Name, FontSize = titleSize, FontWeight = FontWeights.SemiBold, MinHeight = 34, TextWrapping = TextWrapping.Wrap };
+        _name = new TextBlock { Text = subject.Name, FontSize = settings.TileTitleSize, FontWeight = FontWeights.SemiBold, MinHeight = 34, TextWrapping = TextWrapping.Wrap };
         content.Children.Add(_name);
         _watermark = new TextBlock { Text = subject.Name, FontSize = 72, FontWeight = FontWeights.Bold, Opacity = .16, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, IsHitTestVisible = false };
         _layout.Children.Add(_watermark);
@@ -55,7 +56,10 @@ public sealed class ExportTileVisual : Grid
             row.Children.Add(new TextBlock { Text = $"{++index}.", FontSize = 20, Margin = new Thickness(0, 4, 0, 0) });
             RichEditBox editor = new()
             {
-                FontFamily = FontService.DefaultFamily, FontSize = 20, TextWrapping = TextWrapping.Wrap,
+                FontFamily = FontService.Family(settings.TileBodyFontFamily), FontSize = Math.Clamp(settings.TileBodyFontSize, 12, 72),
+                FontWeight = settings.TileBodyBold ? FontWeights.Bold : FontWeights.Normal,
+                FontStyle = settings.TileBodyItalic ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal,
+                TextWrapping = TextWrapping.Wrap,
                 BorderThickness = new Thickness(0), Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
                 Padding = new Thickness(2, 0, 2, 0), MinHeight = 42, IsHitTestVisible = false
             };
@@ -153,7 +157,15 @@ public sealed class ExportTileVisual : Grid
             editor.IsReadOnly = false;
             editor.Document.SetText(string.IsNullOrWhiteSpace(pair.Entry.RtfContent) ? TextSetOptions.None : TextSetOptions.FormatRtf,
                 string.IsNullOrWhiteSpace(pair.Entry.RtfContent) ? pair.Entry.Content : DefaultContentColors.AdaptRtf(pair.Entry.RtfContent, light));
-            if (string.IsNullOrWhiteSpace(pair.Entry.RtfContent)) editor.Document.GetRange(0, int.MaxValue).CharacterFormat.ForegroundColor = foreground;
+            if (string.IsNullOrWhiteSpace(pair.Entry.RtfContent))
+            {
+                ITextCharacterFormat format = editor.Document.GetRange(0, int.MaxValue).CharacterFormat;
+                format.Name = FontService.RtfFamilyName(_settings.TileBodyFontFamily);
+                format.Size = (float)Math.Clamp(_settings.TileBodyFontSize, 12, 72);
+                format.Bold = _settings.TileBodyBold ? FormatEffect.On : FormatEffect.Off;
+                format.Italic = _settings.TileBodyItalic ? FormatEffect.On : FormatEffect.Off;
+                format.ForegroundColor = foreground;
+            }
             FontService.RebindBundledFont(editor, pair.Entry.FontFallbacks);
             editor.Foreground = new SolidColorBrush(foreground);
             editor.IsReadOnly = true;

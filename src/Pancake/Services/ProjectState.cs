@@ -27,6 +27,11 @@ public sealed class BoardSettingsState
     public double GridDotDiameter { get; set; } = 3;
     public bool ShowGridWhileEditing { get; set; } = true;
     public double TileTitleSize { get; set; } = 29;
+    public double TileBodyFontSize { get; set; } = 20;
+    public string TileBodyFontFamily { get; set; } = FontService.FamilyName;
+    public bool TileBodyBold { get; set; }
+    public bool TileBodyItalic { get; set; }
+    public bool PastePlainTextOnly { get; set; }
     public BackgroundSettings TileBackground { get; set; } = new();
     public bool SharedBackgroundEnabled { get; set; }
     public BackgroundSettings SharedBackground { get; set; } = new();

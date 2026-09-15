@@ -231,13 +231,23 @@ public sealed partial class MainWindow
         // 使用真实磁贴控件和独立模型副本，富文本、附件、笔迹与标题样式和看板一致。
         SubjectBoard subject = source?.Clone() ?? new SubjectBoard { Name = "语文", TileWidth = 430, TileHeight = 220 };
         if (source is null) subject.Entries.Add(new HomeworkEntry { Content = "阅读课文，完成课后练习。" });
-        SubjectTileControl tile = new(subject, _ => { }, _ => { }, _ => { }, _ => { }, _ => Task.CompletedTask, () => { });
+        SubjectTileControl tile = new(subject, _ => { }, _ => { }, _ => { }, _ => { }, _ => Task.CompletedTask, () => { }, _settings);
         // 和看板磁贴一样带上数据上下文，预览可以取回控件内部的模型副本来排布。
         tile.DataContext = subject;
         tile.IsHitTestVisible = false;
-        tile.Loaded += (_, _) => DisablePreviewTabStops(tile);
+        tile.Loaded += (_, _) =>
+        {
+            DisablePreviewTabStops(tile);
+            // 子级 RichEditBox 的文档必须完成 Loaded 后才能写入 CharacterFormat；
+            // 推迟到当前 Loaded 事件之后，避免设置页初始化时 WinRT 拒绝字体格式操作。
+            tile.DispatcherQueue.TryEnqueue(() => tile.ApplyBodyDefaults(_settings, overrideFormatted: true));
+        };
         tile.ApplyAppearance(_settings);
-        _buildingPreviewRefreshers?.Add(() => tile.ApplyAppearance(_settings));
+        _buildingPreviewRefreshers?.Add(() =>
+        {
+            tile.ApplyAppearance(_settings);
+            tile.ApplyBodyDefaults(_settings, overrideFormatted: true);
+        });
         return tile;
     }
 

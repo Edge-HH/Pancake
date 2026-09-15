@@ -10,6 +10,7 @@ using Pancake.Models;
 using Pancake.ViewModels;
 using Windows.Foundation;
 using Microsoft.UI.Text;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace Pancake.Controls;
 
@@ -33,6 +34,7 @@ public sealed class SubjectTileControl : Grid
     private readonly Action<bool> _interactionChanged;
     private readonly Func<HomeworkEntry, Task> _addAttachment;
     private readonly Action _contentChanged;
+    private readonly BoardSettingsState _settings;
     private readonly AutofillService? _autofill;
     private readonly AutofillPopup? _autofillPopup;
     private readonly List<HomeworkAutofillInput> _entryAutofills = [];
@@ -68,6 +70,7 @@ public sealed class SubjectTileControl : Grid
         Action<bool> interactionChanged,
         Func<HomeworkEntry, Task> addAttachment,
         Action contentChanged,
+        BoardSettingsState settings,
         AutofillService? autofill = null,
         AutofillPopup? autofillPopup = null)
     {
@@ -78,6 +81,7 @@ public sealed class SubjectTileControl : Grid
         _interactionChanged = interactionChanged;
         _addAttachment = addAttachment;
         _contentChanged = contentChanged;
+        _settings = settings;
         _autofill = autofill;
         _autofillPopup = autofillPopup;
 
@@ -257,9 +261,23 @@ public sealed class SubjectTileControl : Grid
     public void ApplyAppearance(BoardSettingsState settings)
     {
         ApplyTitleSize(settings.TileTitleSize);
+        ApplyBodyDefaults(settings);
         _nameEditor.MaxWidth = Math.Max(240, Width - 150);
         _frame.Background = null;
         _backgroundVisual.Apply(settings.TileBackground, BoardTheme.SurfaceBrush, surface: true);
+    }
+
+    public void ApplyBodyDefaults(BoardSettingsState settings, bool overrideFormatted = false)
+    {
+        foreach (Grid row in _entriesPanel.Children.OfType<Grid>())
+        {
+            if (row.Children.OfType<RichEditBox>().FirstOrDefault() is { Tag: HomeworkEntry entry } editor &&
+                editor.IsLoaded &&
+                (overrideFormatted || string.IsNullOrWhiteSpace(entry.RtfContent)))
+            {
+                ApplyDefaultBodyStyle(editor, entry.Content.Length);
+            }
+        }
     }
 
     // 字号拖动只触发布局，不重建背景媒体和毛玻璃合成资源。
@@ -438,15 +456,29 @@ public sealed class SubjectTileControl : Grid
     {
         RichEditBox editor = new()
         {
-            FontFamily = FontService.DefaultFamily,
-            FontSize = 20,
+            FontFamily = FontService.Family(_settings.TileBodyFontFamily),
+            FontSize = Math.Clamp(_settings.TileBodyFontSize, 12, 72),
+            FontWeight = _settings.TileBodyBold ? Microsoft.UI.Text.FontWeights.Bold : Microsoft.UI.Text.FontWeights.Normal,
+            FontStyle = _settings.TileBodyItalic ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal,
             Background = new SolidColorBrush(Windows.UI.Color.FromArgb(1, 0, 0, 0)),
             BorderThickness = new Thickness(0),
             Padding = new Thickness(2, 0, 2, 0),
             MinHeight = 42,
             TextWrapping = TextWrapping.Wrap,
             IsReadOnly = !_isEditing,
-            IsHitTestVisible = _isEditing
+            IsHitTestVisible = _isEditing,
+            Tag = homework
+        };
+        editor.Paste += async (_, args) =>
+        {
+            if (!_settings.PastePlainTextOnly) return;
+            // RichEditBox 的 Paste 事件同时覆盖 Ctrl+V 和右键菜单；先拦截默认富文本，再只写入剪贴板文本。
+            args.Handled = true;
+            DataPackageView clipboard = Clipboard.GetContent();
+            if (!clipboard.Contains(StandardDataFormats.Text)) return;
+            string text = await clipboard.GetTextAsync();
+            editor.Document.Selection.SetText(TextSetOptions.None, text);
+            CaptureRichText(editor, homework);
         };
         bool documentReady = false;
         editor.TextChanged += (_, _) =>
@@ -465,8 +497,7 @@ public sealed class SubjectTileControl : Grid
             bool repairedTrailingParagraphs = RemoveGeneratedTrailingParagraphs(editor, homework.Content);
             if (string.IsNullOrWhiteSpace(homework.RtfContent) && homework.Content.Length > 0)
             {
-                editor.Document.GetRange(0, homework.Content.Length).CharacterFormat.ForegroundColor =
-                    BoardTheme.TextColor;
+                ApplyDefaultBodyStyle(editor, homework.Content.Length);
             }
             FontService.RebindBundledFont(editor, homework.FontFallbacks);
             editor.IsReadOnly = readOnly;
@@ -491,10 +522,36 @@ public sealed class SubjectTileControl : Grid
         return editor;
     }
 
+    /// <summary>默认正文样式只覆盖没有保存过富文本格式的内容，避免设置页改默认值时破坏用户已有的局部格式。</summary>
+    private void ApplyDefaultBodyStyle(RichEditBox editor, int textLength)
+    {
+        // WinUI 会拒绝修改只读 RichEditBox 的 CharacterFormat；设置预览和查看模式磁贴需要短暂解锁文档。
+        bool readOnly = editor.IsReadOnly;
+        if (readOnly) editor.IsReadOnly = false;
+        try
+        {
+            ITextRange range = editor.Document.GetRange(0, Math.Max(0, textLength));
+            range.CharacterFormat.Name = FontService.RtfFamilyName(_settings.TileBodyFontFamily);
+            range.CharacterFormat.Size = (float)Math.Clamp(_settings.TileBodyFontSize, 12, 72);
+            range.CharacterFormat.Bold = _settings.TileBodyBold ? FormatEffect.On : FormatEffect.Off;
+            range.CharacterFormat.Italic = _settings.TileBodyItalic ? FormatEffect.On : FormatEffect.Off;
+            range.CharacterFormat.ForegroundColor = BoardTheme.TextColor;
+            editor.Document.Selection.CharacterFormat.Name = FontService.RtfFamilyName(_settings.TileBodyFontFamily);
+            editor.Document.Selection.CharacterFormat.Size = (float)Math.Clamp(_settings.TileBodyFontSize, 12, 72);
+            editor.Document.Selection.CharacterFormat.Bold = _settings.TileBodyBold ? FormatEffect.On : FormatEffect.Off;
+            editor.Document.Selection.CharacterFormat.Italic = _settings.TileBodyItalic ? FormatEffect.On : FormatEffect.Off;
+        }
+        finally
+        {
+            if (readOnly) editor.IsReadOnly = true;
+        }
+    }
+
     private StackPanel BuildFormattingToolbar(RichEditBox editor, HomeworkEntry homework)
     {
         StackPanel tools = new() { Orientation = Orientation.Horizontal, Spacing = 2 };
         tools.Children.Add(FontService.CreateFontPicker(editor, () => CaptureRichText(editor, homework)));
+        tools.Children.Add(FontService.CreateFontSizePicker(editor, () => CaptureRichText(editor, homework)));
         tools.Children.Add(CreateIconButton(FluentGlyphs.Bold, "加粗", (_, _) =>
         {
             editor.Document.Selection.CharacterFormat.Bold = FormatEffect.Toggle;

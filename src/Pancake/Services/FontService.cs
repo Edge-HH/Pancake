@@ -19,6 +19,21 @@ public static class FontService
 
     public static IReadOnlyList<string> AvailableFamilies => Fonts.Value;
 
+    public static string NormalizeFamilyName(string? name) =>
+        !string.IsNullOrWhiteSpace(name) && IsInstalledFamily(name) ? name : FamilyName;
+
+    public static FontFamily Family(string? name)
+    {
+        string normalized = NormalizeFamilyName(name);
+        return normalized == FamilyName ? DefaultFamily : new FontFamily(normalized);
+    }
+
+    public static string RtfFamilyName(string? name)
+    {
+        string normalized = NormalizeFamilyName(name);
+        return normalized == FamilyName ? ResourceName : normalized;
+    }
+
     private static readonly ConcurrentDictionary<string, bool> InstalledCache = new(StringComparer.CurrentCultureIgnoreCase);
 
     /// <summary>
@@ -132,6 +147,48 @@ public static class FontService
 #if PANCAKE_UI_TESTS
         // 真实点击不好在自动化里稳定触发，暴露同一段 Apply 供回归检查调用。
         input.Tag = (Action<string>)Apply;
+#endif
+        return input;
+    }
+
+    public static NumberBox CreateFontSizePicker(RichEditBox editor, Action changed)
+    {
+        NumberBox input = new()
+        {
+            Width = 86,
+            Minimum = 8,
+            Maximum = 96,
+            SmallChange = 1,
+            LargeChange = 4,
+            Value = 20,
+            SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Compact
+        };
+        ToolTipService.SetToolTip(input, "字号");
+        int start = 0, end = 0;
+        bool synchronizing = false;
+        void Remember()
+        {
+            start = editor.Document.Selection.StartPosition;
+            end = editor.Document.Selection.EndPosition;
+            float size = editor.Document.Selection.CharacterFormat.Size;
+            if (size is not (>= 8 and <= 96) || Math.Abs(input.Value - size) < .01) return;
+            // 获得焦点时只同步显示值；不能让 ValueChanged 在焦点迁移过程中抢回编辑器焦点。
+            synchronizing = true;
+            try { input.Value = size; }
+            finally { synchronizing = false; }
+        }
+        editor.SelectionChanged += (_, _) => { if (editor.FocusState != FocusState.Unfocused) Remember(); };
+        input.GettingFocus += (_, _) => Remember();
+        input.ValueChanged += (_, args) =>
+        {
+            if (synchronizing || double.IsNaN(args.NewValue)) return;
+            // 文档选区无需重新聚焦即可修改；保留 NumberBox 焦点才能连续输入字号。
+            editor.Document.Selection.SetRange(start, end);
+            editor.Document.Selection.CharacterFormat.Size = (float)Math.Clamp(args.NewValue, 8, 96);
+            changed();
+        };
+#if PANCAKE_UI_TESTS
+        input.Tag = (Action<double>)(size => input.Value = Math.Clamp(size, 8, 96));
 #endif
         return input;
     }

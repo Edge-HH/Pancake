@@ -77,6 +77,11 @@ if ($windowCode -notmatch 'RootShell\.AddHandler' -or $windowCode -notmatch 'Sho
 if ($tileCode -notmatch 'RichEditBox' -or $tileCode -notmatch 'FormatEffect\.Toggle' -or $tileCode -notmatch 'ForegroundColor' -or $tileCode -notmatch 'BackgroundColor' -or $tileCode -notmatch 'UnderlineType') {
     $failures.Add('磁贴内富文本编辑缺少加粗、斜体、下划线、颜色或高光。')
 }
+if ($tileCode -notmatch 'CreateFontSizePicker' -or
+    $settingsCode -notmatch '正文默认字号' -or
+    $tileCode -notmatch 'CharacterFormat\.Size') {
+    $failures.Add('正文编辑工具栏缺少选区字号修改，或磁贴设置页缺少正文默认字号。')
+}
 
 if ($tileCode -notmatch 'CreateThemeButton' -or $tileCode -notmatch 'AccentHex') {
     $failures.Add('磁贴主题色切换尚未接入。')
@@ -193,6 +198,31 @@ if ($settingsCode -notmatch 'ToggleButton randomToggle' -or
     $stateCode -notmatch 'public bool RandomColor \{ get; set; \}' -or
     $windowCode -notmatch '_refreshSubjectAutofill\?\.Invoke\(\)') {
     $failures.Add('学科颜色没有始终按当前色系显示，或缺少随机配色按钮与切换色系后的刷新。')
+}
+
+if ($windowXaml -notmatch 'gitee.com/EdgeHH/pancake' -or
+    $windowXaml -notmatch '在 Gitee 中打开' -or
+    $windowXaml -notmatch 'Foreground="\{ThemeResource BoardTextBrush\}"' -or
+    $settingsCode -match 'HyperlinkButton gitee' -or
+    $windowCode -notmatch '_refreshHomeworkAutofill\?\.Invoke\(\)') {
+    $failures.Add('关于页 Gitee 卡片仍用代码生成的固定深色，或切浅色后没有重建学科/作业列表。')
+}
+
+if ($stateCode -notmatch 'TileBodyFontSize' -or
+    $stateCode -notmatch 'TileBodyFontFamily' -or
+    $stateCode -notmatch 'TileBodyBold' -or
+    $stateCode -notmatch 'TileBodyItalic' -or
+    $stateCode -notmatch 'PastePlainTextOnly' -or
+    $settingsCode -notmatch '正文默认字号' -or
+    $settingsCode -notmatch '正文默认字体' -or
+    $settingsCode -notmatch '正文默认粗体' -or
+    $settingsCode -notmatch '正文默认斜体' -or
+    $settingsCode -notmatch '仅粘贴纯文本' -or
+    $windowCode -notmatch 'ApplyBodyDefaults\(_settings' -or
+    $tileCode -notmatch 'editor\.Paste \+=' -or
+    $tileCode -notmatch 'StandardDataFormats\.Text' -or
+    $tileCode -notmatch 'TextSetOptions\.None, text') {
+    $failures.Add('磁贴页缺少正文默认样式、右侧预览联动，或仅粘贴纯文本没有接入实际 RichEditBox 粘贴路径。')
 }
 
 if ($stateCode -notmatch 'public AutofillSettings Autofill \{ get; set; \}' -or
