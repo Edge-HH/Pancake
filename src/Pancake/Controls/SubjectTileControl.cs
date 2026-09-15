@@ -258,10 +258,11 @@ public sealed class SubjectTileControl : Grid
         return (width, height);
     }
 
-    public void ApplyAppearance(BoardSettingsState settings)
+    public void ApplyAppearance(BoardSettingsState settings, bool applyBodyDefaults = true)
     {
         ApplyTitleSize(settings.TileTitleSize);
-        ApplyBodyDefaults(settings);
+        // 预览拖动只更新标题和背景；正文格式写入 RichEditBox 很贵，不能跟在网格/间隔滑块后面跑。
+        if (applyBodyDefaults) ApplyBodyDefaults(settings);
         _nameEditor.MaxWidth = Math.Max(240, Width - 150);
         _frame.Background = null;
         _backgroundVisual.Apply(settings.TileBackground, BoardTheme.SurfaceBrush, surface: true);

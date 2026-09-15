@@ -243,11 +243,8 @@ public sealed partial class MainWindow
             tile.DispatcherQueue.TryEnqueue(() => tile.ApplyBodyDefaults(_settings, overrideFormatted: true));
         };
         tile.ApplyAppearance(_settings);
-        _buildingPreviewRefreshers?.Add(() =>
-        {
-            tile.ApplyAppearance(_settings);
-            tile.ApplyBodyDefaults(_settings, overrideFormatted: true);
-        });
+        // 拖动网格/间隔时只刷新外观外壳，正文默认样式由 Loaded 和磁贴页专门处理。
+        _buildingPreviewRefreshers?.Add(() => tile.ApplyAppearance(_settings, applyBodyDefaults: false));
         return tile;
     }
 
