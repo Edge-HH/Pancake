@@ -84,10 +84,10 @@ dotnet run --project .\src\Pancake\Pancake.csproj -c Release -p:Platform=x64
 
 ### 自动构建与发布
 
-- 推送 `v主版本.次版本.修订版本` 格式的标签（例如 `v1.2.3`）时，GitHub Actions 会执行 Release x64 构建、设置和排版逻辑测试、更新覆盖/回滚测试以及静态交互契约检查。
+- 推送 `v主版本.次版本.修订版本` 格式的标签（例如 `v1.2.3`）时，GitHub Actions 会发布 x64 自包含便携包：编译、精简语言资源、压缩 ZIP，再解压成品做一次启动检查。
 - 工作流名称为“📦 构建与发布”，各步骤均使用前置 emoji 的中文名称。
 - 发布包包含 .NET 与必要的 WinUI 运行时，精简未使用的 AI、ML、Widgets、WinForms 依赖，仅保留简体中文、繁体中文和英语语言回退资源。
-- 精简之后压缩 ZIP，再解压成品并在临时副本中实际加载主窗口，确认正常退出才创建 GitHub Release；`EnableMsixTooling` 保证主窗口与控件主题的 PRI/XBF 资源进入发布包。
+- 启动检查通过后才会创建 GitHub Release；`EnableMsixTooling` 保证主窗口与控件主题的 PRI/XBF 资源进入发布包。设置、排版、更新回滚和交互契约等更完整的测试仍可在本地运行，不纳入此工作流。
 - 在 Actions 页手动运行该工作流只会生成 ZIP 产物供检查，不会创建 GitHub Release。
 
 正式发布示例：
