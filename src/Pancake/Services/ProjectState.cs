@@ -9,6 +9,8 @@ public sealed class AppState
 
 public sealed class BoardSettingsState
 {
+    public const string DefaultTileBodyFontFamily = "HarmonyOS Sans SC";
+
     public string LayoutMode { get; set; } = "Split";
     public double SplitRatio { get; set; } = 0.4;
     public int DockedWidgetLayoutVersion { get; set; }
@@ -28,7 +30,7 @@ public sealed class BoardSettingsState
     public bool ShowGridWhileEditing { get; set; } = true;
     public double TileTitleSize { get; set; } = 29;
     public double TileBodyFontSize { get; set; } = 20;
-    public string TileBodyFontFamily { get; set; } = FontService.FamilyName;
+    public string TileBodyFontFamily { get; set; } = DefaultTileBodyFontFamily;
     public bool TileBodyBold { get; set; }
     public bool TileBodyItalic { get; set; }
     public bool PastePlainTextOnly { get; set; }

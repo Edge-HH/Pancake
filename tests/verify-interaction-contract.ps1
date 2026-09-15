@@ -218,7 +218,7 @@ if ($stateCode -notmatch 'TileBodyFontSize' -or
     $settingsCode -notmatch '正文默认粗体' -or
     $settingsCode -notmatch '正文默认斜体' -or
     $settingsCode -notmatch '仅粘贴纯文本' -or
-    $windowCode -notmatch 'ApplyBodyDefaults\(_settings' -or
+    $settingsCode -notmatch '_tileAppearancePreview\?\.ApplyBodyDefaults\(_settings,\s*overrideFormatted:\s*true\)' -or
     $tileCode -notmatch 'editor\.Paste \+=' -or
     $tileCode -notmatch 'StandardDataFormats\.Text' -or
     $tileCode -notmatch 'TextSetOptions\.None, text') {

@@ -11,7 +11,7 @@ namespace Pancake.Services;
 /// <summary>字体显示名和应用资源路径集中解析；RTF 对外保存标准家族名。</summary>
 public static class FontService
 {
-    public const string FamilyName = "HarmonyOS Sans SC";
+    public const string FamilyName = BoardSettingsState.DefaultTileBodyFontFamily;
     public const string ResourceName = "ms-appx:///Assets/Fonts/HarmonyOS_Sans_SC_Regular.ttf#HarmonyOS Sans SC";
     public static FontFamily DefaultFamily { get; } = new(ResourceName);
     private static readonly Lazy<string[]> Fonts = new(EnumerateFonts);
