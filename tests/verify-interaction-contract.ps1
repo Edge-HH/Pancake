@@ -17,6 +17,7 @@ $autofillInputCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\
 $projectCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.Projects.cs'))
 $settingsCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\MainWindow.Settings.cs'))
 $stateCode = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Services\ProjectState.cs'))
+$themeXaml = [System.IO.File]::ReadAllText((Join-Path $projectRoot 'src\Pancake\Themes\ThemeResources.xaml'))
 $failures = [System.Collections.Generic.List[string]]::new()
 
 if ($windowXaml -match 'x:Name="BoardScrollViewer"' -and
@@ -231,6 +232,17 @@ if ($stateCode -notmatch 'public AutofillSettings Autofill \{ get; set; \}' -or
     $autofillServiceCode -notmatch 'PendingExpiryDays = 14' -or
     $autofillServiceCode -notmatch 'PromotedExpiryDays = 90') {
     $failures.Add('自动填充设置没有默认关闭，或过期天数与约定不一致。')
+}
+
+# 新增作业只给灰色提示：正文必须是空的，提示文案走 PlaceholderText；旧版本写进正文的提示要在读取时还原。
+if ($stateCode -notmatch 'public const string PlaceholderText = "在这里输入作业内容"' -or
+    $stateCode -notmatch 'public void ClearLegacyPlaceholder\(\)' -or
+    $tileCode -notmatch 'PlaceholderText = _isEditing \? HomeworkState\.PlaceholderText' -or
+    $tileCode -notmatch '_subject\.Entries\.Add\(new HomeworkEntry\(\)\)' -or
+    $tileCode -match 'new HomeworkEntry \{ Content = "在这里输入作业内容" \}' -or
+    $dataCode -notmatch 'ClearLegacyPlaceholder\(\)' -or
+    ([regex]::Matches($themeXaml, 'x:Key="TextControlPlaceholderForeground"')).Count -ne 2) {
+    $failures.Add('新增作业仍把占位提示写成正文，或旧数据里的提示文案没有还原成空内容。')
 }
 
 if ($failures.Count -gt 0) {

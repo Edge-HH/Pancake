@@ -29,7 +29,7 @@ public sealed partial class MainWindow
                 while (watch.Elapsed < TimeSpan.FromSeconds(3))
                 {
                     // 走自然时钟刷新和设置预览路径，不改变解码模式，不向播放器注入帧。
-                    var player = FindVisuals<MediaPlayerElement>(_appearancePreviews["Shared"]).FirstOrDefault()?.MediaPlayer;
+                    var player = FindVisuals<MediaPlayerElement>(_appearancePreviews["Background"]).FirstOrDefault()?.MediaPlayer;
                     if (player is not null)
                     {
                         if (previous is not null && !ReferenceEquals(previous, player)) resets++;
@@ -51,7 +51,7 @@ public sealed partial class MainWindow
                     SettingChanged();
                     durations.Add(update.Elapsed.TotalMilliseconds);
                     await Task.Delay(60);
-                    var player = FindVisuals<MediaPlayerElement>(_appearancePreviews["Shared"]).FirstOrDefault()?.MediaPlayer;
+                    var player = FindVisuals<MediaPlayerElement>(_appearancePreviews["Background"]).FirstOrDefault()?.MediaPlayer;
                     if (player is not null) players.Add(player);
                 }
                 evidence.Add($"MEASURE: 16 appearance updates: players={players.Count}, maxUiWork={durations.Max():F1}ms");

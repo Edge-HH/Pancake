@@ -24,12 +24,16 @@ public sealed partial class MainWindow
     private Border? _tilePreviewStickyFrame;
     private Viewbox? _tilePreviewInlineViewbox;
     private Viewbox? _tilePreviewTileBox;
+    private Border? _backgroundPreviewInlineFrame;
+    private Border? _backgroundPreviewStickyFrame;
+    private Viewbox? _backgroundPreviewInlineViewbox;
     private readonly Dictionary<string, (string Key, List<Action> Refresh)> _previewScenes = [];
     private List<Action>? _buildingPreviewRefreshers;
 
     private UIElement CreateAppearancePreview(string kind)
     {
         if (kind == "Tile") return CreateTileAppearancePreview();
+        if (kind == "Background") return CreateBackgroundAppearancePreview();
         Grid scene = new() { Width = PreviewSceneWidth, Height = PreviewSceneHeight, IsHitTestVisible = false };
         _appearancePreviews.Add(kind, scene);
         // 固定设计坐标经 Viewbox 等比缩放，窄窗口也不会撑宽设置页。
@@ -71,43 +75,75 @@ public sealed partial class MainWindow
         return _tilePreviewInlineFrame;
     }
 
-    private void SettingsContentHost_SizeChanged(object sender, SizeChangedEventArgs e) => UpdateTilePreviewHosting();
+    /// <summary>背景板把跨区、时钟和作业板合成一张主界面式预览，和磁贴预览共用右侧固定宿主。</summary>
+    private UIElement CreateBackgroundAppearancePreview()
+    {
+        Grid scene = new() { Width = PreviewSceneWidth, Height = 360, IsHitTestVisible = false };
+        _appearancePreviews.Add("Background", scene);
+        _backgroundPreviewInlineViewbox = new Viewbox { Stretch = Stretch.Uniform, Child = scene };
+        _backgroundPreviewInlineFrame = new Border
+        {
+            Name = "BackgroundAppearancePreview", MaxWidth = PreviewSceneWidth, HorizontalAlignment = HorizontalAlignment.Stretch,
+            BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(8), Child = _backgroundPreviewInlineViewbox
+        };
+        _backgroundPreviewStickyFrame = new Border
+        {
+            Name = "BackgroundStickyAppearancePreview", HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12)
+        };
+        _backgroundPreviewInlineFrame.BorderBrush = _backgroundPreviewStickyFrame.BorderBrush = BoardTheme.LineBrush;
+        SettingsPreviewHost.Children.Add(_backgroundPreviewStickyFrame);
+        return _backgroundPreviewInlineFrame;
+    }
+
+    private void SettingsContentHost_SizeChanged(object sender, SizeChangedEventArgs e) => UpdatePreviewHosting();
 
     /// <summary>
     /// 按设置页当前的宽度决定磁贴预览挂在哪里。宽度足够时固定在右侧，
     /// 并让背景图铺满整块区域、磁贴按区域宽度放大；宽度不足时回到页内顶部。
     /// </summary>
-    private void UpdateTilePreviewHosting()
+    private void UpdatePreviewHosting()
     {
         if (_tilePreviewInlineFrame is null || _tilePreviewStickyFrame is null ||
-            !_appearancePreviews.TryGetValue("Tile", out Grid? scene)) return;
+            _backgroundPreviewInlineFrame is null || _backgroundPreviewStickyFrame is null) return;
         double available = SettingsContentHost.ActualWidth;
         double panelWidth = Math.Clamp(available * .52, StickyPreviewMinWidth, StickyPreviewMaxWidth);
-        bool sticky = _selectedSettingsPage == "AppearanceTile" && SettingsRoot.Visibility == Visibility.Visible &&
+        bool tilePage = _selectedSettingsPage == "AppearanceTile";
+        bool backgroundPage = _selectedSettingsPage == "AppearanceBackground";
+        bool sticky = (tilePage || backgroundPage) && SettingsRoot.Visibility == Visibility.Visible &&
             available - panelWidth >= MinimumSettingsColumnWidth;
 
         SettingsPreviewHost.Visibility = sticky ? Visibility.Visible : Visibility.Collapsed;
         SettingsPreviewHost.Width = panelWidth;
-        _tilePreviewInlineFrame.Visibility = sticky ? Visibility.Collapsed : Visibility.Visible;
+        _tilePreviewInlineFrame.Visibility = tilePage && !sticky ? Visibility.Visible : Visibility.Collapsed;
+        _tilePreviewStickyFrame.Visibility = tilePage && sticky ? Visibility.Visible : Visibility.Collapsed;
+        _backgroundPreviewInlineFrame.Visibility = backgroundPage && !sticky ? Visibility.Visible : Visibility.Collapsed;
+        _backgroundPreviewStickyFrame.Visibility = backgroundPage && sticky ? Visibility.Visible : Visibility.Collapsed;
         // 铺满右侧区域时缩小留白，让磁贴尽量占满预览；页内预览保持原比例。
         if (_tilePreviewTileBox is not null) _tilePreviewTileBox.Margin = sticky ? new Thickness(16) : new Thickness(30);
-        // 页内预览使用固定设计尺寸供 Viewbox 等比缩放；铺满右侧区域时把尺寸交回布局。
-        scene.Width = sticky ? double.NaN : PreviewSceneWidth;
-        scene.Height = sticky ? double.NaN : PreviewSceneHeight;
+        if (tilePage && _appearancePreviews.TryGetValue("Tile", out Grid? tileScene))
+            MovePreviewScene(tileScene, _tilePreviewInlineViewbox, _tilePreviewStickyFrame, sticky, PreviewSceneHeight);
+        if (backgroundPage && _appearancePreviews.TryGetValue("Background", out Grid? backgroundScene))
+            MovePreviewScene(backgroundScene, _backgroundPreviewInlineViewbox, _backgroundPreviewStickyFrame, sticky, 360);
+    }
 
-        // 页内预览多包一层 Viewbox 才能整体等比缩放，右侧区域则让场景直接铺满。
-        if (sticky ? ReferenceEquals(scene.Parent, _tilePreviewStickyFrame) : ReferenceEquals(scene.Parent, _tilePreviewInlineViewbox)) return;
+    private static void MovePreviewScene(Grid scene, Viewbox? inlineViewbox, Border stickyFrame, bool sticky, double inlineHeight)
+    {
+        // 页内预览使用固定设计尺寸供 Viewbox 等比缩放；右侧区域则让场景直接铺满。
+        scene.Width = sticky ? double.NaN : PreviewSceneWidth;
+        scene.Height = sticky ? double.NaN : inlineHeight;
+        if (sticky ? ReferenceEquals(scene.Parent, stickyFrame) : ReferenceEquals(scene.Parent, inlineViewbox)) return;
         if (scene.Parent is Viewbox inline) inline.Child = null;
         else if (scene.Parent is Border pinned) pinned.Child = null;
-        if (sticky) _tilePreviewStickyFrame.Child = scene;
-        else if (_tilePreviewInlineViewbox is not null) _tilePreviewInlineViewbox.Child = scene;
+        if (sticky) stickyFrame.Child = scene;
+        else if (inlineViewbox is not null) inlineViewbox.Child = scene;
     }
 
     private void RefreshAppearancePreviews()
     {
         string[] kinds = _selectedSettingsPage switch
         {
-            "AppearanceTile" => ["Tile"], "AppearanceBackground" => ["Shared", "Clock", "Board"],
+            "AppearanceTile" => ["Tile"], "AppearanceBackground" => ["Background"],
             "AppearanceGrid" => ["Grid"], "AppearanceToolbar" => ["Toolbar"], "Layout" => ["Layout"], _ => []
         };
         foreach (string kind in kinds)
@@ -119,12 +155,18 @@ public sealed partial class MainWindow
                 if (_tilePreviewInlineFrame is not null) _tilePreviewInlineFrame.BorderBrush = BoardTheme.LineBrush;
                 if (_tilePreviewStickyFrame is not null) _tilePreviewStickyFrame.BorderBrush = BoardTheme.LineBrush;
             }
+            else if (kind == "Background")
+            {
+                if (_backgroundPreviewInlineFrame is not null) _backgroundPreviewInlineFrame.BorderBrush = BoardTheme.LineBrush;
+                if (_backgroundPreviewStickyFrame is not null) _backgroundPreviewStickyFrame.BorderBrush = BoardTheme.LineBrush;
+            }
             else if (scene.Parent is Viewbox { Parent: Border frame }) frame.BorderBrush = BoardTheme.LineBrush;
             string key = kind switch
             {
                 "Toolbar" => $"{BoardTheme.IsLight}|{RootShell.ActualWidth}|{RootShell.ActualHeight}|{_settings.ToolbarPosition}|{_settings.ToolbarScale}|{_settings.ToolbarIconOnly}|{_settings.ToolbarRadius}|{_settings.ToolbarGlass}|{_settings.ToolbarBlur}|{_settings.ToolbarHorizontalInset}|{_settings.ToolbarVerticalInset}",
                 // 磁贴示例的主题色与高光色都取自当前色系，主题或色系变化必须重建示例才和真实磁贴一致。
                 "Tile" => $"{BoardTheme.IsLight}|{ColorPalette.IsMacaron}",
+                "Background" => $"{BoardTheme.IsLight}|{_settings.LayoutMode}|{_settings.SharedBackgroundEnabled}|{_settings.SplitRatio:0.####}",
                 _ => $"{BoardTheme.IsLight}|{_settings.LayoutMode}"
             };
             // 只有网格页每次重建；布局页缓存真实磁贴控件，拖动时只走刷新器，不重建控件与背景。
@@ -159,29 +201,8 @@ public sealed partial class MainWindow
                     _tilePreviewTileBox = new Viewbox { Stretch = Stretch.Uniform, Child = _tileAppearancePreview };
                     scene.Children.Add(_tilePreviewTileBox);
                     break;
-                case "Shared":
-                    AddPreviewBackground(scene, () => UseSharedBackground ? _settings.SharedBackground : new());
-                    Grid split = new();
-                    split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Clamp(_settings.SplitRatio, .1, .9), GridUnitType.Star) });
-                    split.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - Math.Clamp(_settings.SplitRatio, .1, .9), GridUnitType.Star) });
-                    _buildingPreviewRefreshers.Add(() =>
-                    {
-                        split.ColumnDefinitions[0].Width = new GridLength(Math.Clamp(_settings.SplitRatio, .1, .9), GridUnitType.Star);
-                        split.ColumnDefinitions[1].Width = new GridLength(1 - Math.Clamp(_settings.SplitRatio, .1, .9), GridUnitType.Star);
-                    });
-                    Grid clock = new(), board = new();
-                    AddPreviewBackground(clock, () => _settings.ClockBackground, () => UseSharedBackground);
-                    AddPreviewBackground(board, () => _settings.BoardBackground, () => UseSharedBackground);
-                    clock.Children.Add(PreviewClock()); board.Children.Add(PreviewBoard());
-                    split.Children.Add(clock); Grid.SetColumn(board, 1); split.Children.Add(board);
-                    scene.Children.Add(split);
-                    break;
-                case "Clock":
-                case "Board":
-                    AddPreviewBackground(scene, () => UseSharedBackground ? _settings.SharedBackground : new());
-                    AddPreviewBackground(scene, () => _settings.LayoutMode == "Free" ? new() :
-                        kind == "Clock" ? _settings.ClockBackground : _settings.BoardBackground, () => UseSharedBackground);
-                    scene.Children.Add(kind == "Clock" ? PreviewClock() : PreviewBoard());
+                case "Background":
+                    BuildBackgroundPreview(scene);
                     break;
                 case "Grid":
                     Grid comparison = new();
@@ -213,8 +234,54 @@ public sealed partial class MainWindow
             }
             _buildingPreviewRefreshers = null;
         }
-        // 磁贴预览的位置取决于设置页当前宽度，刷新后重新决定挂在页内还是右侧固定区。
-        UpdateTilePreviewHosting();
+        // 预览的位置取决于设置页当前宽度，刷新后重新决定挂在页内还是右侧固定区。
+        UpdatePreviewHosting();
+    }
+
+    /// <summary>
+    /// 背景板预览按主界面布局合成一张场景：跨区背景只创建一次，时钟和作业板区域
+    /// 只叠加自己的毛玻璃/颜色层，从而不会因为三个独立预览各自刷新而重复解码视频。
+    /// </summary>
+    private void BuildBackgroundPreview(Grid scene)
+    {
+        AddPreviewBackground(scene, () => UseSharedBackground ? _settings.SharedBackground : new());
+        Grid content = new();
+        scene.Children.Add(content);
+
+        void AddRegion(Grid region, bool clock)
+        {
+            AddPreviewBackground(region, () => clock ? _settings.ClockBackground : _settings.BoardBackground,
+                () => UseSharedBackground);
+            region.Children.Add(clock ? PreviewClock() : PreviewBoard());
+        }
+
+        double split = Math.Clamp(_settings.SplitRatio, .1, .9);
+        switch (_settings.LayoutMode)
+        {
+            case "Clock":
+                AddRegion(content, true);
+                break;
+            case "Board":
+            case "Free":
+                AddRegion(content, false);
+                break;
+            default:
+                content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(split, GridUnitType.Star) });
+                content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1 - split, GridUnitType.Star) });
+                Grid clock = new(), board = new();
+                AddRegion(clock, true);
+                AddRegion(board, false);
+                content.Children.Add(clock);
+                Grid.SetColumn(board, 1);
+                content.Children.Add(board);
+                _buildingPreviewRefreshers?.Add(() =>
+                {
+                    double current = Math.Clamp(_settings.SplitRatio, .1, .9);
+                    content.ColumnDefinitions[0].Width = new GridLength(current, GridUnitType.Star);
+                    content.ColumnDefinitions[1].Width = new GridLength(1 - current, GridUnitType.Star);
+                });
+                break;
+        }
     }
 
     private void AddPreviewBackground(Grid target, Func<BackgroundSettings> settings, Func<bool>? shared = null)

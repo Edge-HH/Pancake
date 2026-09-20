@@ -17,7 +17,6 @@ public sealed class AutofillService
     public const int MaxSubjectEntries = 200;
     public const int MaxTokenLength = 12;
     public const int MaxSubjectNameLength = 12;
-    public const string PlaceholderHomework = "在这里输入作业内容";
     public const string GlobalScope = "Global";
     public const string BuiltInSource = "BuiltIn";
     public const string LearnedSource = "Learned";
@@ -345,7 +344,8 @@ public sealed class AutofillService
     {
         if (string.IsNullOrWhiteSpace(token)) return false;
         if (token.Length is < 2 or > MaxTokenLength) return false;
-        if (token.Contains(PlaceholderHomework, StringComparison.Ordinal)) return false;
+        // 占位提示不再写进正文，这里只是拦住旧版本遗留或手工粘贴的提示文案。
+        if (token.Contains(HomeworkState.PlaceholderText, StringComparison.Ordinal)) return false;
         if (token.Any(IsHan)) return true;
         int run = 0;
         foreach (char character in token)

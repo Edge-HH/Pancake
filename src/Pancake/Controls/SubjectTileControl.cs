@@ -468,6 +468,9 @@ public sealed class SubjectTileControl : Grid
             TextWrapping = TextWrapping.Wrap,
             IsReadOnly = !_isEditing,
             IsHitTestVisible = _isEditing,
+            // 空作业只显示灰色提示（颜色见 Themes/ThemeResources.xaml 的 TextControlPlaceholderForeground）；
+            // 查看模式没有输入入口，不再显示提示文字。
+            PlaceholderText = _isEditing ? HomeworkState.PlaceholderText : string.Empty,
             Tag = homework
         };
         editor.Paste += async (_, args) =>
@@ -496,8 +499,9 @@ public sealed class SubjectTileControl : Grid
             editor.Document.SetText(string.IsNullOrWhiteSpace(homework.RtfContent) ? TextSetOptions.None : TextSetOptions.FormatRtf,
                 string.IsNullOrWhiteSpace(homework.RtfContent) ? homework.Content : DefaultContentColors.AdaptRtf(homework.RtfContent, BoardTheme.IsLight));
             bool repairedTrailingParagraphs = RemoveGeneratedTrailingParagraphs(editor, homework.Content);
-            if (string.IsNullOrWhiteSpace(homework.RtfContent) && homework.Content.Length > 0)
+            if (string.IsNullOrWhiteSpace(homework.RtfContent))
             {
+                // 空作业也要写入默认样式：它决定用户接下来输入的字体、字号和颜色。
                 ApplyDefaultBodyStyle(editor, homework.Content.Length);
             }
             FontService.RebindBundledFont(editor, homework.FontFallbacks);
@@ -780,7 +784,8 @@ public sealed class SubjectTileControl : Grid
 
     private void AddHomework()
     {
-        _subject.Entries.Add(new HomeworkEntry { Content = "在这里输入作业内容" });
+        // 新增的作业是空内容，编辑框里只显示灰色的“在这里输入作业内容”提示。
+        _subject.Entries.Add(new HomeworkEntry());
         _subject.NotifyEntriesChanged();
         _contentChanged();
     }

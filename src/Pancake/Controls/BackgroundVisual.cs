@@ -14,6 +14,10 @@ public sealed class BackgroundVisual : Grid
 {
     private readonly Grid _media = new();
     private readonly Grid _overlays = new();
+    // 效果层常驻在视觉树中；重复应用设置时只替换 Brush，避免清空/重挂载造成闪烁。
+    private readonly Border _surfaceOverlay = new() { IsHitTestVisible = false };
+    private readonly Border _blurOverlay = new() { IsHitTestVisible = false };
+    private readonly Border _glassTintOverlay = new() { IsHitTestVisible = false };
     private readonly BackgroundPlaylist _playlist = new();
     private readonly DispatcherTimer _timer = new();
     private BackgroundSettings _style = new();
@@ -25,6 +29,9 @@ public sealed class BackgroundVisual : Grid
     private bool _shared;
     private bool _failed;
     private bool _inViewport = true;
+    private bool _overlaySurface;
+    private string _overlayKey = "";
+    private string _backgroundKey = "";
 
     // 局部外观预览可要求铺满；不改变项目保存的图片显示模式。
     internal Stretch? MediaStretchOverride { get; init; }
@@ -34,6 +41,9 @@ public sealed class BackgroundVisual : Grid
         IsHitTestVisible = false;
         Children.Add(_media);
         Children.Add(_overlays);
+        _overlays.Children.Add(_blurOverlay);
+        _overlays.Children.Add(_glassTintOverlay);
+        _overlays.Children.Add(_surfaceOverlay);
         _timer.Tick += (_, _) => Advance();
         Loaded += (_, _) => { ShowCurrent(); UpdateTimer(); };
         Unloaded += (_, _) => { _timer.Stop(); ReleaseMedia(); };
@@ -50,29 +60,40 @@ public sealed class BackgroundVisual : Grid
 
     public void Apply(BackgroundSettings style, Brush fallback, bool shared = false, bool surface = false)
     {
+        bool wasShared = _shared;
         _style = style;
         _shared = shared;
-        Background = shared || (style.Glass && string.IsNullOrWhiteSpace(style.Color)) ? null : string.IsNullOrWhiteSpace(style.Color) ? fallback : SafeColor(style.Color, fallback);
-        if (surface) Background = style.Glass ? null : SurfaceBackground.Create(
-            style.Color, style.ColorOpacity, style.ColorCleared, false, style.Blur);
+        string backgroundKey = $"{shared}|{surface}|{style.Glass}|{style.Color}|{style.ColorOpacity:0.####}|{style.ColorCleared}|{style.Blur:0.####}|{BoardTheme.IsLight}|{fallback.GetHashCode()}";
+        if (_backgroundKey != backgroundKey)
+        {
+            _backgroundKey = backgroundKey;
+            Background = shared || (style.Glass && string.IsNullOrWhiteSpace(style.Color)) ? null : string.IsNullOrWhiteSpace(style.Color) ? fallback : SafeColor(style.Color, fallback);
+            if (surface) Background = style.Glass ? null : SurfaceBackground.Create(
+                style.Color, style.ColorOpacity, style.ColorCleared, false, style.Blur);
+        }
         bool changed = _playlist.Configure(style);
         if (changed) { _failed = false; _timer.Stop(); }
-        if (shared) ReleaseMedia();
+        // 共享区域本身不承载媒体；只有从独立媒体切换到共享层时才需要释放旧播放器。
+        if (shared && !wasShared) ReleaseMedia();
         else if (IsLoaded && !_failed) ShowCurrent();
-        _overlays.Children.Clear();
-        if (surface)
+        string overlayKey = $"{surface}|{style.Glass}|{style.Color}|{style.ColorOpacity:0.####}|{style.ColorCleared}|{style.Blur:0.####}|{BoardTheme.IsLight}";
+        if (_overlayKey != overlayKey)
         {
-            // 在媒体之上统一合成颜色与模糊，清除颜色不能移除模糊层。
-            if (style.Glass)
-                _overlays.Children.Add(new Border { Background = SurfaceBackground.Create(
-                    style.Color, style.ColorOpacity, style.ColorCleared, true, style.Blur) });
+            _overlayKey = overlayKey;
+            _overlaySurface = surface;
+            _surfaceOverlay.Background = surface && style.Glass
+                ? SurfaceBackground.Create(style.Color, style.ColorOpacity, style.ColorCleared, true, style.Blur)
+                : null;
+            _blurOverlay.Background = !surface && style.Glass ? new BlurBackdropBrush(style.Blur) : null;
+            _glassTintOverlay.Background = !surface && style.Glass
+                ? new SolidColorBrush(BoardTheme.IsLight
+                    ? Windows.UI.Color.FromArgb(36, 255, 255, 255)
+                    : Windows.UI.Color.FromArgb(36, 0, 0, 0))
+                : null;
         }
-        else if (style.Glass)
-        {
-            _overlays.Children.Add(new Border { Background = new BlurBackdropBrush(style.Blur) });
-            _overlays.Children.Add(new Border { Background = new SolidColorBrush(BoardTheme.IsLight
-                ? Windows.UI.Color.FromArgb(36, 255, 255, 255) : Windows.UI.Color.FromArgb(36, 0, 0, 0)) });
-        }
+        _surfaceOverlay.Visibility = _overlaySurface && style.Glass ? Visibility.Visible : Visibility.Collapsed;
+        _blurOverlay.Visibility = !_overlaySurface && style.Glass ? Visibility.Visible : Visibility.Collapsed;
+        _glassTintOverlay.Visibility = !_overlaySurface && style.Glass ? Visibility.Visible : Visibility.Collapsed;
         UpdateTimer();
     }
 

@@ -245,7 +245,7 @@ Check(AutofillService.Tokenize("双练一测第3页").SequenceEqual(["双练一�
 Check(AutofillService.Tokenize("双练一测第3页答案").SequenceEqual(["双练一测", "答案"]), "页码之后的词仍然保留");
 Check(AutofillService.Tokenize("Unit 5 单词").SequenceEqual(["Unit", "单词"]), "英文单词与数字分开切分");
 Check(!AutofillService.IsRecordable("P") && !AutofillService.IsRecordable("30")
-    && !AutofillService.IsRecordable(AutofillService.PlaceholderHomework), "单字母、数字与占位文案不记录");
+    && !AutofillService.IsRecordable(HomeworkState.PlaceholderText), "单字母、数字与占位文案不记录");
 Check(AutofillService.IsRecordable("Unit") && AutofillService.IsRecordable("练习题"), "英文短语与中文词可记录");
 Check(!AutofillService.IsRecordable("这是一个超过十二个字符的作业名称"), "过长片段视为句子不记录");
 
@@ -253,7 +253,7 @@ autofillSettings.Homework.Enabled = true;
 Check(autofill.RecordHomework("完成 P30 练习题", "数学"), "首次输入累计待收录词条");
 Check(autofillSettings.Homework.Items.Any(item => item.Text == "练习题" && item.Count == 1 && !item.Promoted), "首次输入只累计不收录");
 Check(autofillSettings.Homework.Items.All(item => item.Text is not ("P" or "30")), "页码碎片不入库");
-Check(autofillSettings.Homework.Items.All(item => item.Text != AutofillService.PlaceholderHomework), "占位文案不进入待收录列表");
+Check(autofillSettings.Homework.Items.All(item => item.Text != HomeworkState.PlaceholderText), "占位文案不进入待收录列表");
 Check(autofill.MatchHomework("练习", "数学").Count == 0, "未达阈值的词条不参与补全");
 autofill.RecordHomework("完成 P31 练习题", "数学");
 autofill.RecordHomework("完成 P32 练习题", "数学");
@@ -285,6 +285,16 @@ Check(autofill.RenameHomework(renamed, "练习册") && renamed.Text == "练习�
 Check(autofill.MatchHomework("练习", "数学").Single().Text == "练习册", "改写后按新名称补全");
 Check(autofill.RenameHomework(renamed, "练习册") == false, "名称未变化时不重复保存");
 Check(autofill.RecordHomework("在这里输入作业内容", "数学") == false, "占位文案不触发统计");
+
+// 新增作业只给灰色提示：正文为空，旧版本写进正文的提示文案在读取时还原成空内容。
+HomeworkState blank = new();
+Check(blank.Content.Length == 0 && blank.RtfContent.Length == 0, "新建作业的正文与富文本都是空的");
+HomeworkState legacy = new() { Content = HomeworkState.PlaceholderText, RtfContent = @"{\rtf1 在这里输入作业内容}" };
+legacy.ClearLegacyPlaceholder();
+Check(legacy.Content.Length == 0 && legacy.RtfContent.Length == 0, "旧项目里的占位提示还原成空内容");
+HomeworkState written = new() { Content = "在这里输入作业内容后交作业", RtfContent = "rtf" };
+written.ClearLegacyPlaceholder();
+Check(written.Content == "在这里输入作业内容后交作业" && written.RtfContent == "rtf", "含有提示字样的真实作业不被清空");
 
 autofillSettings.Homework.Isolation = "Subject";
 autofill.RecordHomework("同步练习册", "数学");

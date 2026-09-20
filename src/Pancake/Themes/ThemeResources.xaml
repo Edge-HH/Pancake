@@ -16,6 +16,10 @@
             <SolidColorBrush x:Key="GitHubIconBrush" Color="#FFFFFF" />
             <SolidColorBrush x:Key="BoardTextSecondaryBrush" Color="#A4A4B4" />
             <SolidColorBrush x:Key="BoardTextMutedBrush" Color="#737386" />
+            <!-- 占位提示统一用次要文字色：默认的次要文字色在深色下接近正文，空作业的灰色提示会看不出是提示。 -->
+            <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#737386" />
+            <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#737386" />
+            <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="#737386" />
             <SolidColorBrush x:Key="BoardLineBrush" Color="#2A2A35" />
             <SolidColorBrush x:Key="BoardBrandBrush" Color="#6D70F6" />
             <SolidColorBrush x:Key="BoardBrandSoftBrush" Color="#2A2B58" />
@@ -36,6 +40,9 @@
             <SolidColorBrush x:Key="GitHubIconBrush" Color="#000000" />
             <SolidColorBrush x:Key="BoardTextSecondaryBrush" Color="#555568" />
             <SolidColorBrush x:Key="BoardTextMutedBrush" Color="#747486" />
+            <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#747486" />
+            <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#747486" />
+            <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="#747486" />
             <SolidColorBrush x:Key="BoardLineBrush" Color="#D9D9E6" />
             <SolidColorBrush x:Key="BoardBrandBrush" Color="#5457DB" />
             <SolidColorBrush x:Key="BoardBrandSoftBrush" Color="#FFFFFF" />

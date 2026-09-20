@@ -67,17 +67,16 @@ public sealed partial class MainWindow
         tile.Children.Add(Note("默认正文样式用于新建和尚未单独设置格式的正文；已有的局部字体、粗体、斜体、颜色与高光不会被覆盖。开启纯文本粘贴后，Ctrl+V 和右键粘贴都会移除来源格式。"));
         tile.Children.Add(BackgroundEditor(_settings.TileBackground, () => true, () => true, surface: true));
         StackPanel backgrounds = SettingsStack();
-        backgrounds.Children.Add(CreateAppearancePreview("Shared"));
+        // 背景板预览把跨区、时钟和作业板合成一张主界面式场景，并在宽窗口固定到右侧。
+        backgrounds.Children.Add(CreateAppearancePreview("Background"));
         var shared = Toggle("使用跨区背景", _settings.SharedBackgroundEnabled, value => _settings.SharedBackgroundEnabled = value);
         backgrounds.Children.Add(shared);
         _refreshSettingAvailability.Add(() => shared.IsEnabled = _settings.LayoutMode == "Split");
         backgrounds.Children.Add(BackgroundEditor(_settings.SharedBackground, () => _settings.LayoutMode == "Split" && _settings.SharedBackgroundEnabled, () => false, false));
-        backgrounds.Children.Add(CreateAppearancePreview("Clock"));
         backgrounds.Children.Add(Heading("时钟区域背景"));
         backgrounds.Children.Add(BackgroundEditor(_settings.ClockBackground,
             () => _settings.LayoutMode is "Split" or "Clock" && !UseSharedBackground,
             () => _settings.LayoutMode is "Split" or "Clock"));
-        backgrounds.Children.Add(CreateAppearancePreview("Board"));
         backgrounds.Children.Add(Heading("作业板区域背景"));
         backgrounds.Children.Add(BackgroundEditor(_settings.BoardBackground,
             () => _settings.LayoutMode is "Split" or "Board" && !UseSharedBackground,

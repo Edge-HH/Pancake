@@ -144,11 +144,22 @@ public sealed class SubjectState
 
 public sealed class HomeworkState
 {
+    /// <summary>新增作业时编辑框里的灰色占位提示：只用于显示，不写进作业正文。</summary>
+    public const string PlaceholderText = "在这里输入作业内容";
+
     public string Content { get; set; } = string.Empty;
     public string RtfContent { get; set; } = string.Empty;
     public bool HasHandwriting { get; set; }
     public List<AttachmentState> Attachments { get; set; } = [];
     public List<FontFallbackState> FontFallbacks { get; set; } = [];
+
+    /// <summary>旧版本把占位提示当成正文写入；读取项目时按空内容还原，让它只作为灰色提示显示。</summary>
+    public void ClearLegacyPlaceholder()
+    {
+        if (!string.Equals((Content ?? string.Empty).Trim(), PlaceholderText, StringComparison.Ordinal)) return;
+        Content = string.Empty;
+        RtfContent = string.Empty;
+    }
 }
 
 /// <summary>背景样式属于软件设置，资源复制到 data 后不依赖原图片位置。</summary>

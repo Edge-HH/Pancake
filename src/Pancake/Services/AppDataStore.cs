@@ -39,6 +39,8 @@ public sealed class AppDataStore
             };
             foreach (HomeworkState item in saved.Entries)
             {
+                // 旧版本把占位提示写成了正文，读取时按空内容还原。
+                item.ClearLegacyPlaceholder();
                 HomeworkEntry homework = new() { Content = item.Content, RtfContent = item.RtfContent, HasHandwriting = item.HasHandwriting, FontFallbacks = ProjectStore.Clone(item.FontFallbacks ?? []) };
                 foreach (AttachmentState attachment in item.Attachments.Where(attachment =>
                     attachment.Kind != "图片" || !string.IsNullOrWhiteSpace(attachment.Path)))

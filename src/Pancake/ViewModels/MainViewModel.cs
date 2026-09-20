@@ -90,7 +90,8 @@ public sealed class MainViewModel : ObservableObject
             return null;
         }
 
-        HomeworkEntry homework = new() { Content = "在这里输入作业内容" };
+        // 新增的作业保持空内容，编辑框里只显示灰色提示，提示不会写进正文。
+        HomeworkEntry homework = new();
         SelectedSubject.Entries.Add(homework);
         SelectedSubject.NotifyEntriesChanged();
         SelectedHomework = homework;

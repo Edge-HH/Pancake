@@ -1554,10 +1554,14 @@ public sealed partial class MainWindow
                 ? stickyTilePreview
                     ? FindVisuals<Border>(SettingsPreviewHost).Where(border => border.Name == "TileStickyAppearancePreview").ToList()
                     : FindVisuals<Border>(_settingsPages[page].Content).Where(border => border.Name == "TileAppearancePreview").ToList()
+                : page == "AppearanceBackground"
+                    ? stickyTilePreview
+                        ? FindVisuals<Border>(SettingsPreviewHost).Where(border => border.Name == "BackgroundStickyAppearancePreview").ToList()
+                        : FindVisuals<Border>(_settingsPages[page].Content).Where(border => border.Name == "BackgroundAppearancePreview").ToList()
                 : FindVisuals<Border>(_settingsPages[page].Content).Where(border => border.Name.EndsWith("AppearancePreview")).ToList();
             // 失败时给出窗口与预览区的实际尺寸，便于判断是固定区还是页内回退没有生效。
-            check((page == "AppearanceTile" || SettingsPreviewHost.Visibility == Visibility.Collapsed) &&
-                previews.Count == (page == "AppearanceBackground" ? 3 : 1) &&
+            check((page == "AppearanceTile" || page == "AppearanceBackground" || SettingsPreviewHost.Visibility == Visibility.Collapsed) &&
+                previews.Count == 1 &&
                 previews.All(preview => preview.ActualWidth > 0 && preview.ActualHeight > 0),
                 page + " has all requested live previews [" + SettingsPreviewHost.Visibility + " host=" + SettingsContentHost.ActualWidth +
                 " root=" + RootShell.ActualWidth + "x" + RootShell.ActualHeight + " scale=" + (RootShell.XamlRoot?.RasterizationScale ?? 0) +
@@ -1742,9 +1746,9 @@ public sealed partial class MainWindow
         ShowSettingsPage("AppearanceBackground");
         _settings.SharedBackgroundEnabled = false; _settings.LayoutMode = "Split";
         _settings.ClockBackground.Color = "#123456"; ApplyExtendedSettings(); await NextLayoutAsync();
-        check(FindVisuals<BackgroundVisual>(_appearancePreviews["Clock"]).Any(background => background.Background is SolidColorBrush brush && brush.Color.R == 0x12),
+        check(FindVisuals<BackgroundVisual>(_appearancePreviews["Background"]).Any(background => background.Background is SolidColorBrush brush && brush.Color.R == 0x12),
             "clock preview applies background color immediately");
-        check(FindVisuals<TextBlock>(_appearancePreviews["Clock"]).Any(text => text.Text == MainTimeText.Text), "clock preview uses the live time");
+        check(FindVisuals<TextBlock>(_appearancePreviews["Background"]).Any(text => text.Text == MainTimeText.Text), "clock preview uses the live time");
         _settings.ClockBackground.Color = "";
         ShowSettingsPage("AppearanceToolbar");
         var positionButtons = FindVisuals<RadioButton>(_settingsPages["AppearanceToolbar"].Content)
