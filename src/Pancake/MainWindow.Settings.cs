@@ -21,6 +21,7 @@ public sealed partial class MainWindow
     private ToggleSwitch? _gridSnapToggle;
     private Action? _refreshHomeworkAutofill;
     private Action? _refreshSubjectAutofill;
+    private bool _surfaceRefreshQueued;
 
     private sealed record SettingsPage(StackPanel Container, UIElement Content, string Title, string Description);
 
@@ -970,7 +971,7 @@ public sealed partial class MainWindow
         flyoutContent.Children.Add(apply);
         panel.Children.Add(new Button { Content = "背景颜色", Flyout = flyout });
         Slider transparency = Range("背景颜色透明度（%）", 0, 100, (1 - opacity) * 100,
-            value => updateOpacity(1 - value / 100));
+            value => updateOpacity(1 - value / 100), QueueSurfaceRefresh);
         transparency.StepFrequency = 1;
         panel.Children.Add(transparency);
         Button clear = new() { Content = "清除背景颜色" };
@@ -1012,7 +1013,7 @@ public sealed partial class MainWindow
         if (includeGlass)
         {
             var glass = Toggle("毛玻璃效果", style.Glass, value => style.Glass = value);
-            var blur = Range("模糊程度", 0, 100, style.Blur, value => style.Blur = value);
+            var blur = Range("模糊程度", 0, 100, style.Blur, value => style.Blur = value, QueueSurfaceRefresh);
             panel.Children.Add(glass); panel.Children.Add(blur);
             _refreshSettingAvailability.Add(() => { glass.IsEnabled = allowGlass(); blur.IsEnabled = allowGlass() && style.Glass; });
         }
@@ -1051,7 +1052,7 @@ public sealed partial class MainWindow
         var vertical = Range("距上下边框", 0, 200, _settings.ToolbarVerticalInset, value => _settings.ToolbarVerticalInset = value);
         panel.Children.Add(horizontal); panel.Children.Add(vertical);
         panel.Children.Add(Toggle("毛玻璃效果", _settings.ToolbarGlass, value => _settings.ToolbarGlass = value));
-        var blur = Range("模糊程度", 0, 100, _settings.ToolbarBlur, value => _settings.ToolbarBlur = value); panel.Children.Add(blur);
+        var blur = Range("模糊程度", 0, 100, _settings.ToolbarBlur, value => _settings.ToolbarBlur = value, QueueSurfaceRefresh); panel.Children.Add(blur);
         _refreshSettingAvailability.Add(() =>
         {
             horizontal.Visibility = _settings.ToolbarPosition.EndsWith("Center") ? Visibility.Collapsed : Visibility.Visible;
@@ -1066,6 +1067,35 @@ public sealed partial class MainWindow
         _settings.ToolbarBackgroundColorCleared, _settings.ToolbarGlass, _settings.ToolbarBlur);
 
     private bool UseSharedBackground => _settings.LayoutMode == "Split" && _settings.SharedBackgroundEnabled;
+
+    /// <summary>连续外观滑块（模糊、透明度）合并到同一帧只刷背景层，拖动时不再全量重建布局。</summary>
+    private void QueueSurfaceRefresh()
+    {
+        if (_surfaceRefreshQueued) return;
+        _surfaceRefreshQueued = true;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            _surfaceRefreshQueued = false;
+            ApplyBackgroundVisuals();
+            if (FloatingToolbar is not null)
+            {
+                FloatingToolbar.Background = CreateToolbarBackground();
+                GlobalInkToolbar.Background = CreateToolbarBackground();
+            }
+            RefreshAppearancePreviews();
+            ScheduleSave();
+        });
+    }
+
+    private void ApplyBackgroundVisuals()
+    {
+        if (SharedBackgroundVisual is null) return;
+        SharedBackgroundVisual.Apply(UseSharedBackground ? _settings.SharedBackground : new(), BoardTheme.SurfaceBrush);
+        ClockPanel.Background = BoardWorkspace.Background = null;
+        ClockBackgroundVisual.Apply(_settings.LayoutMode == "Free" ? new() : _settings.ClockBackground, BoardTheme.SurfaceBrush, UseSharedBackground);
+        BoardBackgroundVisual.Apply(_settings.LayoutMode == "Free" ? new() : _settings.BoardBackground, BoardTheme.SurfaceBrush, UseSharedBackground);
+    }
+
     private void ApplyExtendedSettings()
     {
         if (SharedBackgroundVisual is null) return;
@@ -1074,10 +1104,7 @@ public sealed partial class MainWindow
         // 布局模式切换会改变编辑工具栏可用项和整屏笔迹的显示状态。
         UpdateEditingToolbarVisibility();
         RefreshClockInk();
-        SharedBackgroundVisual.Apply(UseSharedBackground ? _settings.SharedBackground : new(), BoardTheme.SurfaceBrush);
-        ClockPanel.Background = BoardWorkspace.Background = null;
-        ClockBackgroundVisual.Apply(_settings.LayoutMode == "Free" ? new() : _settings.ClockBackground, BoardTheme.SurfaceBrush, UseSharedBackground);
-        BoardBackgroundVisual.Apply(_settings.LayoutMode == "Free" ? new() : _settings.BoardBackground, BoardTheme.SurfaceBrush, UseSharedBackground);
+        ApplyBackgroundVisuals();
         foreach (SubjectTileControl tile in BoardCanvas.Children.OfType<SubjectTileControl>()) tile.ApplyAppearance(_settings);
         // 从无限作业板切回固定作业板时缩放比例回到 100%：原先放大后的位置已经没有意义。
         if (!_settings.InfiniteBoard && _wasInfiniteBoard)

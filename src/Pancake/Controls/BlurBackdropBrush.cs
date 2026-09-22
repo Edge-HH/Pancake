@@ -9,13 +9,15 @@ namespace Pancake.Controls;
 public sealed class BlurBackdropBrush(double amount, Windows.UI.Color? tint = null) : XamlCompositionBrushBase
 {
     private CompositionBackdropBrush? _backdrop;
+    public double Amount { get; } = Math.Clamp(amount, 0, 100);
+
     protected override void OnConnected()
     {
         if (CompositionBrush is not null) return;
         var compositor = CompositionTarget.GetCompositorForCurrentThread();
         using var effect = new GaussianBlurEffect
         {
-            BlurAmount = (float)Math.Clamp(amount, 0, 100),
+            BlurAmount = (float)Amount,
             BorderMode = EffectBorderMode.Hard,
             Source = new CompositionEffectSourceParameter("backdrop")
         };

@@ -24,6 +24,7 @@ public sealed class BackgroundVisual : Grid
     private string _path = "";
     private MediaPlayer? _player;
     private MediaPlayerElement? _video;
+    private VideoFrameImage? _videoFrames;
     private Image? _image;
     private WebWallpaperView? _web;
     private bool _shared;
@@ -45,7 +46,13 @@ public sealed class BackgroundVisual : Grid
         _overlays.Children.Add(_glassTintOverlay);
         _overlays.Children.Add(_surfaceOverlay);
         _timer.Tick += (_, _) => Advance();
-        Loaded += (_, _) => { ShowCurrent(); UpdateTimer(); };
+        Loaded += (_, _) =>
+        {
+            // 刚挂载时 EffectiveViewport 可能仍是空矩形；先按可见恢复媒体，错误暂停由后续视口事件纠正。
+            _inViewport = true;
+            ShowCurrent();
+            UpdateTimer();
+        };
         Unloaded += (_, _) => { _timer.Stop(); ReleaseMedia(); };
         EffectiveViewportChanged += (_, args) =>
         {
@@ -58,12 +65,15 @@ public sealed class BackgroundVisual : Grid
         };
     }
 
-    public void Apply(BackgroundSettings style, Brush fallback, bool shared = false, bool surface = false)
+    public void Apply(BackgroundSettings style, Brush fallback, bool shared = false, bool surface = false, double blurScale = 1)
     {
         bool wasShared = _shared;
         _style = style;
         _shared = shared;
-        string backgroundKey = $"{shared}|{surface}|{style.Glass}|{style.Color}|{style.ColorOpacity:0.####}|{style.ColorCleared}|{style.Blur:0.####}|{BoardTheme.IsLight}|{fallback.GetHashCode()}";
+        blurScale = double.IsFinite(blurScale) ? Math.Max(0, blurScale) : 1;
+        double effectiveBlur = style.Blur * blurScale;
+        // SurfaceBrush 每次都是新实例，不能用哈希参与缓存键，否则每次 Apply 都会重置底色。
+        string backgroundKey = $"{shared}|{surface}|{style.Glass}|{style.Color}|{style.ColorOpacity:0.####}|{style.ColorCleared}|{style.Blur:0.####}|{BoardTheme.IsLight}";
         if (_backgroundKey != backgroundKey)
         {
             _backgroundKey = backgroundKey;
@@ -76,7 +86,7 @@ public sealed class BackgroundVisual : Grid
         // 共享区域本身不承载媒体；只有从独立媒体切换到共享层时才需要释放旧播放器。
         if (shared && !wasShared) ReleaseMedia();
         else if (IsLoaded && !_failed) ShowCurrent();
-        string overlayKey = $"{surface}|{style.Glass}|{style.Color}|{style.ColorOpacity:0.####}|{style.ColorCleared}|{style.Blur:0.####}|{BoardTheme.IsLight}";
+        string overlayKey = $"{surface}|{style.Glass}|{style.Color}|{style.ColorOpacity:0.####}|{style.ColorCleared}|{effectiveBlur:0.####}|{BoardTheme.IsLight}";
         if (_overlayKey != overlayKey)
         {
             _overlayKey = overlayKey;
@@ -84,7 +94,7 @@ public sealed class BackgroundVisual : Grid
             _surfaceOverlay.Background = surface && style.Glass
                 ? SurfaceBackground.Create(style.Color, style.ColorOpacity, style.ColorCleared, true, style.Blur)
                 : null;
-            _blurOverlay.Background = !surface && style.Glass ? new BlurBackdropBrush(style.Blur) : null;
+            _blurOverlay.Background = !surface && style.Glass ? new BlurBackdropBrush(effectiveBlur) : null;
             _glassTintOverlay.Background = !surface && style.Glass
                 ? new SolidColorBrush(BoardTheme.IsLight
                     ? Windows.UI.Color.FromArgb(36, 255, 255, 255)
@@ -104,9 +114,10 @@ public sealed class BackgroundVisual : Grid
         if (_path != path)
         {
             ReleaseMedia();
-            _path = path;
-            if (File.Exists(path))
+            if (string.IsNullOrEmpty(path)) _path = path;
+            else if (File.Exists(path))
             {
+                _path = path;
                 try
                 {
                     if (MediaLibrary.IsWeb(path))
@@ -124,6 +135,10 @@ public sealed class BackgroundVisual : Grid
                         _video = new MediaPlayerElement { AreTransportControlsEnabled = false, IsHitTestVisible = false };
                         _video.SetMediaPlayer(player);
                         _media.Children.Add(_video);
+                        // MediaPlayerElement 的视频合成层不能被背景模糊采样；帧服务模式由 XAML 图像呈现。
+                        _videoFrames = new VideoFrameImage(player);
+                        _videoFrames.Failed += () => { if (ReferenceEquals(_player, player)) Failed(); };
+                        _media.Children.Add(_videoFrames);
                         // 回调不在 UI 线程，并可能晚于换曲或卸载，必须核对播放器身份。
                         player.MediaEnded += (_, _) => DispatcherQueue.TryEnqueue(() =>
                         {
@@ -150,6 +165,7 @@ public sealed class BackgroundVisual : Grid
         Stretch stretch = MediaStretchOverride ?? (_style.ImageMode switch { "Stretch" => Stretch.Fill, "Fit" => Stretch.Uniform, _ => Stretch.UniformToFill });
         if (_image is not null) _image.Stretch = stretch;
         if (_video is not null) _video.Stretch = stretch;
+        if (_videoFrames is not null) _videoFrames.Stretch = stretch;
         if (_player is not null) _player.IsLoopingEnabled = !_style.PlaylistEnabled || !_style.SwitchOnMediaEnded;
     }
 
@@ -186,6 +202,8 @@ public sealed class BackgroundVisual : Grid
     {
         MediaPlayer? player = _player;
         _player = null;
+        _videoFrames?.Dispose();
+        _videoFrames = null;
         _video?.SetMediaPlayer(null);
         player?.Dispose();
         _video = null;

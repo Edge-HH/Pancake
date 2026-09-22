@@ -41,6 +41,19 @@ public sealed partial class MainWindow
                 string imageA = await MediaLibraryStore.ImportAsync(first), imageB = await MediaLibraryStore.ImportAsync(second);
                 string video = Path.Combine(AppContext.BaseDirectory, "media-test.mp4");
                 Check(File.Exists(video), "generated H264 video fixture exists");
+                // RenderTargetBitmap 不包含合成毛玻璃；保留真实窗口供截图对比视频上下半区。
+                if (Environment.GetEnvironmentVariable("PANCAKE_GLASS_PROBE") == "1")
+                {
+                    Grid probe = new() { Width = 640, Height = 360 };
+                    BackgroundVisual movie = new();
+                    movie.Apply(new BackgroundSettings { ImagePath = video }, BoardTheme.SurfaceBrush);
+                    probe.Children.Add(movie);
+                    probe.Children.Add(new Border { Height = 180, VerticalAlignment = VerticalAlignment.Bottom,
+                        Background = new BlurBackdropBrush(30) });
+                    ExportOverlay.Children.Add(probe);
+                    await Task.Delay(45000);
+                    ExportOverlay.Children.Clear();
+                }
                 BackgroundSettings settings = new() { PlaylistEnabled = true, Playlist = [video, imageA], SwitchOnTimer = false, SwitchOnMediaEnded = true };
                 BackgroundVisual background = new() { Width = 320, Height = 180 };
                 background.Apply(settings, BoardTheme.SurfaceBrush);

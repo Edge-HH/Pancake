@@ -1745,7 +1745,11 @@ public sealed partial class MainWindow
         _settings.TileTitleSize = 29;
         ShowSettingsPage("AppearanceBackground");
         _settings.SharedBackgroundEnabled = false; _settings.LayoutMode = "Split";
-        _settings.ClockBackground.Color = "#123456"; ApplyExtendedSettings(); await NextLayoutAsync();
+        _settings.ClockBackground.Color = "#123456";
+        _settings.ClockBackground.ImagePath = Path.Combine(output, "attachment.png");
+        _settings.ClockBackground.Glass = true;
+        _settings.ClockBackground.Blur = 35;
+        ApplyExtendedSettings(); await NextLayoutAsync();
         Grid backgroundPreviewScene = _appearancePreviews["Background"];
         check(backgroundPreviewScene.Parent is Viewbox { Stretch: Stretch.Uniform } &&
             Math.Abs(backgroundPreviewScene.Width - PreviewSceneWidth) < .01 &&
@@ -1753,8 +1757,23 @@ public sealed partial class MainWindow
             "background preview keeps the current display fullscreen ratio instead of stretching to the settings column");
         check(FindVisuals<BackgroundVisual>(_appearancePreviews["Background"]).Any(background => background.Background is SolidColorBrush brush && brush.Color.R == 0x12),
             "clock preview applies background color immediately");
+        check(FindVisuals<Image>(backgroundPreviewScene).Any(image => image.Source is Microsoft.UI.Xaml.Media.Imaging.BitmapImage source && source.PixelWidth > 0),
+            "background image loads when entering the background settings preview");
+        double expectedPreviewBlur = _settings.ClockBackground.Blur * GetBackgroundPreviewBlurScale();
+        List<BlurBackdropBrush> previewBlurBrushes = FindVisuals<Border>(backgroundPreviewScene)
+            .Select(border => border.Background).OfType<BlurBackdropBrush>().ToList();
+        check(previewBlurBrushes.Any(brush => Math.Abs(brush.Amount - expectedPreviewBlur) < .01) && expectedPreviewBlur < _settings.ClockBackground.Blur,
+            $"background preview scales blur to the current display ({expectedPreviewBlur:0.##} from {_settings.ClockBackground.Blur:0.##})");
         check(FindVisuals<TextBlock>(_appearancePreviews["Background"]).Any(text => text.Text == MainTimeText.Text), "clock preview uses the live time");
+        ShowSettingsPage("AppearanceToolbar"); await NextLayoutAsync();
+        ShowSettingsPage("AppearanceBackground"); await NextLayoutAsync();
+        check(FindVisuals<Image>(backgroundPreviewScene).Any(image => image.Source is Microsoft.UI.Xaml.Media.Imaging.BitmapImage source && source.PixelWidth > 0),
+            "background image recovers after leaving and re-entering the background settings page");
+        await SaveVisualAsync(RootShell, Path.Combine(output, "background-settings-preview.png"),
+            (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
         _settings.ClockBackground.Color = "";
+        _settings.ClockBackground.ImagePath = "";
+        _settings.ClockBackground.Glass = false;
         ShowSettingsPage("AppearanceToolbar");
         var positionButtons = FindVisuals<RadioButton>(_settingsPages["AppearanceToolbar"].Content)
             .Where(button => button.GroupName == "ToolbarPosition").ToList();

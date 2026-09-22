@@ -140,17 +140,13 @@ public sealed partial class MainWindow
     {
         scene.Width = PreviewSceneWidth;
         scene.Height = GetFullscreenPreviewHeight();
-        if (sticky)
-        {
-            if (scene.Parent is Viewbox inline) inline.Child = null;
-            if (_backgroundPreviewStickyViewbox is not null && !ReferenceEquals(_backgroundPreviewStickyViewbox.Child, scene))
-                _backgroundPreviewStickyViewbox.Child = scene;
-        }
-        else if (_backgroundPreviewInlineViewbox is not null && !ReferenceEquals(_backgroundPreviewInlineViewbox.Child, scene))
-        {
-            if (scene.Parent is Viewbox pinned) pinned.Child = null;
-            _backgroundPreviewInlineViewbox.Child = scene;
-        }
+        // 右侧宿主本身就是 Viewbox：若不先判断目标父级，每次刷新都会先拆下再装回，
+        // BackgroundVisual 走 Unloaded/ReleaseMedia，图片被卸掉后常因视口时序不再显示。
+        Viewbox? target = sticky ? _backgroundPreviewStickyViewbox : _backgroundPreviewInlineViewbox;
+        if (target is null || ReferenceEquals(scene.Parent, target)) return;
+        if (scene.Parent is Viewbox previous) previous.Child = null;
+        else if (scene.Parent is Border pinned) pinned.Child = null;
+        target.Child = scene;
     }
 
     private double GetFullscreenPreviewHeight()
@@ -168,6 +164,28 @@ public sealed partial class MainWindow
             // 窗口尚未绑定显示器时使用常见的 16:9 作为初始化回退；加载后会再次更新。
         }
         return 360;
+    }
+
+    /// <summary>
+    /// 模糊半径以实际显示区域的 DIP 为单位；预览场景缩到 640 DIP 后也要同比缩小，
+    /// 否则同一个数值在右侧预览里会显得明显重于全屏看板。
+    /// </summary>
+    private double GetBackgroundPreviewBlurScale()
+    {
+        try
+        {
+            nint handle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(handle);
+            var bounds = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Nearest).OuterBounds;
+            double rasterizationScale = RootShell.XamlRoot?.RasterizationScale ?? 1;
+            double fullscreenWidth = bounds.Width / Math.Max(0.01, rasterizationScale);
+            if (fullscreenWidth > 0) return Math.Min(1, PreviewSceneWidth / fullscreenWidth);
+        }
+        catch
+        {
+            // 窗口尚未绑定显示器时保持原值；加载后的预览刷新会重新计算。
+        }
+        return 1;
     }
 
     private static void MovePreviewScene(Grid scene, Viewbox? inlineViewbox, Border stickyFrame, bool sticky, double inlineHeight)
@@ -330,7 +348,8 @@ public sealed partial class MainWindow
     private void AddPreviewBackground(Grid target, Func<BackgroundSettings> settings, Func<bool>? shared = null)
     {
         BackgroundVisual background = new();
-        void Refresh() => background.Apply(settings(), BoardTheme.SurfaceBrush, shared?.Invoke() ?? false);
+        void Refresh() => background.Apply(settings(), BoardTheme.SurfaceBrush, shared?.Invoke() ?? false,
+            blurScale: GetBackgroundPreviewBlurScale());
         Refresh();
         _buildingPreviewRefreshers?.Add(Refresh);
         target.Children.Add(background);
@@ -435,23 +454,104 @@ public sealed partial class MainWindow
             text.SetBinding(TextBlock.TextProperty, new Binding { Source = source, Path = new PropertyPath("Text"), Mode = BindingMode.OneWay });
             return text;
         }
-        StackPanel content = new() { Spacing = 18 };
-        // 与看板同款结构：秒数右侧留空多少，左侧就补多少，时间数字才能落在中轴线上。
+        // 时间区与看板 ClockContentView 同构：秒数右侧留空多少，左侧就补多少，时间数字落在中轴线上。
+        StackPanel timeContent = new()
+        {
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Spacing = 18
+        };
         Grid time = new() { ColumnSpacing = 7, HorizontalAlignment = HorizontalAlignment.Center };
         time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        TextBlock timeText = LiveText(MainTimeText, 112);
-        TextBlock seconds = LiveText(SecondsText, 28); seconds.Margin = new Thickness(0, 17, 0, 0);
+        TextBlock timeText = LiveText(MainTimeText, MainTimeText.FontSize);
+        TextBlock seconds = LiveText(SecondsText, 28);
+        seconds.Margin = new Thickness(0, 17, 0, 0);
+        seconds.VerticalAlignment = VerticalAlignment.Top;
         Border mirror = new();
         mirror.SetBinding(FrameworkElement.WidthProperty, new Binding { Source = seconds, Path = new PropertyPath("ActualWidth"), Mode = BindingMode.OneWay });
         Grid.SetColumn(mirror, 0); Grid.SetColumn(timeText, 1); Grid.SetColumn(seconds, 2);
         time.Children.Add(mirror); time.Children.Add(timeText); time.Children.Add(seconds);
-        content.Children.Add(time); content.Children.Add(LiveText(ClockDateText, 20));
-        StackPanel components = new() { Orientation = Orientation.Horizontal, Spacing = 20, HorizontalAlignment = HorizontalAlignment.Center };
-        components.Children.Add(LiveText(WeatherText, 14)); components.Children.Add(LiveText(NoiseText, 14));
-        content.Children.Add(components);
-        return new Viewbox { Margin = new Thickness(24), Stretch = Stretch.Uniform, Child = content };
+        timeContent.Children.Add(time);
+        timeContent.Children.Add(LiveText(ClockDateText, 20));
+
+        // 组件栏与看板 ClockComponents 同构：卡片外壳 + 图标，而不是裸文本。
+        Border WidgetCard(string symbol, bool warning, TextBlock source)
+        {
+            StackPanel row = new() { Orientation = Orientation.Horizontal, Spacing = 9 };
+            row.Children.Add(new FluentIcon
+            {
+                Symbol = symbol,
+                Foreground = new SolidColorBrush(BoardTheme.IsLight
+                    ? (warning ? Windows.UI.Color.FromArgb(255, 180, 83, 9) : Windows.UI.Color.FromArgb(255, 21, 128, 61))
+                    : (warning ? Windows.UI.Color.FromArgb(255, 251, 191, 36) : Windows.UI.Color.FromArgb(255, 74, 222, 128)))
+            });
+            row.Children.Add(LiveText(source, 14));
+            return new Border
+            {
+                Padding = new Thickness(16, 10, 16, 10),
+                Background = BoardTheme.SurfaceBrush,
+                CornerRadius = new CornerRadius(8),
+                Child = row
+            };
+        }
+        StackPanel componentBar = new()
+        {
+            Orientation = Orientation.Horizontal, Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center
+        };
+        componentBar.Children.Add(WidgetCard("Weather", true, WeatherText));
+        componentBar.Children.Add(WidgetCard("Microphone", false, NoiseText));
+
+        // 真机把时间和组件放在两个独立 Viewbox 上按停靠比例排布，预览保持同样结构。
+        Canvas canvas = new();
+        Viewbox clockView = new() { Stretch = Stretch.Uniform, Child = timeContent };
+        Viewbox componentsView = new() { Stretch = Stretch.Uniform, Child = componentBar };
+        canvas.Children.Add(clockView);
+        canvas.Children.Add(componentsView);
+        Grid root = new() { IsHitTestVisible = false };
+        root.Children.Add(canvas);
+
+        void Layout()
+        {
+            double width = root.ActualWidth, height = root.ActualHeight;
+            if (width < 1 || height < 1) return;
+            canvas.Width = width;
+            canvas.Height = height;
+            string prefix = _settings.LayoutMode == "Split" ? "Split" : "ClockMode";
+            string clockKey = prefix + "Clock", componentsKey = prefix + "Components";
+            double panelWidth = ClockPanel.ActualWidth, panelHeight = ClockPanel.ActualHeight;
+            double clockWidth, clockHeight, clockX, clockY, componentsWidth, componentsHeight, componentsX, componentsY;
+            if (panelWidth > 1 && panelHeight > 1 &&
+                _settings.Widgets.TryGetValue(clockKey, out RegionPlacement? clock) &&
+                _settings.Widgets.TryGetValue(componentsKey, out RegionPlacement? components))
+            {
+                // 已有停靠坐标按真实时钟区等比映射到预览区域，自定义位置也能对上。
+                double sx = width / panelWidth, sy = height / panelHeight;
+                clockWidth = clock.Width * sx; clockHeight = clock.Height * sy;
+                clockX = clock.X * sx; clockY = clock.Y * sy;
+                componentsWidth = components.Width * sx; componentsHeight = components.Height * sy;
+                componentsX = components.X * sx; componentsY = components.Y * sy;
+            }
+            else
+            {
+                bool splitMode = _settings.LayoutMode == "Split";
+                clockWidth = Math.Min(splitMode ? 720 : 760, width * (splitMode ? .84 : .68));
+                clockHeight = clockWidth / DockedClockAspectRatio;
+                componentsWidth = Math.Min(splitMode ? 520 : 560, width * .72);
+                componentsHeight = componentsWidth / DockedComponentsAspectRatio;
+                double groupHeight = clockHeight + componentsHeight + 18;
+                clockY = Math.Max(0, (height - groupHeight) / 2 - (splitMode ? height * .08 : 0));
+                clockX = (width - clockWidth) / 2;
+                componentsY = Math.Min(Math.Max(0, height - componentsHeight), clockY + clockHeight + 18);
+                componentsX = (width - componentsWidth) / 2;
+            }
+            clockView.Width = Math.Max(1, clockWidth); clockView.Height = Math.Max(1, clockHeight);
+            Canvas.SetLeft(clockView, clockX); Canvas.SetTop(clockView, clockY);
+            componentsView.Width = Math.Max(1, componentsWidth); componentsView.Height = Math.Max(1, componentsHeight);
+            Canvas.SetLeft(componentsView, componentsX); Canvas.SetTop(componentsView, componentsY);
+        }
+        root.SizeChanged += (_, _) => Layout();
+        Layout();
+        return root;
     }
 
     /// <summary>
