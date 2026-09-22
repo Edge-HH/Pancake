@@ -1,3 +1,4 @@
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
@@ -27,6 +28,7 @@ public sealed partial class MainWindow
     private Border? _backgroundPreviewInlineFrame;
     private Border? _backgroundPreviewStickyFrame;
     private Viewbox? _backgroundPreviewInlineViewbox;
+    private Viewbox? _backgroundPreviewStickyViewbox;
     private readonly Dictionary<string, (string Key, List<Action> Refresh)> _previewScenes = [];
     private List<Action>? _buildingPreviewRefreshers;
 
@@ -78,7 +80,7 @@ public sealed partial class MainWindow
     /// <summary>背景板把跨区、时钟和作业板合成一张主界面式预览，和磁贴预览共用右侧固定宿主。</summary>
     private UIElement CreateBackgroundAppearancePreview()
     {
-        Grid scene = new() { Width = PreviewSceneWidth, Height = 360, IsHitTestVisible = false };
+        Grid scene = new() { Width = PreviewSceneWidth, Height = GetFullscreenPreviewHeight(), IsHitTestVisible = false };
         _appearancePreviews.Add("Background", scene);
         _backgroundPreviewInlineViewbox = new Viewbox { Stretch = Stretch.Uniform, Child = scene };
         _backgroundPreviewInlineFrame = new Border
@@ -91,6 +93,9 @@ public sealed partial class MainWindow
             Name = "BackgroundStickyAppearancePreview", HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch, BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(12)
         };
+        // 右侧宿主尺寸随设置栏变化，但真实全屏场景的宽高比不能跟着宿主变形。
+        _backgroundPreviewStickyViewbox = new Viewbox { Stretch = Stretch.Uniform };
+        _backgroundPreviewStickyFrame.Child = _backgroundPreviewStickyViewbox;
         _backgroundPreviewInlineFrame.BorderBrush = _backgroundPreviewStickyFrame.BorderBrush = BoardTheme.LineBrush;
         SettingsPreviewHost.Children.Add(_backgroundPreviewStickyFrame);
         return _backgroundPreviewInlineFrame;
@@ -124,7 +129,45 @@ public sealed partial class MainWindow
         if (tilePage && _appearancePreviews.TryGetValue("Tile", out Grid? tileScene))
             MovePreviewScene(tileScene, _tilePreviewInlineViewbox, _tilePreviewStickyFrame, sticky, PreviewSceneHeight);
         if (backgroundPage && _appearancePreviews.TryGetValue("Background", out Grid? backgroundScene))
-            MovePreviewScene(backgroundScene, _backgroundPreviewInlineViewbox, _backgroundPreviewStickyFrame, sticky, 360);
+            MoveBackgroundPreviewScene(backgroundScene, sticky);
+    }
+
+    /// <summary>
+    /// 背景板预览始终代表当前显示器的一整块全屏，而不是右侧设置栏的矩形。
+    /// 因此场景固定显示器宽高比，右侧宿主只负责等比缩放并保留留白。
+    /// </summary>
+    private void MoveBackgroundPreviewScene(Grid scene, bool sticky)
+    {
+        scene.Width = PreviewSceneWidth;
+        scene.Height = GetFullscreenPreviewHeight();
+        if (sticky)
+        {
+            if (scene.Parent is Viewbox inline) inline.Child = null;
+            if (_backgroundPreviewStickyViewbox is not null && !ReferenceEquals(_backgroundPreviewStickyViewbox.Child, scene))
+                _backgroundPreviewStickyViewbox.Child = scene;
+        }
+        else if (_backgroundPreviewInlineViewbox is not null && !ReferenceEquals(_backgroundPreviewInlineViewbox.Child, scene))
+        {
+            if (scene.Parent is Viewbox pinned) pinned.Child = null;
+            _backgroundPreviewInlineViewbox.Child = scene;
+        }
+    }
+
+    private double GetFullscreenPreviewHeight()
+    {
+        try
+        {
+            nint handle = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(handle);
+            var bounds = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Nearest).OuterBounds;
+            if (bounds.Width > 0 && bounds.Height > 0)
+                return PreviewSceneWidth * bounds.Height / bounds.Width;
+        }
+        catch
+        {
+            // 窗口尚未绑定显示器时使用常见的 16:9 作为初始化回退；加载后会再次更新。
+        }
+        return 360;
     }
 
     private static void MovePreviewScene(Grid scene, Viewbox? inlineViewbox, Border stickyFrame, bool sticky, double inlineHeight)

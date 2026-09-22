@@ -1746,6 +1746,11 @@ public sealed partial class MainWindow
         ShowSettingsPage("AppearanceBackground");
         _settings.SharedBackgroundEnabled = false; _settings.LayoutMode = "Split";
         _settings.ClockBackground.Color = "#123456"; ApplyExtendedSettings(); await NextLayoutAsync();
+        Grid backgroundPreviewScene = _appearancePreviews["Background"];
+        check(backgroundPreviewScene.Parent is Viewbox { Stretch: Stretch.Uniform } &&
+            Math.Abs(backgroundPreviewScene.Width - PreviewSceneWidth) < .01 &&
+            Math.Abs(backgroundPreviewScene.Height - GetFullscreenPreviewHeight()) < .01,
+            "background preview keeps the current display fullscreen ratio instead of stretching to the settings column");
         check(FindVisuals<BackgroundVisual>(_appearancePreviews["Background"]).Any(background => background.Background is SolidColorBrush brush && brush.Color.R == 0x12),
             "clock preview applies background color immediately");
         check(FindVisuals<TextBlock>(_appearancePreviews["Background"]).Any(text => text.Text == MainTimeText.Text), "clock preview uses the live time");
