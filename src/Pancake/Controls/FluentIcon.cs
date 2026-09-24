@@ -50,6 +50,10 @@ public static class FluentGlyphs
     // 作业板缩放控件用的放大/缩小图标。
     public const string ZoomIn = "\uF4D1"; // ic_fluent_zoom_in_20_regular
     public const string ZoomOut = "\uF4D3"; // ic_fluent_zoom_out_20_regular
+    // 数据页：保存、导出与从备份还原。
+    public const string Save = "\uEEB5"; // ic_fluent_save_20_regular
+    public const string ArrowDownload = "\uE0D3"; // ic_fluent_arrow_download_20_regular
+    public const string ArrowSync = "\uE161"; // ic_fluent_arrow_sync_20_regular
     // 组件右下角缩放手柄的方向提示；同时用于校验该字形确实随字体分发。
     public const string ArrowDownRight = "\uE0D1"; // ic_fluent_arrow_down_right_20_regular
     public static string Resolve(string symbol) => symbol switch
@@ -95,6 +99,9 @@ public static class FluentGlyphs
         nameof(ZoomIn) => ZoomIn,
         nameof(ZoomOut) => ZoomOut,
         nameof(ArrowDownRight) => ArrowDownRight,
+        nameof(Save) => Save,
+        nameof(ArrowDownload) => ArrowDownload,
+        nameof(ArrowSync) => ArrowSync,
         _ => throw new ArgumentException("未知图标名称", nameof(symbol))
     };
 }

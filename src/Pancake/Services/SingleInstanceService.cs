@@ -22,6 +22,7 @@ public sealed class SingleInstanceService : IDisposable
     private readonly EventWaitHandle _quitSignal;
     private readonly bool _owned;
     private readonly Thread? _listener;
+    private bool _disposed;
 
     /// <summary>true 表示本次启动认领了闸门（第一个窗口）；false 表示同目录已有窗口在运行。</summary>
     public bool IsFirstInstance => _owned;
@@ -121,6 +122,9 @@ public sealed class SingleInstanceService : IDisposable
 
     public void Dispose()
     {
+        // 还原备份后重启会先手动释放闸门再随窗口关闭释放一次；重复释放不能抛出。
+        if (_disposed) return;
+        _disposed = true;
         // 只有认领者能让监听线程收工；共享退出信号被误触发会关掉已有窗口的监听。
         if (_owned)
         {

@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Text.Json;
 using Pancake.Services;
 
@@ -400,3 +401,195 @@ Check(!legacyAutofill.Autofill.Subject.Enabled && !legacyAutofill.Autofill.Homew
     && legacyAutofill.Autofill.Subject.Subjects.All(item => !item.RandomColor),
     "旧配置缺少自动填充字段时使用默认值并保持关闭");
 Console.WriteLine("PASS: autofill subject library, pinyin matching levels, homework tokenizing, thresholds, isolation, expiry and blocking.");
+
+// 锁定：密码哈希校验、两步验证生效条件、Base32 与 TOTP 时间窗。
+var lockState = new LockSettings();
+Check(!LockService.IsEnforced(lockState), "未配置密码或两步验证时不锁定");
+lockState.Enabled = true;
+Check(!LockService.IsEnforced(lockState), "只开总开关不锁定，避免把自己关在门外");
+LockService.SetPassword(lockState, "课堂密码123");
+Check(lockState.PasswordSalt.Length > 0 && lockState.PasswordHash.Length > 0, "密码只保存盐与哈希");
+Check(LockService.IsEnforced(lockState) && LockService.VerifyPassword(lockState, "课堂密码123"), "设置密码并开启总开关后锁定生效");
+Check(!LockService.VerifyPassword(lockState, "课堂密码124") && !LockService.VerifyPassword(lockState, "")
+    && !LockService.VerifyPassword(lockState, "课堂密码123 "), "错误、空白或带尾随空格的密码不能解锁");
+Check(LockService.HashPassword("课堂密码123", lockState.PasswordSalt) == lockState.PasswordHash, "同一密码与盐得到相同哈希");
+string firstSalt = lockState.PasswordSalt;
+LockService.SetPassword(lockState, "课堂密码123");
+Check(lockState.PasswordSalt != firstSalt, "修改密码更换盐，避免哈希比对泄露相同密码");
+LockService.ClearPassword(lockState);
+Check(!LockService.HasPassword(lockState) && !LockService.IsEnforced(lockState), "删除密码后不再锁定");
+lockState.TotpSecret = LockService.CreateTotpSecret();
+Check(LockService.IsEnforced(lockState), "绑定验证器后锁定生效");
+lockState.Enabled = false;
+Check(!LockService.IsEnforced(lockState), "总开关关闭后不锁定");
+BoardSettingsState lockRoundTrip = JsonSerializer.Deserialize<BoardSettingsState>(
+    JsonSerializer.Serialize(new BoardSettingsState { Lock = lockState }))!;
+Check(lockRoundTrip.Lock.TotpSecret == lockState.TotpSecret && !lockRoundTrip.Lock.Enabled
+    && lockRoundTrip.Lock.RequireAuthForSettings && !lockRoundTrip.Lock.RequireAuthForEditing,
+    "锁定设置与两步验证密钥往返持久化");
+
+string secret = LockService.CreateTotpSecret();
+Check(secret.Length >= 32 && secret.All(c => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".Contains(c)), "密钥使用 Base32 标准字母表");
+Check(LockService.Base32Decode(secret).Length == 20, "160 位密钥解码为 20 字节");
+Check(LockService.TotpProvisioningUri(secret).StartsWith("otpauth://totp/Pancake?secret=" + secret), "otpauth 链接可直接导入验证器");
+foreach (byte[] data in new[] { Array.Empty<byte>(), new byte[] { 0 }, new byte[] { 255, 0, 128, 7 }, new byte[] { 1, 2, 3, 4, 5 } })
+    Check(LockService.Base32Decode(LockService.Base32Encode(data)).SequenceEqual(data), "Base32 编解码往返无损");
+DateTimeOffset moment = DateTimeOffset.FromUnixTimeSeconds(1_700_000_000);
+long totpStep = moment.ToUnixTimeSeconds() / LockService.TotpStepSeconds;
+string totpCode = LockService.ComputeTotp(LockService.Base32Decode(secret), totpStep);
+Check(totpCode.Length == 6 && totpCode.All(char.IsDigit), "验证码为 6 位数字");
+Check(LockService.VerifyTotp(secret, totpCode, moment), "当前时间步的验证码通过");
+Check(LockService.VerifyTotp(secret, totpCode, moment.AddSeconds(LockService.TotpStepSeconds)), "容忍一步时钟偏差");
+Check(!LockService.VerifyTotp(secret, totpCode, moment.AddSeconds(LockService.TotpStepSeconds * 3)), "偏差过大不通过");
+Check(!LockService.VerifyTotp(secret, "12345", moment) && !LockService.VerifyTotp(secret, "123456x", moment), "位数不对的验证码不通过");
+Check(LockService.VerifyTotp(secret, totpCode.Insert(3, " "), moment), "验证码里的空格被忽略");
+Check(!LockService.VerifyTotp("0", totpCode, moment), "非法 Base32 密钥不通过而不是抛出");
+Console.WriteLine("PASS: lock password hashing, enforcement conditions, Base32 round trips and TOTP time windows.");
+
+// 数据备份：范围打包、清单读取、跨目录还原与自动备份清理。
+string backupRoot = Path.Combine(Path.GetTempPath(), "pancake-backup-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(backupRoot);
+try
+{
+    string sourceData = Path.Combine(backupRoot, "source");
+    Directory.CreateDirectory(sourceData);
+    ProjectStore sourceStore = new(sourceData);
+    ProjectLibrary library = sourceStore.Load();
+    ProjectDocument project = ProjectStore.Create(library, false);
+    project.Subjects.Add(new SubjectState
+    {
+        Name = "数学", Width = 300, Height = 200, X = 10, Y = 20, InkCoordinateVersion = 1,
+        AccentHex = "#123456", IsAccentExplicit = true,
+        Entries = [new HomeworkState { Content = "完成练习", Attachments = [], FontFallbacks = [] }],
+        InkStrokes = []
+    });
+    string picture = Path.Combine(backupRoot, "attachment.png");
+    File.WriteAllBytes(picture, [9, 9, 9]);
+    project.Subjects[0].Entries[0].Attachments.Add(new AttachmentState
+    {
+        Name = "图片", Kind = "图片", Path = sourceStore.CopyAttachment(project.Id, picture)
+    });
+    library.Settings.InfiniteBoard = true;
+    library.Settings.Theme = "Light";
+    string wallpaper = Path.Combine(backupRoot, "wall.png");
+    File.WriteAllBytes(wallpaper, [1, 2, 3]);
+    library.Settings.BoardBackground.ImagePath = await new MediaLibrary(sourceData).ImportAsync(wallpaper, MediaScope.Background);
+    sourceStore.Save(library);
+
+    BackupService exporter = new(sourceData);
+    string fullArchive = Path.Combine(backupRoot, "manual.pbk");
+    exporter.Create(fullArchive, BackupScopes.All, library);
+    BackupInfo info = exporter.Read(fullArchive);
+    Check(info.Manifest.Version == BackupService.ManifestVersion && info.Manifest.Scopes == BackupScopes.All, "清单记录版本与完整范围");
+    Check(info.MediaEntries.Any(entry => entry.StartsWith("backgrounds/")), "背景媒体收进备份");
+
+    string targetData = Path.Combine(backupRoot, "target");
+    new BackupService(targetData).Restore(fullArchive);
+    ProjectLibrary restoredLibrary = new ProjectStore(targetData).Load();
+    Check(restoredLibrary.Projects.Count == 1 && restoredLibrary.Projects[0].Subjects[0].Entries[0].Content == "完成练习", "作业数据完整还原到另一数据目录");
+    Check(restoredLibrary.Settings.InfiniteBoard && restoredLibrary.Settings.Theme == "Light", "软件设置完整还原");
+    Check(File.Exists(restoredLibrary.Projects[0].Subjects[0].Entries[0].Attachments[0].Path), "图片附件落回本地资源目录");
+    Check(File.Exists(restoredLibrary.Settings.BoardBackground.ImagePath), "背景媒体落回本地资源目录并改写引用");
+
+    // 只收作业范围时设置不随包走，还原后保留目标机器现有设置。
+    string jobsArchive = Path.Combine(backupRoot, "jobs.pbk");
+    exporter.Create(jobsArchive, BackupScopes.Jobs, library);
+    Check(exporter.Read(jobsArchive).Manifest.Scopes == BackupScopes.Jobs, "按范围导出只收选中的类别");
+    ProjectStore targetStore = new(targetData);
+    ProjectLibrary target = targetStore.Load();
+    target.Settings.Theme = "Dark";
+    target.Settings.InfiniteBoard = false;
+    targetStore.Save(target);
+    new BackupService(targetData).Restore(jobsArchive);
+    ProjectLibrary partial = targetStore.Load();
+    Check(partial.Projects[0].Subjects[0].Entries[0].Content == "完成练习" && !partial.Settings.InfiniteBoard && partial.Settings.Theme == "Dark",
+        "只含作业的备份还原后保留现有设置");
+
+    bool refusedEmptyScope = false;
+    try { exporter.Create(Path.Combine(backupRoot, "empty.pbk"), BackupScopes.None, library); }
+    catch (InvalidDataException) { refusedEmptyScope = true; }
+    Check(refusedEmptyScope, "空备份范围被拒绝");
+
+    void WriteArchive(string path, string entryName, string? manifest)
+    {
+        ProjectStore.AtomicWrite(path, stream =>
+        {
+            using ZipArchive archive = new(stream, ZipArchiveMode.Create, true);
+            if (manifest is not null)
+                using (Stream target = archive.CreateEntry("manifest.json").Open())
+                    target.Write(System.Text.Encoding.UTF8.GetBytes(manifest));
+            if (entryName.Length > 0) archive.CreateEntry(entryName);
+        });
+    }
+    bool rejected = false;
+    WriteArchive(Path.Combine(backupRoot, "escape.pbk"), "backgrounds/../evil.txt", "{\"Version\":1,\"Scopes\":1,\"CreatedAt\":\"2026-01-01T00:00:00\"}");
+    try { exporter.Read(Path.Combine(backupRoot, "escape.pbk")); } catch (InvalidDataException) { rejected = true; }
+    Check(rejected, "备份里的路径穿越条目被拒绝");
+    rejected = false;
+    WriteArchive(Path.Combine(backupRoot, "loose.pbk"), "evil.txt", "{\"Version\":1,\"Scopes\":1,\"CreatedAt\":\"2026-01-01T00:00:00\"}");
+    try { exporter.Read(Path.Combine(backupRoot, "loose.pbk")); } catch (InvalidDataException) { rejected = true; }
+    Check(rejected, "备份里的越界条目被拒绝");
+    rejected = false;
+    WriteArchive(Path.Combine(backupRoot, "nomanifest.pbk"), "backgrounds/x.png", null);
+    try { exporter.Read(Path.Combine(backupRoot, "nomanifest.pbk")); } catch (InvalidDataException) { rejected = true; }
+    Check(rejected, "缺少清单的备份被拒绝");
+    rejected = false;
+    WriteArchive(Path.Combine(backupRoot, "future.pbk"), "backgrounds/x.png", "{\"Version\":2,\"Scopes\":1,\"CreatedAt\":\"2026-01-01T00:00:00\"}");
+    try { exporter.Read(Path.Combine(backupRoot, "future.pbk")); } catch (InvalidDataException) { rejected = true; }
+    Check(rejected, "其他版本的备份被拒绝");
+
+    string autoDirectory = Path.Combine(backupRoot, "auto");
+    Directory.CreateDirectory(autoDirectory);
+    foreach (int hours in new[] { 5, 4, 3, 2, 1 })
+        File.WriteAllText(Path.Combine(autoDirectory, BackupService.AutoBackupFileName(DateTime.Now.AddHours(-hours))), "backup");
+    Check(Directory.EnumerateFiles(autoDirectory, "auto-*.pbk").Count() == 5, "自动备份按时间命名，字典序即时间序");
+    Check(BackupService.PruneAutoBackups(autoDirectory, 3) == 2 && Directory.EnumerateFiles(autoDirectory, "auto-*.pbk").Count() == 3,
+        "超出保留份数时删除最旧的备份");
+    Check(BackupService.PruneAutoBackups(autoDirectory, 0) == 0 && Directory.EnumerateFiles(autoDirectory, "auto-*.pbk").Count() == 3,
+        "非法保留份数不清理");
+    Check(BackupService.NormalizeIntervalHours(0) == 1 && BackupService.NormalizeIntervalHours(5.5) == 5.5
+        && BackupService.NormalizeIntervalHours(double.NaN) == 24 && BackupService.NormalizeIntervalHours(99999) == 24 * 365,
+        "自动备份间隔归一化到可用范围");
+    DateTime moment2 = new(2026, 9, 24, 12, 0, 0);
+    Check(BackupService.IsDue(null, 24, moment2), "从未备份过立即执行");
+    Check(!BackupService.IsDue(moment2.AddHours(-23), 24, moment2) && BackupService.IsDue(moment2.AddHours(-24), 24, moment2),
+        "到期按上次备份时间与间隔判断");
+    Check(BackupService.IsDue(moment2.AddDays(-400), double.NaN, moment2), "非法间隔按 24 小时判断到期");
+}
+finally { Directory.Delete(backupRoot, true); }
+
+// 自动保存与数据页设置：开关默认开启，旧配置补全默认值并完整往返。
+BoardSettingsState dataDefaults = JsonSerializer.Deserialize<BoardSettingsState>("{}")!;
+Check(dataDefaults.AutoSaveEnabled, "旧配置默认开启自动保存");
+Check(dataDefaults.Data.JobRetentionDays == 30 && dataDefaults.Data.Backup.Scopes == BackupScopes.All
+    && dataDefaults.Data.AutoBackup.IntervalHours == 24 && dataDefaults.Data.AutoBackup.KeepCount == 7
+    && dataDefaults.Data.AutoBackup.LastRunAt is null, "旧配置缺少数据字段时使用默认值");
+Check(!dataDefaults.Lock.Enabled && dataDefaults.Lock.RequireAuthForSettings && !dataDefaults.Lock.RequireAuthForEditing,
+    "旧配置缺少锁定字段时保持未启用");
+BoardSettingsState dataRoundTrip = JsonSerializer.Deserialize<BoardSettingsState>(JsonSerializer.Serialize(new BoardSettingsState
+{
+    AutoSaveEnabled = false,
+    Lock = new LockSettings { Enabled = true, RequireAuthForEditing = true, RequireAuthForSettings = false },
+    Data = new DataSettings
+    {
+        JobRetentionDays = 7,
+        Backup = new BackupSettings { Scopes = BackupScopes.Jobs | BackupScopes.Settings },
+        AutoBackup = new BackupSettings
+        {
+            Enabled = true, Directory = "D:\\auto", IntervalHours = 6, KeepCount = 3,
+            LastRunAt = new DateTime(2026, 1, 2, 3, 4, 5), Scopes = BackupScopes.CurrentBackground
+        }
+    }
+}))!;
+Check(!dataRoundTrip.AutoSaveEnabled, "自动保存开关往返持久化");
+Check(dataRoundTrip.Data.JobRetentionDays == 7 && dataRoundTrip.Data.Backup.Scopes == (BackupScopes.Jobs | BackupScopes.Settings),
+    "备份范围按位组合往返持久化");
+Check(dataRoundTrip.Data.AutoBackup.Enabled && dataRoundTrip.Data.AutoBackup.IntervalHours == 6
+    && dataRoundTrip.Data.AutoBackup.KeepCount == 3 && dataRoundTrip.Data.AutoBackup.LastRunAt == new DateTime(2026, 1, 2, 3, 4, 5)
+    && dataRoundTrip.Data.AutoBackup.Scopes == BackupScopes.CurrentBackground,
+    "自动备份目录、间隔、保留份数与上次备份时间往返持久化");
+Check(dataRoundTrip.Lock.Enabled && dataRoundTrip.Lock.RequireAuthForEditing && !dataRoundTrip.Lock.RequireAuthForSettings,
+    "锁定开关与验证范围往返持久化");
+Check((BackupScopes.All | BackupScopes.Jobs).Sanitize() == BackupScopes.All && ((BackupScopes)255).Sanitize() == BackupScopes.All,
+    "备份范围只保留合法位");
+Console.WriteLine("PASS: backup pack/restore boundaries, auto-backup pruning and auto-save/data-page persistence.");

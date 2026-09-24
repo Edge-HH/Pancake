@@ -140,6 +140,8 @@
                         <NavigationViewItem Content="作业补全" Tag="AutofillHomework"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Document" /></NavigationViewItem.Icon></NavigationViewItem>
                     </NavigationViewItem.MenuItems>
                 </NavigationViewItem>
+                <NavigationViewItem Content="数据" Tag="Data"><NavigationViewItem.Icon><icons:FluentIcon Symbol="ArrowDownload" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="锁定" Tag="Lock"><NavigationViewItem.Icon><icons:FluentIcon Symbol="LockClosed" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem x:Name="AboutNavigationGroup" Content="关于" Tag="About">
                     <NavigationViewItem.Icon><icons:FluentIcon Symbol="Info" /></NavigationViewItem.Icon>
                 </NavigationViewItem>
@@ -284,6 +286,8 @@
                     </Border>
                 </StackPanel>
                 <StackPanel x:Name="AutofillSettingsPanel" Spacing="22" Visibility="Collapsed" />
+                <StackPanel x:Name="DataSettingsPanel" Spacing="22" Visibility="Collapsed" />
+                <StackPanel x:Name="LockSettingsPanel" Spacing="22" Visibility="Collapsed" />
             </StackPanel>
             </ScrollViewer>
                 <!-- 磁贴设置页的固定预览区：向下滚动编辑选项时，预览图始终可见。 -->

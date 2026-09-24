@@ -74,6 +74,8 @@ public sealed class BoardSettingsState
     public string WeatherCityCode { get; set; } = "101010100";
     public bool GridSnappingEnabled { get; set; } = true;
     public bool AutoUpdateEnabled { get; set; } = true;
+    /// <summary>自动保存：开启后改动会在停止操作约 0.6 秒后写盘；关闭后仅在退出软件或手动保存时写入。</summary>
+    public bool AutoSaveEnabled { get; set; } = true;
     /// <summary>允许多实例：默认关闭，关闭后同一安装目录只允许同时打开一个软件窗口。</summary>
     public bool AllowMultipleInstances { get; set; }
     /// <summary>已打开时再次启动的行为：Foreground（移至前台）、FullScreen（全屏）、None（不执行任何操作）。</summary>
@@ -106,6 +108,8 @@ public sealed class BackupSettings
     public double IntervalHours { get; set; } = 24;
     /// <summary>自动备份保留份数，超出后删除最旧的备份。</summary>
     public int KeepCount { get; set; } = 7;
+    /// <summary>上次自动备份时间；为空表示尚未备份过，开启后立即执行一次。</summary>
+    public DateTime? LastRunAt { get; set; }
 }
 
 /// <summary>备份范围：四类内容可任意组合，默认全开。</summary>

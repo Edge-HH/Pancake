@@ -33,6 +33,7 @@ public sealed partial class MainWindow : Window
     private readonly ReleaseUpdateService _updateService = new();
     private readonly AppDataStore _dataStore = new();
     private readonly DispatcherTimer _saveTimer = new() { Interval = TimeSpan.FromMilliseconds(600) };
+    private readonly DispatcherTimer _autoBackupTimer = new() { Interval = TimeSpan.FromMinutes(30) };
     private readonly AutofillService _autofill;
     private readonly AutofillPopup _autofillPopup = new();
     private BoardSettingsState _settings = new();
@@ -130,6 +131,9 @@ public sealed partial class MainWindow : Window
                 ScheduleSave();
                 _ = RefreshWeatherAsync();
                 if (_settings.AutoUpdateEnabled) _ = CheckForUpdatesAsync(false);
+                // 自动备份按到期检查推进；定时器只负责触发，是否执行由上次备份时间决定。
+                _autoBackupTimer.Start();
+                RunAutoBackupIfDue();
             }
             RootShell.Focus(FocusState.Programmatic);
             if (_startFullScreen)
@@ -144,6 +148,7 @@ public sealed partial class MainWindow : Window
             _weatherTimer.Stop();
             _presentationTimer.Stop();
             _toolbarAnimation?.Stop();
+            _autoBackupTimer.Stop();
             SaveStateNow();
             _noiseMonitor.Dispose();
             _noiseAlertPlayer.Dispose();
@@ -162,6 +167,7 @@ public sealed partial class MainWindow : Window
         };
         _weatherTimer.Tick += async (_, _) => await RefreshWeatherAsync();
         _saveTimer.Tick += (_, _) => { _saveTimer.Stop(); SaveStateNow(); };
+        _autoBackupTimer.Tick += (_, _) => RunAutoBackupIfDue();
 
         _noiseMonitor.FastLevelAvailable += (_, level) => DispatcherQueue.TryEnqueue(() => ProcessNoiseAlert(level));
         _noiseMonitor.LevelAvailable += (_, level) => DispatcherQueue.TryEnqueue(() => UpdateNoiseDisplay(level));
@@ -228,7 +234,8 @@ public sealed partial class MainWindow : Window
     {
         if (_initialView == "settings")
         {
-            ShowSettings();
+            // 启动参数直接进设置页同样要过验证入口。
+            _ = TryShowSettingsAsync();
             return;
         }
         ShowBoard();
@@ -284,6 +291,8 @@ public sealed partial class MainWindow : Window
     private void EnterEditing()
     {
         if (_isEditing || CurrentProject is null) return;
+        // 锁定生效且要求编辑前验证时，先弹出解锁对话框，通过后才进入编辑模式。
+        if (NeedsEditAuth()) { RequestEditAuthThenEnter(); return; }
         ViewModel.BeginEditing();
         _widgetEditSnapshot = WidgetLayout.Copy(_settings.Widgets);
         _dockedCustomizationEditSnapshot = [.. _settings.CustomizedDockedWidgets];
@@ -339,9 +348,11 @@ public sealed partial class MainWindow : Window
         ScheduleSave();
     }
 
-    private void SettingsButton_Click(object sender, RoutedEventArgs e)
+    private async void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
         if (_isEditing) FinishEditing();
+        // 锁定生效且要求打开设置前验证时，先通过身份验证再进入设置页。
+        if (!await AuthorizeAsync()) return;
         ShowSettings();
     }
 
@@ -1111,6 +1122,11 @@ public sealed partial class MainWindow : Window
             _settings.Autofill.Subject.Subjects ??= [];
             _settings.Autofill.Homework.Items ??= [];
             _settings.Autofill.Homework.Blocked ??= [];
+            // 旧配置缺少锁定与数据字段时补齐默认值，保持向后兼容。
+            _settings.Lock ??= new LockSettings();
+            _settings.Data ??= new DataSettings();
+            _settings.Data.Backup ??= new BackupSettings();
+            _settings.Data.AutoBackup ??= new BackupSettings();
             _autofill.EnsureBuiltIns();
             _autofill.Prune(DateTime.Now);
             _settings.GridLineThickness = Math.Clamp(_settings.GridLineThickness, .5, 5);
@@ -1152,13 +1168,15 @@ public sealed partial class MainWindow : Window
     private void ScheduleSave()
     {
         if (!_isLoaded) return;
+        // 自动保存关闭后只在退出、手动保存或立即保存时写盘，防止意外损坏来不及挽救。
+        if (!_settings.AutoSaveEnabled) return;
         _saveTimer.Stop();
         _saveTimer.Start();
     }
 
     private void SaveStateNow()
     {
-        if (!_storageReady) return;
+        if (!_storageReady || _skipSaveOnClose) return;
         try
         {
             _settings.GridSnappingEnabled = IsGridSnappingEnabled;

@@ -21,5 +21,8 @@
     <Content Include="../../src/Pancake/Assets/Pinyin/pinyin.txt" Link="Assets/Pinyin/pinyin.txt" CopyToOutputDirectory="PreserveNewest" />
     <Compile Include="../../src/Pancake/Services/WidgetLayout.cs" Link="WidgetLayout.cs" />
     <Compile Include="../../src/Pancake/Services/GitHubUpdateService.cs" Link="GitHubUpdateService.cs" />
+    <Compile Include="../../src/Pancake/Services/LockService.cs" Link="LockService.cs" />
+    <Compile Include="../../src/Pancake/Services/ProjectStore.cs" Link="ProjectStore.cs" />
+    <Compile Include="../../src/Pancake/Services/BackupService.cs" Link="BackupService.cs" />
   </ItemGroup>
 </Project>

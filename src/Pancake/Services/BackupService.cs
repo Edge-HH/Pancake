@@ -104,8 +104,9 @@ public sealed class BackupService(string dataDirectory)
         if (scope.Has(BackupScopes.Settings))
             foreach (BackgroundSettings style in Styles())
             {
-                style.ImagePath = EntryOfPath(Path.GetFullPath(style.ImagePath));
-                style.Playlist = style.Playlist.Select(item => EntryOfPath(Path.GetFullPath(item))).ToList();
+                // 默认设置没有背景媒体；空路径直接保留，不能送进路径解析。
+                if (!string.IsNullOrWhiteSpace(style.ImagePath)) style.ImagePath = EntryOfPath(Path.GetFullPath(style.ImagePath));
+                style.Playlist = style.Playlist.Select(item => string.IsNullOrWhiteSpace(item) ? item : EntryOfPath(Path.GetFullPath(item))).ToList();
             }
 
         ProjectStore.AtomicWrite(destination, stream =>
@@ -204,6 +205,17 @@ public sealed class BackupService(string dataDirectory)
             new MediaLibrary(dataDirectory).ReplaceHistory(images, media);
         }
     }
+
+    /// <summary>自动备份的文件名按时间命名，字典序即时间序，便于按保留份数清理最旧备份。</summary>
+    public static string AutoBackupFileName(DateTime now) => $"auto-{now:yyyyMMddHHmmss}.pbk";
+
+    /// <summary>自动备份间隔小时数归一化：非法值回到 24 小时，范围 1 小时到 1 年。</summary>
+    public static double NormalizeIntervalHours(double hours) =>
+        double.IsFinite(hours) ? Math.Clamp(hours, 1, 24 * 365) : 24;
+
+    /// <summary>自动备份是否到期：从未备份过立即执行，之后至少间隔设定的小时数。</summary>
+    public static bool IsDue(DateTime? lastRunAt, double intervalHours, DateTime now) =>
+        lastRunAt is not { } last || (now - last).TotalHours >= NormalizeIntervalHours(intervalHours);
 
     /// <summary>自动备份按容量上限清理：超出份数的最旧备份被删除，至少保留最新一份。</summary>
     public static int PruneAutoBackups(string directory, int maxCount)
