@@ -115,6 +115,7 @@
                         SelectionChanged="SettingsNavigation_SelectionChanged">
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="布局" Tag="Layout"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Layout" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem Content="窗口" Tag="Window"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Window" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem x:Name="AppearanceNavigationGroup" Content="外观" IsExpanded="True" SelectsOnInvoked="False">
                     <NavigationViewItem.Icon><icons:FluentIcon Symbol="Color" /></NavigationViewItem.Icon>
                     <NavigationViewItem.MenuItems>
@@ -155,6 +156,7 @@
                     <TextBlock x:Name="SettingsPageDescription" FontSize="15" Foreground="{ThemeResource BoardTextSecondaryBrush}" Text="调整磁贴标题和背景样式。" />
                 </StackPanel>
                 <StackPanel x:Name="LayoutSettingsPanel" Visibility="Collapsed" />
+                <StackPanel x:Name="WindowSettingsPanel" Visibility="Collapsed" />
                 <StackPanel x:Name="AppearanceSettingsPanel" Spacing="22">
                 <Border x:Name="ThemeSettingsCard" Style="{StaticResource BoardCardStyle}">
                     <StackPanel Spacing="18">

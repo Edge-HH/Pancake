@@ -7,7 +7,8 @@ param(
     [switch]$AutoLayoutOnly,
     [switch]$FontAuditOnly,
     [switch]$AutofillKeysOnly,
-    [switch]$AutofillImeOnly
+    [switch]$AutofillImeOnly,
+    [switch]$GridCoverageOnly
 )
 $ErrorActionPreference = 'Stop'
 $source = (Resolve-Path -LiteralPath $PublishDirectory).Path
@@ -22,12 +23,29 @@ try {
         & ffmpeg -hide_banner -loglevel error -f lavfi -i 'testsrc=size=1280x720:rate=60' -t $duration -c:v libx264 -pix_fmt yuv420p -y (Join-Path $testRoot 'media-test.mp4')
         if ($LASTEXITCODE -ne 0) { throw '测试视频生成失败，需要可用的 ffmpeg。' }
     }
-    $verificationArgument = if ($MediaPerformanceOnly) { '--verify-media-performance' } elseif ($BackgroundMediaOnly) { '--verify-background-media' } elseif ($FullScreenHintOnly) { '--verify-fullscreen-hint' } elseif ($AutoLayoutOnly) { '--verify-ui --auto-layout-only' } elseif ($FontAuditOnly) { '--verify-font-audit' } elseif ($AutofillKeysOnly) { '--verify-autofill-keys' } elseif ($AutofillImeOnly) { '--verify-autofill-ime' } else { '--verify-ui' }
+    if ($MediaPerformanceOnly) {
+        # 高质量动态壁纸样本：4K/60fps 高码率画面，模拟真实动态壁纸的解码与像素压力。
+        & ffmpeg -hide_banner -loglevel error -f lavfi -i 'testsrc2=size=3840x2160:rate=60' -vf 'noise=alls=15:allf=t+u' -t $duration -c:v libx264 -preset medium -b:v 40M -maxrate 60M -bufsize 80M -pix_fmt yuv420p -y (Join-Path $testRoot 'media-test-high.mp4')
+        if ($LASTEXITCODE -ne 0) { throw '高质量测试视频生成失败，需要可用的 ffmpeg。' }
+        # 差分对照的低清基线样本。
+        & ffmpeg -hide_banner -loglevel error -f lavfi -i 'testsrc=size=1280x720:rate=30' -t $duration -c:v libx264 -pix_fmt yuv420p -y (Join-Path $testRoot 'media-test-base.mp4')
+        if ($LASTEXITCODE -ne 0) { throw '基线测试视频生成失败，需要可用的 ffmpeg。' }
+        $env:PANCAKE_TEST_VIDEO = Join-Path $testRoot 'media-test-high.mp4'
+        $env:PANCAKE_TEST_VIDEO_BASE = Join-Path $testRoot 'media-test-base.mp4'
+    }
+    $verificationArgument = if ($MediaPerformanceOnly) { '--verify-media-performance' } elseif ($BackgroundMediaOnly) { '--verify-background-media' } elseif ($FullScreenHintOnly) { '--verify-fullscreen-hint' } elseif ($AutoLayoutOnly) { '--verify-ui --auto-layout-only' } elseif ($FontAuditOnly) { '--verify-font-audit' } elseif ($AutofillKeysOnly) { '--verify-autofill-keys' } elseif ($AutofillImeOnly) { '--verify-autofill-ime' } elseif ($GridCoverageOnly) { '--verify-grid-coverage' } else { '--verify-ui' }
     $process = Start-Process -FilePath (Join-Path $testRoot 'Pancake.exe') -ArgumentList $verificationArgument -WorkingDirectory $testRoot -WindowStyle Hidden -PassThru
     # 真实窗口检查数量随功能增加，慢机器上会接近一分钟；上限只用于兜住卡死，留足正常通过的时间。
-    if (-not $process.WaitForExit(180000)) { throw '隔离 UI 验证在 180 秒内未结束。' }
-    $resultName = if ($MediaPerformanceOnly) { 'performance-result.txt' } elseif ($BackgroundMediaOnly) { 'media-result.txt' } elseif ($FullScreenHintOnly) { 'fullscreen-result.txt' } elseif ($FontAuditOnly) { 'font-audit-result.txt' } elseif ($AutofillKeysOnly) { 'autofill-key-result.txt' } elseif ($AutofillImeOnly) { 'ime-result.txt' } else { 'result.txt' }
-    $successMarker = if ($MediaPerformanceOnly) { 'MEDIA_PERFORMANCE_VERIFICATION_OK' } elseif ($BackgroundMediaOnly) { 'BACKGROUND_MEDIA_VERIFICATION_OK' } elseif ($FullScreenHintOnly) { 'FULLSCREEN_HINT_VERIFICATION_OK' } elseif ($FontAuditOnly) { 'FONT_AUDIT_OK' } elseif ($AutofillKeysOnly) { 'AUTOFILL_KEY_VERIFICATION_OK' } elseif ($AutofillImeOnly) { 'AUTOFILL_IME_DIAGNOSTIC_OK' } else { 'UI_VERIFICATION_OK' }
+    if (-not $process.WaitForExit(180000)) {
+        # 超时也要保住测量证据：进度文件能显示验证推进到哪一步，临时目录马上要被清理。
+        $null = New-Item -ItemType Directory -Path $evidence -Force
+        if (Test-Path -LiteralPath (Join-Path $testRoot 'verification')) {
+            Copy-Item -Path (Join-Path $testRoot 'verification/*') -Destination $evidence -Force
+        }
+        throw '隔离 UI 验证在 180 秒内未结束。'
+    }
+    $resultName = if ($MediaPerformanceOnly) { 'performance-result.txt' } elseif ($BackgroundMediaOnly) { 'media-result.txt' } elseif ($FullScreenHintOnly) { 'fullscreen-result.txt' } elseif ($FontAuditOnly) { 'font-audit-result.txt' } elseif ($AutofillKeysOnly) { 'autofill-key-result.txt' } elseif ($AutofillImeOnly) { 'ime-result.txt' } elseif ($GridCoverageOnly) { 'grid-coverage-result.txt' } else { 'result.txt' }
+    $successMarker = if ($MediaPerformanceOnly) { 'MEDIA_PERFORMANCE_VERIFICATION_OK' } elseif ($BackgroundMediaOnly) { 'BACKGROUND_MEDIA_VERIFICATION_OK' } elseif ($FullScreenHintOnly) { 'FULLSCREEN_HINT_VERIFICATION_OK' } elseif ($FontAuditOnly) { 'FONT_AUDIT_OK' } elseif ($AutofillKeysOnly) { 'AUTOFILL_KEY_VERIFICATION_OK' } elseif ($AutofillImeOnly) { 'AUTOFILL_IME_DIAGNOSTIC_OK' } elseif ($GridCoverageOnly) { 'GRID_COVERAGE_VERIFICATION_OK' } else { 'UI_VERIFICATION_OK' }
     $result = Join-Path $testRoot "verification/$resultName"
     $null = New-Item -ItemType Directory -Path $evidence -Force
     if (Test-Path -LiteralPath (Join-Path $testRoot 'verification')) {

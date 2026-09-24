@@ -20,6 +20,8 @@ public sealed class BackgroundVisual : Grid
     private readonly Border _glassTintOverlay = new() { IsHitTestVisible = false };
     private readonly BackgroundPlaylist _playlist = new();
     private readonly DispatcherTimer _timer = new();
+    // 折叠的祖先不再触发布局/视口事件，媒体启停靠低频兜底定时器重新评估，不依赖事件必然到达。
+    private readonly DispatcherTimer _activityTimer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private BackgroundSettings _style = new();
     private string _path = "";
     private MediaPlayer? _player;
@@ -30,9 +32,11 @@ public sealed class BackgroundVisual : Grid
     private bool _shared;
     private bool _failed;
     private bool _inViewport = true;
+    private bool _active;
     private bool _overlaySurface;
     private string _overlayKey = "";
     private string _backgroundKey = "";
+    private bool _mediaRestoreQueued;
 
     // 局部外观预览可要求铺满；不改变项目保存的图片显示模式。
     internal Stretch? MediaStretchOverride { get; init; }
@@ -46,23 +50,63 @@ public sealed class BackgroundVisual : Grid
         _overlays.Children.Add(_glassTintOverlay);
         _overlays.Children.Add(_surfaceOverlay);
         _timer.Tick += (_, _) => Advance();
+        _activityTimer.Tick += (_, _) => EvaluateActivity();
         Loaded += (_, _) =>
         {
             // 刚挂载时 EffectiveViewport 可能仍是空矩形；先按可见恢复媒体，错误暂停由后续视口事件纠正。
             _inViewport = true;
-            ShowCurrent();
-            UpdateTimer();
+            QueueMediaRestore();
+            EvaluateActivity();
+            _activityTimer.Start();
         };
-        Unloaded += (_, _) => { _timer.Stop(); ReleaseMedia(); };
+        Unloaded += (_, _) =>
+        {
+            _activityTimer.Stop();
+            _timer.Stop();
+            ReleaseMedia();
+            _active = false;
+            QueueMediaRestore();
+        };
         EffectiveViewportChanged += (_, args) =>
         {
-            // 折叠设置页或滚出可见区域时暂停解码和定时器，避免隐藏预览继续消耗资源。
+            // 滚出可见区域时暂停解码和定时器，避免不可见内容继续消耗资源。
             bool visible = args.EffectiveViewport.Width > 0 && args.EffectiveViewport.Height > 0;
             if (_inViewport == visible) return;
             _inViewport = visible;
-            if (visible) { ShowCurrent(); _player?.Play(); _web?.SetPaused(false); UpdateTimer(); }
-            else { _player?.Pause(); _web?.SetPaused(true); _timer.Stop(); }
+            EvaluateActivity();
         };
+    }
+
+    /// <summary>可见性综合判断后的唯一启停入口；隐藏的管线必须停下解码、定时器与帧拷贝。</summary>
+    private void EvaluateActivity()
+    {
+        bool active = IsLoaded && _inViewport && ShownThroughTree(this);
+        if (active == _active) return;
+        _active = active;
+        if (_active) { ShowCurrent(); _player?.Play(); _web?.SetPaused(false); UpdateTimer(); }
+        else { _player?.Pause(); _web?.SetPaused(true); _timer.Stop(); }
+    }
+
+    /// <summary>WinUI 3 没有有效可见性事件；沿父链检查 Visibility，祖先折叠时子树不参与布局。</summary>
+    internal static bool ShownThroughTree(UIElement element)
+    {
+        for (DependencyObject? node = element; node is not null; node = VisualTreeHelper.GetParent(node))
+            if (node is UIElement { Visibility: not Visibility.Visible }) return false;
+        return true;
+    }
+
+    private void QueueMediaRestore()
+    {
+        // Viewbox 间重挂载可能在同一轮布局中交错触发 Loaded/Unloaded。
+        // 等事件结束后以当前挂载状态为准恢复，避免最后一次 Unloaded 清空已加载的图片。
+        if (_mediaRestoreQueued) return;
+        _mediaRestoreQueued = DispatcherQueue.TryEnqueue(() =>
+        {
+            _mediaRestoreQueued = false;
+            if (!IsLoaded) return;
+            ShowCurrent();
+            UpdateTimer();
+        });
     }
 
     public void Apply(BackgroundSettings style, Brush fallback, bool shared = false, bool surface = false, double blurScale = 1)
@@ -109,7 +153,7 @@ public sealed class BackgroundVisual : Grid
 
     private void ShowCurrent()
     {
-        if (_shared || !IsLoaded || !_inViewport || _failed) return;
+        if (_shared || !IsLoaded || !_active || _failed) return;
         string path = _playlist.Current;
         if (_path != path)
         {
@@ -192,7 +236,7 @@ public sealed class BackgroundVisual : Grid
 
     private void UpdateTimer()
     {
-        if (!IsLoaded || !_inViewport || _shared || _failed || !_style.PlaylistEnabled || !_style.SwitchOnTimer || string.IsNullOrEmpty(_playlist.Current)) { _timer.Stop(); return; }
+        if (!IsLoaded || !_active || _shared || _failed || !_style.PlaylistEnabled || !_style.SwitchOnTimer || string.IsNullOrEmpty(_playlist.Current)) { _timer.Stop(); return; }
         TimeSpan interval = TimeSpan.FromSeconds(BackgroundPlaylist.NormalizeInterval(_style.SwitchIntervalSeconds));
         if (_timer.Interval != interval) { _timer.Stop(); _timer.Interval = interval; }
         if (!_timer.IsEnabled) _timer.Start();

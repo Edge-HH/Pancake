@@ -15,7 +15,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <Version>2.0.6</Version>
+    <Version>2.1.0</Version>
     <SatelliteResourceLanguages>zh-Hans;zh-Hant;en</SatelliteResourceLanguages>
   </PropertyGroup>
 
@@ -41,6 +41,7 @@
   </PropertyGroup>
   <ItemGroup Condition="'$(EnableUiVerification)' == 'true'">
     <Compile Include="../../tests/UiVerification.cs" Link="UiVerification.cs" />
+    <Compile Include="../../tests/GridCoverageVerification.cs" Link="GridCoverageVerification.cs" />
     <Compile Include="../../tests/MediaUiVerification.cs" Link="MediaUiVerification.cs" />
     <Compile Include="../../tests/MediaPerformanceVerification.cs" Link="MediaPerformanceVerification.cs" />
   </ItemGroup>

@@ -19,6 +19,7 @@ public static class FluentGlyphs
     public const string Add = "\uE00D"; // ic_fluent_add_20_regular
     public const string Grid = "\uE929"; // ic_fluent_grid_20_regular
     public const string Layout = "\uEA39"; // ic_fluent_layout_cell_four_20_regular
+    public const string Window = "\uF483"; // ic_fluent_window_20_regular
     public const string Edit = "\uE7C9"; // ic_fluent_edit_20_regular
     public const string Settings = "\uEF27"; // ic_fluent_settings_20_regular
     public const string FullScreen = "\uE8D1"; // ic_fluent_full_screen_maximize_20_regular
@@ -40,6 +41,10 @@ public static class FluentGlyphs
     public const string Pen = "\uEC9D"; // ic_fluent_pen_20_regular
     public const string Eraser = "\uE7FF"; // ic_fluent_eraser_20_regular
     public const string TextGrammarWand = "\uF285"; // ic_fluent_text_grammar_wand_20_regular
+    // 锁定与登录相关：配合项目锁定功能使用。
+    public const string LockClosed = "\uEAF0"; // ic_fluent_lock_closed_20_regular
+    public const string Password = "\uEC8B"; // ic_fluent_password_20_regular
+    public const string QrCode = "\uEE2D"; // ic_fluent_qr_code_20_regular
     // 竖版控制窗里字体选择框收成图标按钮时用的字体图标。
     public const string TextFont = "\uF26F"; // ic_fluent_text_font_20_regular
     // 作业板缩放控件用的放大/缩小图标。
@@ -61,6 +66,7 @@ public static class FluentGlyphs
         nameof(Add) => Add,
         nameof(Grid) => Grid,
         nameof(Layout) => Layout,
+        nameof(Window) => Window,
         nameof(Edit) => Edit,
         nameof(Settings) => Settings,
         nameof(FullScreen) => FullScreen,
@@ -82,6 +88,9 @@ public static class FluentGlyphs
         nameof(Pen) => Pen,
         nameof(Eraser) => Eraser,
         nameof(TextGrammarWand) => TextGrammarWand,
+        nameof(LockClosed) => LockClosed,
+        nameof(Password) => Password,
+        nameof(QrCode) => QrCode,
         nameof(TextFont) => TextFont,
         nameof(ZoomIn) => ZoomIn,
         nameof(ZoomOut) => ZoomOut,

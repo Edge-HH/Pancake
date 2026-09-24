@@ -39,6 +39,7 @@ public sealed partial class MainWindow : Window
     private readonly bool _startFullScreen;
     private readonly string _initialView;
     private AppWindow? _appWindow;
+    private SingleInstanceService? _instanceGate;
     private bool _isEditing;
     private bool _isFullScreen;
     private bool _isLoaded;
@@ -52,6 +53,9 @@ public sealed partial class MainWindow : Window
     private int _activeTileInteractions;
     private double _renderedGridWidth;
     private double _renderedGridHeight;
+    // 绘制窗口（视口可见的内容坐标矩形）也是缓存键的一部分：视口变大、缩放或平移后必须重绘，
+    // 否则初始窗口之外的区域会一直没有网格。
+    private string _renderedGridWindow = string.Empty;
     private string _renderedGridAppearance = string.Empty;
     private bool IsGridSnappingEnabled = true;
     private bool _dialogOpen;
@@ -176,6 +180,31 @@ public sealed partial class MainWindow : Window
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(windowHandle);
         _appWindow = AppWindow.GetFromWindowId(windowId);
         _appWindow?.Resize(new SizeInt32(1440, 900));
+    }
+
+    /// <summary>接管窗口启动闸门：再次启动时按“已打开时再次启动的行为”唤醒本窗口。</summary>
+    public void AttachSingleInstanceGate(SingleInstanceService gate)
+    {
+        _instanceGate = gate;
+        gate.SecondLaunchRequested += action => DispatcherQueue.TryEnqueue(() => HandleSecondLaunch(action));
+        Closed += (_, _) => gate.Dispose();
+    }
+
+    /// <summary>关闭允许多实例后认领启动闸门；闸门已被其他窗口持有时保持现状，下次启动仍按新设置转发。</summary>
+    private void ClaimSingleInstanceGate()
+    {
+        if (_instanceGate is not null) return;
+        SingleInstanceService gate = SingleInstanceService.Start();
+        if (gate.IsFirstInstance) AttachSingleInstanceGate(gate);
+        else gate.Dispose();
+    }
+
+    /// <summary>再次启动的唤醒动作：移至前台，或全屏并移至前台；“不执行任何操作”根本不发信号。</summary>
+    private void HandleSecondLaunch(string action)
+    {
+        if (action == SingleInstanceService.NoneAction) return;
+        SingleInstanceService.BringToForeground(WinRT.Interop.WindowNative.GetWindowHandle(this));
+        if (action == SingleInstanceService.FullScreenAction) SetFullScreen(true);
     }
 
     private void UpdateClock()
@@ -585,11 +614,15 @@ public sealed partial class MainWindow : Window
         GridCanvas.Width = width;
         GridCanvas.Height = height;
         string gridAppearance = $"{GridAppearance.EffectiveStyle(_settings.GridStyle, _isEditing, _settings.ShowGridWhileEditing)}|{GridSize}|{_settings.GridColor}|{_settings.GridLineThickness}|{_settings.GridDotColor}|{_settings.GridDotDiameter}";
-        if (Math.Abs(width - _renderedGridWidth) > 0.5 || Math.Abs(height - _renderedGridHeight) > 0.5 || _renderedGridAppearance != gridAppearance)
+        (double gridLeft, double gridTop, double gridRight, double gridBottom) = GridRenderWindow(width, height);
+        string gridWindow = $"{Math.Round(gridLeft / 4)}:{Math.Round(gridTop / 4)}:{Math.Round(gridRight / 4)}:{Math.Round(gridBottom / 4)}";
+        if (Math.Abs(width - _renderedGridWidth) > 0.5 || Math.Abs(height - _renderedGridHeight) > 0.5
+            || _renderedGridWindow != gridWindow || _renderedGridAppearance != gridAppearance)
         {
             RenderGrid(width, height);
             _renderedGridWidth = width;
             _renderedGridHeight = height;
+            _renderedGridWindow = gridWindow;
             _renderedGridAppearance = gridAppearance;
         }
         }
@@ -618,16 +651,33 @@ public sealed partial class MainWindow : Window
         subject.Y = Math.Clamp(subject.Y, 0, Math.Max(0, viewportHeight - subject.TileHeight));
     }
 
+    /// <summary>
+    /// 网格绘制窗口：视口当前可见的内容坐标矩形，吸附到网格边界并外扩两格余量。
+    /// 用可视变换取矩形（zoom≠1 时 WinUI 会把小于视口的内容居中，代数换算拿不到这段边距）。
+    /// 无限画板把窗口夹进画板范围，平移很远也不会创建成千上万的 XAML 对象；
+    /// 固定作业板允许越出板界填满可见区，缩小时四周露出的部分同样要有网格。
+    /// </summary>
+    private (double Left, double Top, double Right, double Bottom) GridRenderWindow(double width, double height)
+    {
+        if (GridCanvas.ActualWidth < 1 || BoardScroller.ActualWidth < 1) return (0, 0, width, height);
+        GeneralTransform transform = BoardScroller.TransformToVisual(GridCanvas);
+        Point topLeft = transform.TransformPoint(new Point(0, 0));
+        Point bottomRight = transform.TransformPoint(new Point(BoardScroller.ActualWidth, BoardScroller.ActualHeight));
+        double left = Math.Floor(topLeft.X / GridSize) * GridSize;
+        double top = Math.Floor(topLeft.Y / GridSize) * GridSize;
+        double right = Math.Ceiling(bottomRight.X / GridSize) * GridSize;
+        double bottom = Math.Ceiling(bottomRight.Y / GridSize) * GridSize;
+        return _settings.InfiniteBoard
+            ? (Math.Max(0, left), Math.Max(0, top), Math.Min(width, right), Math.Min(height, bottom))
+            : (left, top, right, bottom);
+    }
+
     private void RenderGrid(double width, double height)
     {
         GridCanvas.Children.Clear();
         string style = GridAppearance.EffectiveStyle(_settings.GridStyle, _isEditing, _settings.ShowGridWhileEditing);
         if (style == "None") return;
-        // 无限画板只绘制视口附近的网格图形，平移很远也不会创建成千上万的 XAML 对象。
-        double left = _settings.InfiniteBoard ? Math.Max(0, Math.Floor(BoardScroller.HorizontalOffset / BoardScroller.ZoomFactor / GridSize) * GridSize) : 0;
-        double top = _settings.InfiniteBoard ? Math.Max(0, Math.Floor(BoardScroller.VerticalOffset / BoardScroller.ZoomFactor / GridSize) * GridSize) : 0;
-        double right = _settings.InfiniteBoard ? Math.Min(width, left + BoardScroller.ActualWidth / BoardScroller.ZoomFactor + GridSize * 2) : width;
-        double bottom = _settings.InfiniteBoard ? Math.Min(height, top + BoardScroller.ActualHeight / BoardScroller.ZoomFactor + GridSize * 2) : height;
+        (double left, double top, double right, double bottom) = GridRenderWindow(width, height);
         DrawGrid(GridCanvas, style, left, top, right, bottom);
     }
 
@@ -1065,6 +1115,10 @@ public sealed partial class MainWindow : Window
             _autofill.Prune(DateTime.Now);
             _settings.GridLineThickness = Math.Clamp(_settings.GridLineThickness, .5, 5);
             _settings.GridDotDiameter = Math.Clamp(_settings.GridDotDiameter, 1, 12);
+            // 再次启动行为只认三种取值；旧配置或手改值回到默认的“移至前台”。
+            _settings.SecondLaunchAction = BoardSettingsState.NormalizeSecondLaunchAction(_settings.SecondLaunchAction);
+            // 字号按整数调节：旧版字号滑块按 0.01 步进留下的小数值（如 20.37）在这里统一收敛。
+            _settings.TileBodyFontSize = Math.Round(_settings.TileBodyFontSize, MidpointRounding.AwayFromZero);
             _library.ActiveProjectId = CurrentProject?.Id ?? _library.Projects.OrderByDescending(p => p.LastUsedAt).FirstOrDefault()?.Id;
             ViewModel.ReplaceSubjects(AppDataStore.RestoreSubjects(CurrentProject?.Subjects ?? []));
             LoadClockInk();

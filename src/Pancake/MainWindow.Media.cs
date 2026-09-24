@@ -19,14 +19,14 @@ public sealed partial class MainWindow
         return picker;
     }
 
-    private StackPanel CreateBackgroundMediaEditor(BackgroundSettings style)
+    private StackPanel CreateBackgroundMediaEditor(BackgroundSettings style, MediaScope scope = MediaScope.Background)
     {
         style.Playlist ??= [];
         StackPanel panel = SettingsStack(), rows = SettingsStack();
         bool busy = false;
         Button pick = new() { Content = "选择图片或视频" };
         panel.Children.Add(pick);
-        async Task Import(IEnumerable<string> paths, IReadOnlyDictionary<string, WallpaperProject>? projects = null)
+        async Task Import(IEnumerable<string> paths, IReadOnlyDictionary<string, WallpaperProject>? projects = null, bool recent = false)
         {
             if (busy) return;
             busy = true;
@@ -35,7 +35,8 @@ public sealed partial class MainWindow
             {
                 foreach (string path in paths)
                 {
-                    string owned = projects is null ? await MediaLibraryStore.ImportAsync(path) : await MediaLibraryStore.ImportWallpaperAsync(projects[path]);
+                    string owned = recent ? await MediaLibraryStore.UseRecentAsync(path, scope)
+                        : projects is null ? await MediaLibraryStore.ImportAsync(path, scope) : await MediaLibraryStore.ImportWallpaperAsync(projects[path], scope);
                     if (style.PlaylistEnabled)
                     {
                         if (!style.Playlist.Contains(owned, StringComparer.OrdinalIgnoreCase)) style.Playlist.Add(owned);
@@ -55,7 +56,7 @@ public sealed partial class MainWindow
             }
             catch (Exception ex) { await ShowMessageAsync("无法选择媒体", ex.Message, "知道了"); }
         };
-        panel.Children.Add(new RecentImagesView(MediaLibraryStore, path => Import([path])));
+        panel.Children.Add(new RecentImagesView(MediaLibraryStore, path => Import([path], recent: true), scope));
         panel.Children.Add(Toggle("播放队列模式", style.PlaylistEnabled, value =>
         {
             style.PlaylistEnabled = value;

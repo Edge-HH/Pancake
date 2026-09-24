@@ -57,16 +57,50 @@ public sealed partial class MainWindow
         _refreshSettingAvailability.Add(UpdateAutoLayoutGapStep);
         RegisterSettingsPage("Layout", LayoutSettingsPanel, layout, "布局", "调整布局模式、无限作业板与网格。");
 
+        StackPanel window = SettingsStack();
+        StackPanel multiInstanceBlock = new() { Spacing = 3 };
+        multiInstanceBlock.Children.Add(Toggle("允许多实例", _settings.AllowMultipleInstances, value =>
+        {
+            _settings.AllowMultipleInstances = value;
+            // 允许多实例期间启动的窗口没有认领过启动闸门，关闭后要补上，后续启动才会被拦下。
+            if (!value) ClaimSingleInstanceGate();
+        }));
+        multiInstanceBlock.Children.Add(new TextBlock
+        {
+            Text = "不建议开启，可能导致未知问题", TextWrapping = TextWrapping.Wrap, FontSize = 12,
+            Foreground = (Brush)Application.Current.Resources["BoardTextMutedBrush"]
+        });
+        window.Children.Add(multiInstanceBlock);
+        StackPanel secondLaunchBlock = new() { Spacing = 3 };
+        ComboBox secondLaunch = Choice("已打开时再次启动行为", ["移至前台", "全屏", "不执行任何操作"],
+            [SingleInstanceService.ForegroundAction, SingleInstanceService.FullScreenAction, SingleInstanceService.NoneAction],
+            _settings.SecondLaunchAction, value => _settings.SecondLaunchAction = value);
+        secondLaunchBlock.Children.Add(secondLaunch);
+        secondLaunchBlock.Children.Add(new TextBlock
+        {
+            Text = "仅在关闭允许多实例时生效。", TextWrapping = TextWrapping.Wrap, FontSize = 12,
+            Foreground = (Brush)Application.Current.Resources["BoardTextMutedBrush"]
+        });
+        window.Children.Add(secondLaunchBlock);
+        // 允许多实例时再次启动会直接开新窗口，再次启动行为没有作用对象。
+        _refreshSettingAvailability.Add(() => secondLaunch.IsEnabled = !_settings.AllowMultipleInstances);
+        RegisterSettingsPage("Window", WindowSettingsPanel, window, "窗口", "调整同时打开的窗口数量与再次启动的行为。");
+
         StackPanel tile = SettingsStack();
         tile.Children.Add(CreateAppearancePreview("Tile"));
         tile.Children.Add(Range("标题大小", 16, 72, _settings.TileTitleSize, value => _settings.TileTitleSize = value, TileTitleSizeChanged));
-        tile.Children.Add(Range("正文默认字号", 12, 72, _settings.TileBodyFontSize, value => _settings.TileBodyFontSize = value, TileBodyStyleChanged));
+        Slider bodyFontSizeSlider = Range("正文默认字号", 12, 72, Math.Round(_settings.TileBodyFontSize, MidpointRounding.AwayFromZero), value => _settings.TileBodyFontSize = Math.Round(value, MidpointRounding.AwayFromZero), TileBodyStyleChanged);
+        // 字号按整数调节，避免出现 20.37 这类没有意义的取值。
+        bodyFontSizeSlider.StepFrequency = 1;
+        bodyFontSizeSlider.SmallChange = 1;
+        bodyFontSizeSlider.LargeChange = 4;
+        tile.Children.Add(bodyFontSizeSlider);
         tile.Children.Add(DefaultBodyFontPicker());
         tile.Children.Add(Toggle("正文默认粗体", _settings.TileBodyBold, value => _settings.TileBodyBold = value, TileBodyStyleChanged));
         tile.Children.Add(Toggle("正文默认斜体", _settings.TileBodyItalic, value => _settings.TileBodyItalic = value, TileBodyStyleChanged));
         tile.Children.Add(Toggle("仅粘贴纯文本", _settings.PastePlainTextOnly, value => _settings.PastePlainTextOnly = value));
         tile.Children.Add(Note("默认正文样式用于新建和尚未单独设置格式的正文；已有的局部字体、粗体、斜体、颜色与高光不会被覆盖。开启纯文本粘贴后，Ctrl+V 和右键粘贴都会移除来源格式。"));
-        tile.Children.Add(BackgroundEditor(_settings.TileBackground, () => true, () => true, surface: true));
+        tile.Children.Add(BackgroundEditor(_settings.TileBackground, () => true, () => true, surface: true, scope: MediaScope.Tile));
         StackPanel backgrounds = SettingsStack();
         // 背景板预览把跨区、时钟和作业板合成一张主界面式场景，并在宽窗口固定到右侧。
         backgrounds.Children.Add(CreateAppearancePreview("Background"));
@@ -985,7 +1019,8 @@ public sealed partial class MainWindow
         return panel;
     }
 
-    private StackPanel BackgroundEditor(BackgroundSettings style, Func<bool> allowImage, Func<bool> allowGlass, bool includeGlass = true, bool surface = false)
+    private StackPanel BackgroundEditor(BackgroundSettings style, Func<bool> allowImage, Func<bool> allowGlass, bool includeGlass = true, bool surface = false,
+        MediaScope scope = MediaScope.Background)
     {
         StackPanel panel = SettingsStack(), imageControls = SettingsStack();
         ColorPicker color = new() { IsAlphaEnabled = false, IsHexInputVisible = true };
@@ -996,7 +1031,7 @@ public sealed partial class MainWindow
                 (value, cleared) => { style.Color = value; style.ColorCleared = cleared; }, value => style.ColorOpacity = value));
         else
             imageControls.Children.Add(new Button { Content = "背景颜色", Flyout = new Flyout { Content = color } });
-        imageControls.Children.Add(new ContentControl { Content = CreateBackgroundMediaEditor(style), HorizontalContentAlignment = HorizontalAlignment.Stretch });
+        imageControls.Children.Add(new ContentControl { Content = CreateBackgroundMediaEditor(style, scope), HorizontalContentAlignment = HorizontalAlignment.Stretch });
         imageControls.Children.Add(Choice("图片模式", ["缩放", "拉伸", "适应"], ["Zoom", "Stretch", "Fit"], style.ImageMode, value => style.ImageMode = value));
         Button clear = new() { Content = "清除背景媒体" };
         clear.Click += (_, _) => { style.ImagePath = ""; style.Playlist.Clear(); SettingChanged(); };
@@ -1048,6 +1083,23 @@ public sealed partial class MainWindow
         panel.Children.Add(Toggle("无字模式", _settings.ToolbarIconOnly, value => _settings.ToolbarIconOnly = value));
         panel.Children.Add(Range("大小", .6, 2, _settings.ToolbarScale, value => _settings.ToolbarScale = value));
         panel.Children.Add(Range("圆角", 0, 60, _settings.ToolbarRadius, value => _settings.ToolbarRadius = value));
+        panel.Children.Add(Range("边框粗细", 0, 20, _settings.ToolbarBorderThickness,
+            value => _settings.ToolbarBorderThickness = value, ToolbarBorderChanged));
+        ColorPicker borderColor = new()
+        {
+            IsAlphaEnabled = true, IsHexInputVisible = true,
+            Color = GridAppearance.ParseColor(_settings.ToolbarBorderColor, BoardTheme.LineColorFor(BoardTheme.IsLight))
+        };
+        borderColor.ColorChanged += (_, args) =>
+        {
+            _settings.ToolbarBorderColor = GridAppearance.FormatColor(args.NewColor);
+            ToolbarBorderChanged();
+        };
+        panel.Children.Add(new Button { Content = "边框颜色", Flyout = new Flyout { Content = borderColor } });
+        Button resetBorder = new() { Content = "恢复主题边框色" };
+        resetBorder.Click += (_, _) => { _settings.ToolbarBorderColor = ""; ToolbarBorderChanged(); };
+        panel.Children.Add(resetBorder);
+        panel.Children.Add(Note("控制窗、画笔栏和浮岛共用这套边框；粗细为 0 时没有边框。颜色默认跟随主题线条色，设定后不再随深浅主题变化。"));
         var horizontal = Range("距左右边框", 0, 200, _settings.ToolbarHorizontalInset, value => _settings.ToolbarHorizontalInset = value);
         var vertical = Range("距上下边框", 0, 200, _settings.ToolbarVerticalInset, value => _settings.ToolbarVerticalInset = value);
         panel.Children.Add(horizontal); panel.Children.Add(vertical);
@@ -1065,6 +1117,30 @@ public sealed partial class MainWindow
     private Brush CreateToolbarBackground() => SurfaceBackground.Create(
         _settings.ToolbarBackgroundColor, _settings.ToolbarBackgroundOpacity,
         _settings.ToolbarBackgroundColorCleared, _settings.ToolbarGlass, _settings.ToolbarBlur);
+
+    /// <summary>控制窗边框：设置为空时跟随主题线条色，指定颜色后不再随深浅主题变化。</summary>
+    private static Brush CreateToolbarBorder(string color) =>
+        string.IsNullOrEmpty(color) ? BoardTheme.LineBrush : new SolidColorBrush(GridAppearance.ParseColor(color, BoardTheme.LineColorFor(BoardTheme.IsLight)));
+
+    /// <summary>控制窗、画笔栏与浮岛共用的边框样式，保证三块窗口外观一致。</summary>
+    private void ApplyToolbarBorder(Border border)
+    {
+        border.BorderThickness = new Thickness(IslandBorderThickness);
+        border.BorderBrush = CreateToolbarBorder(_settings.ToolbarBorderColor);
+    }
+
+    /// <summary>边框只影响三块悬浮窗的轮廓，拖动时不必重排整窗布局。</summary>
+    private void ToolbarBorderChanged()
+    {
+        if (FloatingToolbar is not null)
+        {
+            ApplyToolbarBorder(FloatingToolbar);
+            ApplyToolbarBorder(GlobalInkToolbar);
+        }
+        RefreshIslands();
+        RefreshAppearancePreviews();
+        ScheduleSave();
+    }
 
     private bool UseSharedBackground => _settings.LayoutMode == "Split" && _settings.SharedBackgroundEnabled;
 
@@ -1211,6 +1287,8 @@ public sealed partial class MainWindow
         FloatingToolbar.CornerRadius = GlobalInkToolbar.CornerRadius = new CornerRadius(_settings.ToolbarRadius);
         FloatingToolbar.Padding = new Thickness(toolbarPadding);
         GlobalInkToolbar.Padding = new Thickness(inkToolbarPadding);
+        ApplyToolbarBorder(FloatingToolbar);
+        ApplyToolbarBorder(GlobalInkToolbar);
         FloatingToolbar.Background = CreateToolbarBackground();
         GlobalInkToolbar.Background = CreateToolbarBackground();
         FloatingToolbar.HorizontalAlignment = position.EndsWith("Left") ? HorizontalAlignment.Left : position.EndsWith("Right") ? HorizontalAlignment.Right : HorizontalAlignment.Center;

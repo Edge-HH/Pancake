@@ -155,12 +155,25 @@ try
     string ownedB = await library.ImportAsync(b);
     Check(library.RecentImages().SequenceEqual(new[] { ownedB, ownedA }), "最近图片按选择顺序排列");
     Check(await library.ImportAsync(ownedA) == ownedA && library.RecentImages()[0] == ownedA, "重复选择复用文件并移到首位");
-    string ownedVideo = await library.ImportAsync(video);
+    string ownedVideo = await library.ImportAsync(video, MediaScope.Tile);
+    Check(library.RecentMedia(MediaScope.Tile)[0] == ownedVideo, "视频导入后进入最近媒体首位");
+    Check(new MediaLibrary(Path.Combine(mediaRoot, "data")).RecentMedia(MediaScope.Tile)[0] == ownedVideo, "视频历史跨服务实例持久化");
     Check(library.RecentImages().Count == 2 && !library.RecentImages().Contains(ownedVideo), "视频不混入最近图片缩略图");
+    Check(!library.RecentMedia(MediaScope.Background).Contains(ownedVideo), "磁贴的视频不出现在背景板最近媒体");
     File.Delete(a);
     Check(File.Exists(ownedA), "原图片删除不影响历史副本");
     Check(new MediaLibrary(Path.Combine(mediaRoot, "data")).RecentImages()[0] == ownedA, "历史跨服务实例持久化");
     Check(MediaLibrary.DisplayName(ownedA) == "a.png", "资源内部标识不会显示成媒体名称");
+    bool refusedVideo = false;
+    try { await library.ImportAsync(video); } catch (InvalidDataException) { refusedVideo = true; }
+    Check(refusedVideo, "图片入口拒绝视频");
+    string c = Path.Combine(mediaRoot, "c.webp"); File.WriteAllText(c, "image c");
+    string ownedC = await library.ImportAsync(c, MediaScope.Background);
+    Check(library.RecentMedia(MediaScope.Background)[0] == ownedC && library.RecentImages()[0] == ownedC, "背景板导入进入背景板最近媒体，图片仍进图片历史");
+    Check(!library.RecentMedia(MediaScope.Tile).Contains(ownedC), "背景板的图片不出现在磁贴最近媒体");
+    bool refusedCrossScope = false;
+    try { await library.UseRecentAsync(ownedVideo, MediaScope.Background); } catch (FileNotFoundException) { refusedCrossScope = true; }
+    Check(refusedCrossScope, "另一使用面的媒体不能从本使用面复选");
     BackgroundSettings playlistSettings = new() { PlaylistEnabled = true, Playlist = [ownedA, b, video, b, Path.Combine(mediaRoot, "missing.png")],
         Shuffle = false, SwitchOnTimer = true, SwitchIntervalSeconds = 12, SwitchOnMediaEnded = false };
     BackgroundPlaylist playback = new();
@@ -203,6 +216,38 @@ try
     Check(WallpaperEngineLibrary.ReadProject(mediaRoot) is null, "拒绝项目目录逃逸");
     File.WriteAllText(projectFile, "{broken");
     Check(WallpaperEngineLibrary.ReadProject(mediaRoot) is null, "损坏项目不阻断扫描");
+    int missingExceptions = 0;
+    void CountMissing(object? sender, System.Runtime.ExceptionServices.FirstChanceExceptionEventArgs args)
+    {
+        if (args.Exception is FileNotFoundException) missingExceptions++;
+    }
+    AppDomain.CurrentDomain.FirstChanceException += CountMissing;
+    try { Check(WallpaperEngineLibrary.ReadProject(Path.Combine(mediaRoot, "absent")) is null, "扫描忽略缺少清单的项目"); }
+    finally { AppDomain.CurrentDomain.FirstChanceException -= CountMissing; }
+    Check(missingExceptions == 0, "缺少项目清单不引发调试器首次机会异常");
+    string webRoot = Path.Combine(mediaRoot, "web-source");
+    Directory.CreateDirectory(webRoot);
+    string webEntry = Path.Combine(webRoot, "index.html");
+    File.WriteAllText(webEntry, "<html>wallpaper</html>");
+    File.WriteAllText(Path.Combine(webRoot, "resource.js"), "// resource");
+    File.WriteAllText(Path.Combine(webRoot, "project.json"), "{\"type\":\"web\",\"file\":\"index.html\"}");
+    int changes = 0;
+    library.Changed += () => changes++;
+    string ownedWeb = await library.ImportWallpaperAsync(new("网页", webEntry, "web", webRoot, ""), MediaScope.Background);
+    Check(changes == 1 && library.RecentMedia(MediaScope.Background)[0] == ownedWeb, "网页完整导入后更新最近媒体并通知视图");
+    Check(!library.RecentMedia(MediaScope.Tile).Contains(ownedWeb), "背景板的动态壁纸不出现在磁贴最近媒体");
+    File.Delete(webEntry);
+    await library.UseRecentAsync(ownedVideo, MediaScope.Tile);
+    Check(library.RecentMedia(MediaScope.Tile)[0] == ownedVideo, "再次选择视频移到首位");
+    Check(await library.UseRecentAsync(ownedWeb, MediaScope.Background) == ownedWeb && library.RecentMedia(MediaScope.Background)[0] == ownedWeb
+        && Directory.GetDirectories(Path.GetDirectoryName(Path.GetDirectoryName(ownedWeb))!).Length == 1
+        && File.Exists(Path.Combine(Path.GetDirectoryName(ownedWeb)!, "resource.js")), "原网页入口删除后复用完整项目且不重复复制");
+    Check(!library.RecentImages().Contains(ownedWeb) && !library.RecentImages().Contains(ownedVideo), "附件图片入口过滤网页和视频");
+    bool refusedWallpaper = false;
+    try { await library.ImportWallpaperAsync(new("网页", webEntry, "web", webRoot, ""), MediaScope.Images); } catch (InvalidDataException) { refusedWallpaper = true; }
+    Check(refusedWallpaper, "图片入口拒绝动态壁纸");
+    Check(new MediaLibrary(Path.Combine(mediaRoot, "data")).RecentMedia(MediaScope.Background)[0] == ownedWeb
+        && new MediaLibrary(Path.Combine(mediaRoot, "data")).RecentMedia(MediaScope.Tile)[0] == ownedVideo, "磁贴与背景板最近媒体分别持久化");
     Console.WriteLine("PASS: recent image ownership/history, mixed playlists, shuffle, persistence and Wallpaper Engine import boundaries.");
 }
 finally { Directory.Delete(mediaRoot, true); }

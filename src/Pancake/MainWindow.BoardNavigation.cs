@@ -17,8 +17,8 @@ public sealed partial class MainWindow
         BoardScroller.ViewChanged += (_, _) =>
         {
             if (_updatingBoardBounds) return;
+            // 绘制窗口已进入 UpdateBoardBounds 的缓存键，视图变化后这里只需走重算路径。
             UpdateBoardBounds();
-            RenderGrid(BoardCanvas.Width, BoardCanvas.Height);
         };
         BoardScroller.SizeChanged += (_, _) => UpdateBoardBounds();
         BoardScroller.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, args) =>

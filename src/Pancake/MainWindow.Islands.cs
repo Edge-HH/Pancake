@@ -20,7 +20,7 @@ public sealed partial class MainWindow
     internal const double MinimumBoardZoom = 0.2;
     internal const double MaximumBoardZoom = 4;
     /// <summary>悬浮岛与控制窗共用的边框宽度，等高（竖版等宽）计算必须把它算进去。</summary>
-    private const double IslandBorderThickness = 1;
+    private double IslandBorderThickness => Math.Clamp(_settings.ToolbarBorderThickness, 0, 20);
     /// <summary>缩放档位：逐档增减比固定步长更容易停在常用比例上。</summary>
     private static readonly double[] BoardZoomSteps =
         [.2, .25, .33, .5, .67, .75, .8, .9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4];
@@ -306,7 +306,7 @@ public sealed partial class MainWindow
     private double ToolbarContentSize(double scale) => (_settings.ToolbarIconOnly ? 44 : 64) * scale;
 
     /// <summary>控制窗的高（竖版控制窗为宽）：内容尺寸加内边距与边框，悬浮岛必须与它一致。</summary>
-    private static double ToolbarCrossSize(double contentSize, double padding) =>
+    private double ToolbarCrossSize(double contentSize, double padding) =>
         contentSize + padding * 2 + IslandBorderThickness * 2;
 
     /// <summary>悬浮岛外观：内边距、圆角与背景跟随控制窗；按钮尺寸与说明字跟随缩放和无字模式。</summary>
@@ -325,6 +325,7 @@ public sealed partial class MainWindow
             island.Padding = new Thickness(padding);
             island.CornerRadius = corner;
             island.Background = background;
+            ApplyToolbarBorder(island);
         }
         // 竖版控制窗较窄，浮岛改成与控制窗等宽、竖向排布；横版控制窗则等高、横向排布。
         RichTextIsland.Width = ZoomIsland.Width = vertical ? crossSize : double.NaN;

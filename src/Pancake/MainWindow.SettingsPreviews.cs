@@ -82,6 +82,17 @@ public sealed partial class MainWindow
     {
         Grid scene = new() { Width = PreviewSceneWidth, Height = GetFullscreenPreviewHeight(), IsHitTestVisible = false };
         _appearancePreviews.Add("Background", scene);
+        double lastBlurScale = -1;
+        scene.LayoutUpdated += (_, _) =>
+        {
+            if (_selectedSettingsPage != "AppearanceBackground" || !scene.IsLoaded) return;
+            double scale = GetBackgroundPreviewBlurScale();
+            if (Math.Abs(scale - lastBlurScale) < .0001) return;
+            lastBlurScale = scale;
+            // Viewbox 的最终缩放要等布局完成才能取得；尺寸变化只刷新已有背景资源。
+            if (_previewScenes.TryGetValue("Background", out var cached))
+                foreach (var refresh in cached.Refresh) refresh();
+        };
         _backgroundPreviewInlineViewbox = new Viewbox { Stretch = Stretch.Uniform, Child = scene };
         _backgroundPreviewInlineFrame = new Border
         {
@@ -167,10 +178,10 @@ public sealed partial class MainWindow
     }
 
     /// <summary>
-    /// 模糊半径以实际显示区域的 DIP 为单位；预览场景缩到 640 DIP 后也要同比缩小，
-    /// 否则同一个数值在右侧预览里会显得明显重于全屏看板。
+    /// 背景采样发生在合成后的显示区域，比例必须包含 Viewbox 的最终缩放，
+    /// 不能只使用场景的 640 DIP 设计宽度（窄窗或高度受限时会明显偏重）。
     /// </summary>
-    private double GetBackgroundPreviewBlurScale()
+    private double GetBackgroundPreviewBlurScale(bool useRenderedSize = true)
     {
         try
         {
@@ -179,7 +190,14 @@ public sealed partial class MainWindow
             var bounds = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Nearest).OuterBounds;
             double rasterizationScale = RootShell.XamlRoot?.RasterizationScale ?? 1;
             double fullscreenWidth = bounds.Width / Math.Max(0.01, rasterizationScale);
-            if (fullscreenWidth > 0) return Math.Min(1, PreviewSceneWidth / fullscreenWidth);
+            double previewWidth = PreviewSceneWidth;
+            if (useRenderedSize && _appearancePreviews.TryGetValue("Background", out Grid? scene) && scene.IsLoaded && scene.ActualWidth > 0)
+            {
+                var displayed = scene.TransformToVisual(RootShell).TransformBounds(
+                    new Windows.Foundation.Rect(0, 0, scene.ActualWidth, scene.ActualHeight));
+                if (displayed.Width > 0 && double.IsFinite(displayed.Width)) previewWidth = displayed.Width;
+            }
+            if (fullscreenWidth > 0) return Math.Min(1, previewWidth / fullscreenWidth);
         }
         catch
         {
@@ -202,6 +220,8 @@ public sealed partial class MainWindow
 
     private void RefreshAppearancePreviews()
     {
+        // 先确定宿主再创建媒体，避免首次进入设置页就在创建后立即卸载整棵预览树。
+        UpdatePreviewHosting();
         string[] kinds = _selectedSettingsPage switch
         {
             "AppearanceTile" => ["Tile"], "AppearanceBackground" => ["Background"],
@@ -224,7 +244,7 @@ public sealed partial class MainWindow
             else if (scene.Parent is Viewbox { Parent: Border frame }) frame.BorderBrush = BoardTheme.LineBrush;
             string key = kind switch
             {
-                "Toolbar" => $"{BoardTheme.IsLight}|{RootShell.ActualWidth}|{RootShell.ActualHeight}|{_settings.ToolbarPosition}|{_settings.ToolbarScale}|{_settings.ToolbarIconOnly}|{_settings.ToolbarRadius}|{_settings.ToolbarGlass}|{_settings.ToolbarBlur}|{_settings.ToolbarHorizontalInset}|{_settings.ToolbarVerticalInset}",
+                "Toolbar" => $"{BoardTheme.IsLight}|{RootShell.ActualWidth}|{RootShell.ActualHeight}|{_settings.ToolbarPosition}|{_settings.ToolbarScale}|{_settings.ToolbarIconOnly}|{_settings.ToolbarRadius}|{_settings.ToolbarGlass}|{_settings.ToolbarBlur}|{_settings.ToolbarHorizontalInset}|{_settings.ToolbarVerticalInset}|{_settings.ToolbarBorderThickness}|{_settings.ToolbarBorderColor}",
                 // 磁贴示例的主题色与高光色都取自当前色系，主题或色系变化必须重建示例才和真实磁贴一致。
                 "Tile" => $"{BoardTheme.IsLight}|{ColorPalette.IsMacaron}",
                 "Background" => $"{BoardTheme.IsLight}|{_settings.LayoutMode}|{_settings.SharedBackgroundEnabled}|{_settings.SplitRatio:0.####}",
@@ -348,8 +368,9 @@ public sealed partial class MainWindow
     private void AddPreviewBackground(Grid target, Func<BackgroundSettings> settings, Func<bool>? shared = null)
     {
         BackgroundVisual background = new();
+        bool useRenderedSize = _selectedSettingsPage == "AppearanceBackground";
         void Refresh() => background.Apply(settings(), BoardTheme.SurfaceBrush, shared?.Invoke() ?? false,
-            blurScale: GetBackgroundPreviewBlurScale());
+            blurScale: GetBackgroundPreviewBlurScale(useRenderedSize));
         Refresh();
         _buildingPreviewRefreshers?.Add(Refresh);
         target.Children.Add(background);
@@ -745,8 +766,9 @@ public sealed partial class MainWindow
         string position = _settings.ToolbarPosition;
         bool vertical = position.StartsWith("Center");
         double scale = Math.Clamp(_settings.ToolbarScale, .6, 2);
-        double toolbarWidth = ((vertical ? (_settings.ToolbarIconOnly ? 44 : 64) : (_settings.ToolbarIconOnly ? 44 : 88) * 3 + 8) + 14) * scale + 2;
-        double toolbarHeight = (((_settings.ToolbarIconOnly ? 44 : 64) * (vertical ? 3 : 1)) + (vertical ? 8 : 0) + 14) * scale + 2;
+        double previewBorder = IslandBorderThickness;
+        double toolbarWidth = ((vertical ? (_settings.ToolbarIconOnly ? 44 : 64) : (_settings.ToolbarIconOnly ? 44 : 88) * 3 + 8) + 14) * scale + previewBorder * 2;
+        double toolbarHeight = (((_settings.ToolbarIconOnly ? 44 : 64) * (vertical ? 3 : 1)) + (vertical ? 8 : 0) + 14) * scale + previewBorder * 2;
         // 在实际窗口坐标中截取控制窗附近，保持预览宽高比，避免整窗缩小和留黑边。
         double cropHeight = Math.Max(300, Math.Max(toolbarHeight + 64, (toolbarWidth + 64) * 300 / 640));
         double cropWidth = cropHeight * 640 / 300;
@@ -782,7 +804,7 @@ public sealed partial class MainWindow
         {
             Name = "ToolbarPreviewFrame", Child = buttons, Padding = new Thickness(7 * scale), CornerRadius = new CornerRadius(_settings.ToolbarRadius),
             Background = CreateToolbarBackground(),
-            BorderBrush = BoardTheme.LineBrush, BorderThickness = new Thickness(1),
+            BorderBrush = CreateToolbarBorder(_settings.ToolbarBorderColor), BorderThickness = new Thickness(previewBorder),
             HorizontalAlignment = position.EndsWith("Left") ? HorizontalAlignment.Left : position.EndsWith("Right") ? HorizontalAlignment.Right : HorizontalAlignment.Center,
             VerticalAlignment = position.StartsWith("Top") ? VerticalAlignment.Top : vertical ? VerticalAlignment.Center : VerticalAlignment.Bottom,
             Margin = new Thickness(_settings.ToolbarHorizontalInset, _settings.ToolbarVerticalInset, _settings.ToolbarHorizontalInset, _settings.ToolbarVerticalInset)

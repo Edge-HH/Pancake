@@ -65,9 +65,12 @@ public static class WallpaperEngineLibrary
 
     public static WallpaperProject? ReadProject(string folder)
     {
+        // 创意工坊中可能残留未下载完成或已取消订阅的目录，这是正常扫描结果。
+        string projectFile = Path.Combine(folder, "project.json");
+        if (!File.Exists(projectFile)) return null;
         try
         {
-            using var json = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "project.json")));
+            using var json = JsonDocument.Parse(File.ReadAllText(projectFile));
             var root = json.RootElement;
             if (!root.TryGetProperty("type", out var type)) return null;
             string kind = type.GetString()?.ToLowerInvariant() ?? "";

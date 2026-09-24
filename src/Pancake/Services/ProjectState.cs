@@ -43,6 +43,9 @@ public sealed class BoardSettingsState
     public string ToolbarPosition { get; set; } = "BottomCenter";
     public double ToolbarScale { get; set; } = 1;
     public double ToolbarRadius { get; set; } = 14;
+    public double ToolbarBorderThickness { get; set; } = 1;
+    // 空字符串表示跟随主题线条色；设为固定颜色后切换深浅主题不再变色。
+    public string ToolbarBorderColor { get; set; } = "";
     public double ToolbarHorizontalInset { get; set; } = 24;
     public double ToolbarVerticalInset { get; set; } = 24;
     public bool ToolbarGlass { get; set; }
@@ -71,7 +74,73 @@ public sealed class BoardSettingsState
     public string WeatherCityCode { get; set; } = "101010100";
     public bool GridSnappingEnabled { get; set; } = true;
     public bool AutoUpdateEnabled { get; set; } = true;
+    /// <summary>允许多实例：默认关闭，关闭后同一安装目录只允许同时打开一个软件窗口。</summary>
+    public bool AllowMultipleInstances { get; set; }
+    /// <summary>已打开时再次启动的行为：Foreground（移至前台）、FullScreen（全屏）、None（不执行任何操作）。</summary>
+    public string SecondLaunchAction { get; set; } = "Foreground";
     public AutofillSettings Autofill { get; set; } = new();
+    public LockSettings Lock { get; set; } = new();
+    public DataSettings Data { get; set; } = new();
+
+    /// <summary>再次启动行为只认三种取值；旧配置或手改值一律回到“移至前台”。</summary>
+    public static string NormalizeSecondLaunchAction(string? value) =>
+        value is "Foreground" or "FullScreen" or "None" ? value : "Foreground";
+}
+
+/// <summary>数据页设置：作业保留、备份与自动备份属于软件设置，跨项目共享。</summary>
+public sealed class DataSettings
+{
+    /// <summary>应用内作业保留天数，0 表示永久保留；创建时间超出该时间的作业项目会被清除。</summary>
+    public int JobRetentionDays { get; set; } = 30;
+    public BackupSettings Backup { get; set; } = new();
+    public BackupSettings AutoBackup { get; set; } = new();
+}
+
+/// <summary>备份的范围与位置；手动备份只用 Scopes，自动备份还使用目录、间隔和保留份数。</summary>
+public sealed class BackupSettings
+{
+    public BackupScopes Scopes { get; set; } = BackupScopes.All;
+    public bool Enabled { get; set; }
+    public string Directory { get; set; } = "";
+    /// <summary>自动备份间隔小时数，至少 1。</summary>
+    public double IntervalHours { get; set; } = 24;
+    /// <summary>自动备份保留份数，超出后删除最旧的备份。</summary>
+    public int KeepCount { get; set; } = 7;
+}
+
+/// <summary>备份范围：四类内容可任意组合，默认全开。</summary>
+[Flags]
+public enum BackupScopes
+{
+    None = 0,
+    Jobs = 1,
+    CurrentBackground = 2,
+    RecentBackgrounds = 4,
+    Settings = 8,
+    All = Jobs | CurrentBackground | RecentBackgrounds | Settings
+}
+
+public static class BackupScopeExtensions
+{
+    public static bool Has(this BackupScopes scopes, BackupScopes flag) => (scopes & flag) != 0;
+    /// <summary>存档里只保留合法位，旧版本或手改的数值不能带进新备份。</summary>
+    public static BackupScopes Sanitize(this BackupScopes scopes) => scopes & BackupScopes.All;
+}
+
+/// <summary>
+/// 锁定设置属于软件设置，跨项目共享；只保存密码哈希与 2FA 密钥，不保存明文。
+/// 总开关开启但密码与 2FA 都未配置时不生效，具体判断见 LockService.IsEnforced。
+/// </summary>
+public sealed class LockSettings
+{
+    public bool Enabled { get; set; }
+    public string PasswordHash { get; set; } = "";
+    public string PasswordSalt { get; set; } = "";
+    public string TotpSecret { get; set; } = "";
+    /// <summary>编辑看板前要求验证；默认关闭。</summary>
+    public bool RequireAuthForEditing { get; set; }
+    /// <summary>打开设置前要求验证；默认开启。</summary>
+    public bool RequireAuthForSettings { get; set; } = true;
 }
 
 /// <summary>自动填充设置属于软件设置，跨项目共享；默认全部关闭，升级后不改变原有输入行为。</summary>

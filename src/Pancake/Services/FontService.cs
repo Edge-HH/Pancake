@@ -151,6 +151,9 @@ public static class FontService
         return input;
     }
 
+    /// <summary>字号按整数调节：四舍五入并夹在 8–96，避免出现 20.5 这类没有意义的取值。</summary>
+    private static double NormalizeSize(double size) => Math.Clamp(Math.Round(size, MidpointRounding.AwayFromZero), 8, 96);
+
     public static NumberBox CreateFontSizePicker(RichEditBox editor, Action changed)
     {
         NumberBox input = new()
@@ -171,10 +174,12 @@ public static class FontService
             start = editor.Document.Selection.StartPosition;
             end = editor.Document.Selection.EndPosition;
             float size = editor.Document.Selection.CharacterFormat.Size;
-            if (size is not (>= 8 and <= 96) || Math.Abs(input.Value - size) < .01) return;
+            if (size is not (>= 8 and <= 96)) return;
+            double normalized = NormalizeSize(size);
+            if (Math.Abs(input.Value - normalized) < .01) return;
             // 获得焦点时只同步显示值；不能让 ValueChanged 在焦点迁移过程中抢回编辑器焦点。
             synchronizing = true;
-            try { input.Value = size; }
+            try { input.Value = normalized; }
             finally { synchronizing = false; }
         }
         editor.SelectionChanged += (_, _) => { if (editor.FocusState != FocusState.Unfocused) Remember(); };
@@ -182,13 +187,21 @@ public static class FontService
         input.ValueChanged += (_, args) =>
         {
             if (synchronizing || double.IsNaN(args.NewValue)) return;
+            // 输入或步进得到的小数先收敛成整数，框内显示与文档取值保持一致。
+            double size = NormalizeSize(args.NewValue);
+            if (Math.Abs(input.Value - size) > .01)
+            {
+                synchronizing = true;
+                try { input.Value = size; }
+                finally { synchronizing = false; }
+            }
             // 文档选区无需重新聚焦即可修改；保留 NumberBox 焦点才能连续输入字号。
             editor.Document.Selection.SetRange(start, end);
-            editor.Document.Selection.CharacterFormat.Size = (float)Math.Clamp(args.NewValue, 8, 96);
+            editor.Document.Selection.CharacterFormat.Size = (float)size;
             changed();
         };
 #if PANCAKE_UI_TESTS
-        input.Tag = (Action<double>)(size => input.Value = Math.Clamp(size, 8, 96));
+        input.Tag = (Action<double>)(size => input.Value = NormalizeSize(size));
 #endif
         return input;
     }

@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Pancake.Services;
 
 namespace Pancake;
 
@@ -80,6 +81,13 @@ public partial class App : Application
             _window.Activate();
             return;
         }
+        if (commandLine.Contains("--verify-grid-coverage", StringComparison.OrdinalIgnoreCase))
+        {
+            _window = new MainWindow(false, "verification");
+            _window.ScheduleGridCoverageVerification();
+            _window.Activate();
+            return;
+        }
         if (commandLine.Contains("--verify-ui", StringComparison.OrdinalIgnoreCase))
         {
             _window = new MainWindow(false, "verification");
@@ -102,7 +110,22 @@ public partial class App : Application
             return;
         }
 #endif
+        // 允许多实例关闭时拦下重复启动：转成对已有窗口的一次唤醒后直接退出。
+        // 冒烟与验证模式已在上面提前返回，各自跑隔离副本，不参与互斥。
+        (bool allowMultipleInstances, string secondLaunchAction) = SingleInstanceService.ReadLaunchSettings();
+        SingleInstanceService? instanceGate = null;
+        if (!allowMultipleInstances)
+        {
+            instanceGate = SingleInstanceService.Start();
+            if (!instanceGate.IsFirstInstance)
+            {
+                instanceGate.ForwardToRunningInstance(secondLaunchAction);
+                instanceGate.Dispose();
+                return;
+            }
+        }
         _window = new MainWindow(startFullScreen, initialView);
+        if (instanceGate is not null) _window.AttachSingleInstanceGate(instanceGate);
         _window.Activate();
     }
 }

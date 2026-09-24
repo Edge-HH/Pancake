@@ -222,6 +222,18 @@ public sealed partial class MainWindow
                 await NextLayoutAsync();
                 Check(Math.Abs(editor.Document.GetRange(0, 2).CharacterFormat.Size - 35) < .01,
                     "font size picker applies changes without stealing focus");
+                // 字号按整数调节：半点字号只同步显示整数，输入小数也收敛到整数。
+                editor.Focus(FocusState.Programmatic);
+                editor.Document.Selection.SetRange(0, 2);
+                editor.Document.Selection.CharacterFormat.Size = 10.5f;
+                fontSizePicker.Focus(FocusState.Programmatic);
+                await NextLayoutAsync();
+                Check(Math.Abs(fontSizePicker.Value - 11) < .01,
+                    "font size picker displays half-point text sizes as whole numbers");
+                ((Action<double>)fontSizePicker.Tag)(20.5);
+                await NextLayoutAsync();
+                Check(Math.Abs(fontSizePicker.Value - 21) < .01 && Math.Abs(editor.Document.GetRange(0, 2).CharacterFormat.Size - 21) < .01,
+                    "font size picker adjusts in whole numbers");
                 fontPicker!.Focus(FocusState.Programmatic);
                 await NextLayoutAsync();
                 evidence.Add("font picker selection: " + editor.Document.Selection.StartPosition + ".." + editor.Document.Selection.EndPosition);
@@ -266,7 +278,8 @@ public sealed partial class MainWindow
                 GlobalPenButton.IsChecked = true; await NextLayoutAsync();
                 Check(GlobalInkToolbar.Visibility == Visibility.Visible && !AddSubjectButton.IsEnabled, "global ink mode owns editing input");
                 Check(AddSubjectButton.Visibility == Visibility.Collapsed, "ink mode hides disabled add button instead of drawing a gray rectangle");
-                Check(GlobalInkToolbar.BorderThickness.Left >= 1, "ink toolbar has a visible outline");
+                Check(GlobalInkToolbar.BorderThickness.Left == Math.Clamp(_settings.ToolbarBorderThickness, 0, 20),
+                    "ink toolbar outline follows the border thickness setting");
                 await SaveVisualAsync(RootShell, Path.Combine(output, "editor.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
                 GlobalPenButton.IsChecked = false;
                 CaptureCurrentProject();
@@ -913,7 +926,10 @@ public sealed partial class MainWindow
         check(RichTextIsland.CornerRadius.TopLeft == FloatingToolbar.CornerRadius.TopLeft &&
             Math.Abs(RichTextIsland.Padding.Left - FloatingToolbar.Padding.Left) < .01 && RichTextIsland.Background is not null,
             "rich text island inherits the control window corner, padding and background");
-        check(RichTextIsland.BorderThickness.Left >= 1, "rich text island keeps a visible outline");
+        check(RichTextIsland.BorderThickness.Left == FloatingToolbar.BorderThickness.Left &&
+            RichTextIsland.BorderBrush is SolidColorBrush islandLine && FloatingToolbar.BorderBrush is SolidColorBrush toolbarLine &&
+            islandLine.Color.Equals(toolbarLine.Color),
+            "rich text island keeps the control window outline");
         await SaveVisualAsync(RootShell, Path.Combine(output, "islands-editor.png"), (int)RootShell.ActualWidth, (int)RootShell.ActualHeight);
 
         // 关闭无字模式后按钮名称必须排在图标下方，并保持与控制窗相同的高度。
@@ -1285,6 +1301,14 @@ public sealed partial class MainWindow
         check(Math.Abs(BoardScroller.ZoomFactor - .75) < .01, "infinite board actually zooms");
         var gridLines = GridCanvas.Children.OfType<Microsoft.UI.Xaml.Shapes.Line>().Where(l => l.X1 == l.X2).ToList();
         check(gridLines.Count > 1 && Math.Abs(gridLines[1].X1 - gridLines[0].X1 - 64) < .01, "grid uses configured spacing");
+        // 网格/点阵必须铺满当前可见区域：缩放变小、平移或视口变大后，一开始不在屏幕范围的部分也要有网格。
+        CheckGridCoversViewport("infinite board grid covers the zoomed viewport", check);
+        SetBoardZoom(.5); await NextLayoutAsync();
+        CheckGridCoversViewport("infinite board grid covers the viewport after zooming out", check);
+        SetFullScreen(true); await NextLayoutAsync(); await Task.Delay(400); await NextLayoutAsync();
+        CheckGridCoversViewport("infinite board grid follows viewport growth in fullscreen", check);
+        SetFullScreen(false); await NextLayoutAsync(); await Task.Delay(400); await NextLayoutAsync();
+        SetBoardZoom(1); await NextLayoutAsync();
         _settings.ShowGridWhileEditing = false; _settings.GridStyle = "Dots"; _renderedGridAppearance = string.Empty; ApplyExtendedSettings(); await NextLayoutAsync();
         check(GridCanvas.Children.OfType<Microsoft.UI.Xaml.Shapes.Ellipse>().Any() && !GridCanvas.Children.OfType<Microsoft.UI.Xaml.Shapes.Line>().Any(), "dot grid changes only the rendered appearance");
         _settings.GridStyle = "None"; _renderedGridAppearance = string.Empty; ApplyExtendedSettings(); await NextLayoutAsync();
@@ -1295,6 +1319,10 @@ public sealed partial class MainWindow
         check(GridCanvas.Children.Count == 0, "leaving edit mode restores the configured hidden grid");
         EnterEditing(); _settings.GridStyle = "Grid"; _settings.ShowGridWhileEditing = true; _renderedGridAppearance = string.Empty;
         _settings.InfiniteBoard = false; _settings.GridSize = 48; _renderedGridWidth = 0;
+        await NextLayoutAsync();
+        SetBoardZoom(.5); await NextLayoutAsync();
+        CheckGridCoversViewport("fixed board grid covers the zoomed-out viewport", check);
+        SetBoardZoom(1); await NextLayoutAsync();
         _settings.SharedBackgroundEnabled = true;
         _settings.SharedBackground.ImagePath = Path.Combine(output, "attachment.png");
         _settings.ClockBackground.Glass = true; _settings.ClockBackground.Blur = 35;
@@ -1664,6 +1692,9 @@ public sealed partial class MainWindow
         await NextLayoutAsync();
         var originalTile = FindVisuals<SubjectTileControl>(_appearancePreviews["Tile"]).Single();
         var titleSlider = FindVisuals<Slider>(_settingsPages["AppearanceTile"].Content).Single(slider => Equals(slider.Header, "标题大小"));
+        var bodyFontSlider = FindVisuals<Slider>(_settingsPages["AppearanceTile"].Content).Single(slider => Equals(slider.Header, "正文默认字号"));
+        check(Math.Abs(bodyFontSlider.StepFrequency - 1) < .01 && Math.Abs(bodyFontSlider.SmallChange - 1) < .01,
+            "body font size slider adjusts in whole numbers");
         var originalEditors = FindVisuals<RichEditBox>(_appearancePreviews["Tile"]).ToArray();
         var originalBackground = SharedBackgroundVisual.Children.ToArray();
         var titleTiming = System.Diagnostics.Stopwatch.StartNew();
@@ -1743,13 +1774,14 @@ public sealed partial class MainWindow
         _settings.TileTitleSize = 47; ApplyExtendedSettings(); await NextLayoutAsync();
         check(FindVisuals<TextBox>(_appearancePreviews["Tile"]).Any(text => Math.Abs(text.FontSize - 47) < .01), "tile preview applies title size immediately");
         _settings.TileTitleSize = 29;
-        ShowSettingsPage("AppearanceBackground");
+        // 先保存背景再进入页面，不能在进入后 Apply 设置，否则会掩盖首次加载丢图。
         _settings.SharedBackgroundEnabled = false; _settings.LayoutMode = "Split";
         _settings.ClockBackground.Color = "#123456";
         _settings.ClockBackground.ImagePath = Path.Combine(output, "attachment.png");
         _settings.ClockBackground.Glass = true;
         _settings.ClockBackground.Blur = 35;
         ApplyExtendedSettings(); await NextLayoutAsync();
+        ShowSettingsPage("AppearanceBackground"); await NextLayoutAsync();
         Grid backgroundPreviewScene = _appearancePreviews["Background"];
         check(backgroundPreviewScene.Parent is Viewbox { Stretch: Stretch.Uniform } &&
             Math.Abs(backgroundPreviewScene.Width - PreviewSceneWidth) < .01 &&

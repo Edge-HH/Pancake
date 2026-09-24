@@ -38,7 +38,7 @@ public sealed partial class MainWindow
                 sample.Background = new SolidColorBrush(Microsoft.UI.Colors.Orange);
                 await NextLayoutAsync(); await SaveVisualAsync(sample, second, 320, 180);
                 ExportOverlay.Children.Clear();
-                string imageA = await MediaLibraryStore.ImportAsync(first), imageB = await MediaLibraryStore.ImportAsync(second);
+                string imageA = await MediaLibraryStore.ImportAsync(first, MediaScope.Tile), imageB = await MediaLibraryStore.ImportAsync(second, MediaScope.Tile);
                 string video = Path.Combine(AppContext.BaseDirectory, "media-test.mp4");
                 Check(File.Exists(video), "generated H264 video fixture exists");
                 // RenderTargetBitmap 不包含合成毛玻璃；保留真实窗口供截图对比视频上下半区。
@@ -92,7 +92,7 @@ public sealed partial class MainWindow
                 ShowSettings(); ShowSettingsPage("AppearanceTile"); await NextLayoutAsync();
                 var editor = _settingsPages["AppearanceTile"].Content;
                 RecentImagesView recent = FindVisuals<RecentImagesView>(editor).Single();
-                Check(FindVisuals<Button>(recent).Count() == 2, "background picker shows shared recent image thumbnails");
+                Check(FindVisuals<Button>(recent).Count() == 2, "background picker shows its own surface's recent media thumbnails");
                 InvokeButton(FindVisuals<Button>(recent).Last());
                 await WaitUntil(() => _settings.TileBackground.ImagePath == imageA, "clicking a recent thumbnail applies that image");
                 ToggleSwitch playlist = FindVisuals<ToggleSwitch>(editor).Single(toggle => toggle.Header?.ToString() == "播放队列模式");
@@ -113,7 +113,7 @@ public sealed partial class MainWindow
                     var actual = WallpaperEngineLibrary.ReadVideos(installed).Where(item => Path.GetExtension(item.Path).Equals(".mp4", StringComparison.OrdinalIgnoreCase)).OrderBy(item => new FileInfo(item.Path).Length).FirstOrDefault();
                     if (actual is not null)
                     {
-                        string imported = await MediaLibraryStore.ImportAsync(actual.Path);
+                        string imported = await MediaLibraryStore.ImportAsync(actual.Path, MediaScope.Background);
                         Check(imported != actual.Path && new FileInfo(imported).Length == new FileInfo(actual.Path).Length, "real Wallpaper Engine video imported as an owned copy");
                         ExportOverlay.Visibility = Visibility.Visible; ExportOverlay.Children.Add(background);
                         settings.Playlist = [imported]; background.Apply(settings, BoardTheme.SurfaceBrush);
