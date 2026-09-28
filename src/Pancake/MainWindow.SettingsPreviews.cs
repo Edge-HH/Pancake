@@ -225,7 +225,8 @@ public sealed partial class MainWindow
         string[] kinds = _selectedSettingsPage switch
         {
             "AppearanceTile" => ["Tile"], "AppearanceBackground" => ["Background"],
-            "AppearanceGrid" => ["Grid"], "AppearanceToolbar" => ["Toolbar"], "Layout" => ["Layout"], _ => []
+            "AppearanceGrid" => ["Grid"], "AppearanceToolbar" => ["Toolbar"], "Layout" => ["Layout"],
+            "AppearanceComponents" => ["Components"], "AppearanceClock" => ["Clock"], _ => []
         };
         foreach (string kind in kinds)
         {
@@ -245,6 +246,8 @@ public sealed partial class MainWindow
             string key = kind switch
             {
                 "Toolbar" => $"{BoardTheme.IsLight}|{RootShell.ActualWidth}|{RootShell.ActualHeight}|{_settings.ToolbarPosition}|{_settings.ToolbarScale}|{_settings.ToolbarIconOnly}|{_settings.ToolbarRadius}|{_settings.ToolbarGlass}|{_settings.ToolbarBlur}|{_settings.ToolbarHorizontalInset}|{_settings.ToolbarVerticalInset}|{_settings.ToolbarBorderThickness}|{_settings.ToolbarBorderColor}",
+                "Components" => $"{BoardTheme.IsLight}|{_settings.WidgetGlass}|{_settings.WidgetBlur:0.####}|{_settings.WidgetBackgroundColor}|{_settings.WidgetBackgroundOpacity:0.####}|{_settings.WidgetBackgroundColorCleared}",
+                "Clock" => $"{BoardTheme.IsLight}|{_settings.ClockFontFamily}|{_settings.ClockFontWeight}|{_settings.ClockColor}",
                 // 磁贴示例的主题色与高光色都取自当前色系，主题或色系变化必须重建示例才和真实磁贴一致。
                 "Tile" => $"{BoardTheme.IsLight}|{ColorPalette.IsMacaron}",
                 "Background" => $"{BoardTheme.IsLight}|{_settings.LayoutMode}|{_settings.SharedBackgroundEnabled}|{_settings.SplitRatio:0.####}",
@@ -305,6 +308,12 @@ public sealed partial class MainWindow
                     break;
                 case "Toolbar":
                     scene.Children.Add(PreviewToolbar());
+                    break;
+                case "Components":
+                    BuildComponentsPreview(scene);
+                    break;
+                case "Clock":
+                    BuildClockPreview(scene);
                     break;
                 case "Layout":
                     // 底图沿用作业板区域背景（分屏时跟随跨区背景），预览与看板实际观感一致。
@@ -468,13 +477,6 @@ public sealed partial class MainWindow
 
     private UIElement PreviewClock()
     {
-        TextBlock LiveText(TextBlock source, double size)
-        {
-            TextBlock text = new() { FontSize = size, Foreground = BoardTheme.TextBrush,
-                HorizontalAlignment = HorizontalAlignment.Center, FontWeight = source.FontWeight, FontFamily = source.FontFamily };
-            text.SetBinding(TextBlock.TextProperty, new Binding { Source = source, Path = new PropertyPath("Text"), Mode = BindingMode.OneWay });
-            return text;
-        }
         // 时间区与看板 ClockContentView 同构：秒数右侧留空多少，左侧就补多少，时间数字落在中轴线上。
         StackPanel timeContent = new()
         {
@@ -484,8 +486,8 @@ public sealed partial class MainWindow
         time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        TextBlock timeText = LiveText(MainTimeText, MainTimeText.FontSize);
-        TextBlock seconds = LiveText(SecondsText, 28);
+        TextBlock timeText = BindLiveText(MainTimeText, MainTimeText.FontSize);
+        TextBlock seconds = BindLiveText(SecondsText, 28);
         seconds.Margin = new Thickness(0, 17, 0, 0);
         seconds.VerticalAlignment = VerticalAlignment.Top;
         Border mirror = new();
@@ -493,24 +495,29 @@ public sealed partial class MainWindow
         Grid.SetColumn(mirror, 0); Grid.SetColumn(timeText, 1); Grid.SetColumn(seconds, 2);
         time.Children.Add(mirror); time.Children.Add(timeText); time.Children.Add(seconds);
         timeContent.Children.Add(time);
-        timeContent.Children.Add(LiveText(ClockDateText, 20));
+        TextBlock dateText = BindLiveText(ClockDateText, 20);
+        timeContent.Children.Add(dateText);
+        // 时钟字体、粗细与颜色在“外观 → 时钟”调整；首次构建和缓存命中只走刷新器时都要同步。
+        ApplyClockTextStyles(timeText, seconds, dateText);
+        _buildingPreviewRefreshers?.Add(() => ApplyClockTextStyles(timeText, seconds, dateText));
 
         // 组件栏与看板 ClockComponents 同构：卡片外壳 + 图标，而不是裸文本。
-        Border WidgetCard(string symbol, bool warning, TextBlock source)
+        Border WidgetCard(string symbol, bool warning, TextBlock source, TextBlock? suffix = null, double horizontalPadding = 16)
         {
             StackPanel row = new() { Orientation = Orientation.Horizontal, Spacing = 9 };
-            row.Children.Add(new FluentIcon
-            {
-                Symbol = symbol,
-                Foreground = new SolidColorBrush(BoardTheme.IsLight
-                    ? (warning ? Windows.UI.Color.FromArgb(255, 180, 83, 9) : Windows.UI.Color.FromArgb(255, 21, 128, 61))
-                    : (warning ? Windows.UI.Color.FromArgb(255, 251, 191, 36) : Windows.UI.Color.FromArgb(255, 74, 222, 128)))
-            });
-            row.Children.Add(LiveText(source, 14));
+            row.Children.Add(new FluentIcon { Symbol = symbol, Foreground = new SolidColorBrush(WidgetIconColor(warning)) });
+            // 真机文本定宽（如噪音读数的 30px 数字框）时预览跟随同宽，组件卡不随读数位数呼吸。
+            TextBlock text = BindLiveText(source, 14);
+            if (!double.IsNaN(source.Width)) text.SetBinding(FrameworkElement.WidthProperty,
+                new Binding { Source = source, Path = new PropertyPath("Width"), Mode = BindingMode.OneWay });
+            text.TextAlignment = source.TextAlignment;
+            row.Children.Add(text);
+            // 噪音卡的单位与状态是独立文本：预览同样拆成两段，镜像真机“数字定宽居中 + 状态紧随”的结构。
+            if (suffix is not null) row.Children.Add(BindLiveText(suffix, 14));
             return new Border
             {
-                Padding = new Thickness(16, 10, 16, 10),
-                Background = BoardTheme.SurfaceBrush,
+                Padding = new Thickness(horizontalPadding, 10, horizontalPadding, 10),
+                Background = CreateWidgetBackground(),
                 CornerRadius = new CornerRadius(8),
                 Child = row
             };
@@ -519,8 +526,16 @@ public sealed partial class MainWindow
         {
             Orientation = Orientation.Horizontal, Spacing = 12, HorizontalAlignment = HorizontalAlignment.Center
         };
-        componentBar.Children.Add(WidgetCard("Weather", true, WeatherText));
-        componentBar.Children.Add(WidgetCard("Microphone", false, NoiseText));
+        Border weatherCard = WidgetCard("Weather", true, WeatherText);
+        Border noiseCard = WidgetCard("Microphone", false, NoiseText, NoiseStatusText, 12);
+        componentBar.Children.Add(weatherCard);
+        componentBar.Children.Add(noiseCard);
+        // 组件卡样式在“外观 → 组件”调整；缓存命中只走刷新器时卡片背景也要跟随当前设置。
+        _buildingPreviewRefreshers?.Add(() =>
+        {
+            weatherCard.Background = CreateWidgetBackground();
+            noiseCard.Background = CreateWidgetBackground();
+        });
 
         // 真机把时间和组件放在两个独立 Viewbox 上按停靠比例排布，预览保持同样结构。
         Canvas canvas = new();
@@ -573,6 +588,109 @@ public sealed partial class MainWindow
         root.SizeChanged += (_, _) => Layout();
         Layout();
         return root;
+    }
+
+    /// <summary>
+    /// 组件页预览：底图垫在卡片后方，毛玻璃模糊的正是这部分内容，
+    /// 因此颜色层、透明度和模糊程度的每一步调整都能即时看出效果。
+    /// </summary>
+    private void BuildComponentsPreview(Grid scene)
+    {
+        // 底图与磁贴预览共用一张示例图；浅色模式同样压一层白色提亮。
+        scene.Children.Add(new Image
+        {
+            Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/Settings/tile-preview-background.png")),
+            Stretch = Stretch.UniformToFill
+        });
+        scene.Children.Add(new Border
+        {
+            Name = "ComponentsPreviewLightOverlay",
+            Background = new SolidColorBrush(Microsoft.UI.Colors.White),
+            Opacity = BoardTheme.IsLight ? TilePreviewLightOverlayOpacity : 0,
+            IsHitTestVisible = false
+        });
+        StackPanel bar = new()
+        {
+            Orientation = Orientation.Horizontal, Spacing = 12,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+        };
+        bar.Children.Add(PreviewWidgetCard("Weather", true, "24° 多云"));
+        bar.Children.Add(PreviewWidgetCard("Microphone", false, "42 dB · 安静"));
+        scene.Children.Add(bar);
+    }
+
+    /// <summary>组件卡预览外壳：图标 + 示例文本，背景与真实卡片同样跟随“外观 → 组件”。</summary>
+    private Border PreviewWidgetCard(string symbol, bool warning, string text)
+    {
+        StackPanel row = new() { Orientation = Orientation.Horizontal, Spacing = 9 };
+        row.Children.Add(new FluentIcon { Symbol = symbol, Foreground = new SolidColorBrush(WidgetIconColor(warning)) });
+        row.Children.Add(new TextBlock { Text = text, FontSize = 14, Foreground = BoardTheme.TextBrush });
+        return new Border
+        {
+            Padding = new Thickness(16, 10, 16, 10),
+            Background = CreateWidgetBackground(),
+            CornerRadius = new CornerRadius(8),
+            Child = row
+        };
+    }
+
+    private static Windows.UI.Color WidgetIconColor(bool warning) => BoardTheme.IsLight
+        ? (warning ? Windows.UI.Color.FromArgb(255, 180, 83, 9) : Windows.UI.Color.FromArgb(255, 21, 128, 61))
+        : (warning ? Windows.UI.Color.FromArgb(255, 251, 191, 36) : Windows.UI.Color.FromArgb(255, 74, 222, 128));
+
+    /// <summary>预览文本镜像真机元素：Text 属性单向绑定实时更新，字号在创建时拷贝。</summary>
+    private static TextBlock BindLiveText(TextBlock source, double size)
+    {
+        TextBlock text = new()
+        {
+            FontSize = size, Foreground = BoardTheme.TextBrush,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            FontWeight = source.FontWeight, FontFamily = source.FontFamily
+        };
+        text.SetBinding(TextBlock.TextProperty, new Binding { Source = source, Path = new PropertyPath("Text"), Mode = BindingMode.OneWay });
+        return text;
+    }
+
+    /// <summary>
+    /// 时钟页预览：底图上按真机结构镜像时间块（秒数等宽占位镜像 + 日期），文本实时绑定真机时间，
+    /// 字体、粗细与颜色跟随当前设置，每次调整重建场景即可看到效果。
+    /// </summary>
+    private void BuildClockPreview(Grid scene)
+    {
+        // 底图与磁贴、组件预览共用一张示例图；浅色模式同样压一层白色提亮。
+        scene.Children.Add(new Image
+        {
+            Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/Settings/tile-preview-background.png")),
+            Stretch = Stretch.UniformToFill
+        });
+        scene.Children.Add(new Border
+        {
+            Name = "ClockPreviewLightOverlay",
+            Background = new SolidColorBrush(Microsoft.UI.Colors.White),
+            Opacity = BoardTheme.IsLight ? TilePreviewLightOverlayOpacity : 0,
+            IsHitTestVisible = false
+        });
+        Grid time = new() { ColumnSpacing = 7, HorizontalAlignment = HorizontalAlignment.Center };
+        time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        time.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        TextBlock timeText = BindLiveText(MainTimeText, MainTimeText.FontSize);
+        TextBlock seconds = BindLiveText(SecondsText, 28);
+        seconds.Margin = new Thickness(0, 17, 0, 0);
+        seconds.VerticalAlignment = VerticalAlignment.Top;
+        Border mirror = new();
+        mirror.SetBinding(FrameworkElement.WidthProperty, new Binding { Source = seconds, Path = new PropertyPath("ActualWidth"), Mode = BindingMode.OneWay });
+        Grid.SetColumn(mirror, 0); Grid.SetColumn(timeText, 1); Grid.SetColumn(seconds, 2);
+        time.Children.Add(mirror); time.Children.Add(timeText); time.Children.Add(seconds);
+        TextBlock date = BindLiveText(ClockDateText, 20);
+        StackPanel content = new()
+        {
+            Spacing = 18, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+        };
+        content.Children.Add(time);
+        content.Children.Add(date);
+        ApplyClockTextStyles(timeText, seconds, date);
+        scene.Children.Add(content);
     }
 
     /// <summary>

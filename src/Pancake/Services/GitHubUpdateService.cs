@@ -10,6 +10,9 @@ public sealed record ReleaseAsset(string Name, string Url, string? Digest);
 public sealed record GitHubReleaseUpdate(Version Version, string Tag, string AssetName, string DownloadUrl, string? Digest)
 {
     public IReadOnlyList<ReleaseAsset> Parts { get; init; } = [];
+
+    /// <summary>Release 描述原文（GitHub/Gitee 的 body），用于应用内展示更新日志。</summary>
+    public string? Notes { get; init; }
 }
 
 public sealed class GitHubUpdateService

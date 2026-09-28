@@ -1863,9 +1863,9 @@ public sealed partial class MainWindow
         _settings.PauseNoiseWhenMinimized = true;
         var presenter = (OverlappedPresenter)_appWindow!.Presenter;
         presenter.Minimize(); await Task.Delay(400);
-        check(_noiseSuspended && NoiseText.Text == "监测已暂停", "minimizing the real window suspends noise monitoring");
+        check(_noiseSuspended && NoiseStatusText.Text == "监测已暂停", "minimizing the real window suspends noise monitoring");
         UpdateNoiseDisplay(100); ProcessNoiseAlert(100);
-        check(NoiseText.Text == "监测已暂停", "queued samples cannot overwrite suspended noise state");
+        check(NoiseStatusText.Text == "监测已暂停", "queued samples cannot overwrite suspended noise state");
         presenter.Restore(); await Task.Delay(400);
         check(!_noiseSuspended, "restoring the window clears noise suspension");
         _settings.PauseNoiseWhenMinimized = false;

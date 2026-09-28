@@ -26,6 +26,8 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
     <PackageReference Include="NAudio.Wasapi" Version="2.4.0" />
     <PackageReference Include="NAudio.WinMM" Version="2.4.0" />
+    <!-- 验证器绑定弹窗的 otpauth 二维码；仅用 PngByteQRCode 输出 PNG 字节，无传递依赖。 -->
+    <PackageReference Include="QRCoder" Version="1.7.0" />
   </ItemGroup>
 
   <ItemGroup>

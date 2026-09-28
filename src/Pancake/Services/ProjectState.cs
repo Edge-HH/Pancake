@@ -53,6 +53,17 @@ public sealed class BoardSettingsState
     public string ToolbarBackgroundColor { get; set; } = "";
     public double ToolbarBackgroundOpacity { get; set; } = 0.8;
     public bool ToolbarBackgroundColorCleared { get; set; }
+    // 时钟区组件卡（天气/噪音）的背景样式：默认完全沿用主题底色，保持升级前的观感。
+    public bool WidgetGlass { get; set; }
+    public double WidgetBlur { get; set; } = 20;
+    public string WidgetBackgroundColor { get; set; } = "";
+    public double WidgetBackgroundOpacity { get; set; } = 1;
+    public bool WidgetBackgroundColorCleared { get; set; }
+    // 时钟区文字外观：默认沿用内置字体与主题文字色；粗细只作用于时间数字。
+    // 颜色为空或纯黑/纯白时跟随深浅主题反转（深色显示白色、浅色显示黑色）。
+    public string ClockFontFamily { get; set; } = "";
+    public string ClockFontWeight { get; set; } = "Normal";
+    public string ClockColor { get; set; } = "";
     public bool ToolbarAutoHide { get; set; }
     public double ToolbarAutoHideSeconds { get; set; } = 5;
     public string ToolbarHideAnimation { get; set; } = "Fade";

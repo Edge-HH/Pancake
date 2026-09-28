@@ -288,6 +288,8 @@ public sealed class SubjectTileControl : Grid
     {
         Width = _subject.TileWidth;
         Height = _subject.TileHeight;
+        // 标题换行上限跟随磁贴宽度：测量和真实布局用同一个宽度，自动排列复测才不会低估标题高度。
+        _nameEditor.MaxWidth = Math.Max(240, Width - 150);
     }
 
     public void SetEditing(bool editing)

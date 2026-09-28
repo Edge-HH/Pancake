@@ -85,8 +85,13 @@
                                     <Border x:Name="WeatherWidget" Padding="16,10" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
                                         <StackPanel Orientation="Horizontal" Spacing="9"><icons:FluentIcon Foreground="{ThemeResource BoardWarningBrush}" Symbol="Weather" /><TextBlock x:Name="WeatherText" FontSize="14" Foreground="{ThemeResource BoardTextBrush}" Text="天气未配置" /></StackPanel>
                                     </Border>
-                                    <Border x:Name="NoiseWidget" Padding="16,10" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
-                                        <StackPanel Orientation="Horizontal" Spacing="9"><icons:FluentIcon Foreground="{ThemeResource BoardSuccessBrush}" Symbol="Microphone" /><TextBlock x:Name="NoiseText" FontSize="14" Foreground="{ThemeResource BoardTextBrush}" Text="42 dB · 安静" /></StackPanel>
+                                    <!-- 噪音组件收窄：只有读数数字会变，按最宽三位数“120”定宽并居中；单位与状态是独立文本，两位数与三位数切换时后面的“dB · 状态”保持不动。 -->
+                                    <Border x:Name="NoiseWidget" Padding="12,10" Background="{ThemeResource BoardSurfaceBrush}" CornerRadius="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="9">
+                                            <icons:FluentIcon Foreground="{ThemeResource BoardSuccessBrush}" Symbol="Microphone" />
+                                            <TextBlock x:Name="NoiseText" Width="30" FontSize="14" TextAlignment="Center" Foreground="{ThemeResource BoardTextBrush}" Text="42" />
+                                            <TextBlock x:Name="NoiseStatusText" FontSize="14" Foreground="{ThemeResource BoardTextBrush}" Text="dB · 安静" />
+                                        </StackPanel>
                                     </Border>
                                 </StackPanel>
                             </Viewbox>
@@ -124,6 +129,8 @@
                         <NavigationViewItem Content="主题" Tag="AppearanceTheme"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Color" /></NavigationViewItem.Icon></NavigationViewItem>
                         <NavigationViewItem Content="网格" Tag="AppearanceGrid"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Grid" /></NavigationViewItem.Icon></NavigationViewItem>
                         <NavigationViewItem Content="控制窗" Tag="AppearanceToolbar"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Settings" /></NavigationViewItem.Icon></NavigationViewItem>
+                        <NavigationViewItem Content="组件" Tag="AppearanceComponents"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Components" /></NavigationViewItem.Icon></NavigationViewItem>
+                        <NavigationViewItem Content="时钟" Tag="AppearanceClock"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Clock" /></NavigationViewItem.Icon></NavigationViewItem>
                     </NavigationViewItem.MenuItems>
                 </NavigationViewItem>
                 <NavigationViewItem x:Name="ComponentsNavigationGroup" Content="组件" SelectsOnInvoked="False">
@@ -280,7 +287,10 @@
                             <Grid ColumnSpacing="20">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <TextBlock x:Name="UpdateStatusText" VerticalAlignment="Center" Foreground="{ThemeResource BoardTextSecondaryBrush}" Text="尚未检查" TextWrapping="Wrap" />
-                                <Button Grid.Column="1" Click="CheckUpdateButton_Click" Style="{StaticResource BoardSecondaryButtonStyle}" Content="检查更新" />
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <Button Click="ViewChangelogButton_Click" Style="{StaticResource BoardSecondaryButtonStyle}" Content="更新日志" />
+                                    <Button Click="CheckUpdateButton_Click" Style="{StaticResource BoardSecondaryButtonStyle}" Content="检查更新" />
+                                </StackPanel>
                             </Grid>
                         </StackPanel>
                     </Border>

@@ -428,6 +428,30 @@ Check(lockRoundTrip.Lock.TotpSecret == lockState.TotpSecret && !lockRoundTrip.Lo
     && lockRoundTrip.Lock.RequireAuthForSettings && !lockRoundTrip.Lock.RequireAuthForEditing,
     "锁定设置与两步验证密钥往返持久化");
 
+// 启动参数：精确匹配开关，--view/--project 按前缀取值，未知取值回退默认。
+LaunchArgs emptyArgs = LaunchArgs.Parse([]);
+Check(emptyArgs.Windowed is null && emptyArgs.View == LaunchArgs.ViewDisplay && emptyArgs.Project is null,
+    "无参数时保持默认全屏、看板视图且不指定项目");
+Check(LaunchArgs.Parse(["--windowed"]).Windowed is true, "--windowed 使用普通窗口启动");
+Check(LaunchArgs.Parse(["--fullscreen"]).Windowed is false, "--fullscreen 使用全屏启动");
+Check(LaunchArgs.Parse(["--fullscreen", "--windowed"]).Windowed is true
+    && LaunchArgs.Parse(["--windowed", "--FULLSCREEN"]).Windowed is false,
+    "窗口与全屏同时给出时后面的生效，且大小写不敏感");
+Check(LaunchArgs.Parse(["--WINDOWED"]).Windowed is true, "开关匹配大小写不敏感");
+Check(LaunchArgs.Parse(["--windowedX", "--windowed=false", "--windowed true"]).Windowed is null,
+    "形近开关和带值的 --windowed 不应误命中");
+Check(LaunchArgs.Parse(["--view=editor"]).View == LaunchArgs.ViewEditor, "--view=editor 进入编辑模式");
+Check(LaunchArgs.Parse(["--view=INK"]).View == LaunchArgs.ViewInk, "--view 取值大小写不敏感");
+Check(LaunchArgs.Parse(["--view=settings"]).View == LaunchArgs.ViewSettings, "--view=settings 直接进设置页");
+Check(LaunchArgs.Parse(["--view=editorial", "--view=display"]).View == LaunchArgs.ViewDisplay,
+    "未知的 --view 取值回退看板视图，不再被前缀误命中");
+Check(LaunchArgs.Parse(["--project=数学园地"]).Project == "数学园地", "--project=值 打开指定项目");
+Check(LaunchArgs.Parse(["--Project", "数学园地"]).Project == "数学园地", "--project 与值分开写同样支持");
+Check(LaunchArgs.Parse(["--project="]).Project is null, "空的 --project= 不产生项目参数");
+LaunchArgs combined = LaunchArgs.Parse(["--windowed", "--view=ink", "--project=D:\\课表\\数学.pch"]);
+Check(combined.Windowed is true && combined.View == LaunchArgs.ViewInk && combined.Project == "D:\\课表\\数学.pch",
+    "多个启动参数可以组合使用");
+
 string secret = LockService.CreateTotpSecret();
 Check(secret.Length >= 32 && secret.All(c => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".Contains(c)), "密钥使用 Base32 标准字母表");
 Check(LockService.Base32Decode(secret).Length == 20, "160 位密钥解码为 20 字节");

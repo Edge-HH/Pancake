@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 
 namespace Pancake.Services;
 
-public sealed record ReleaseSnapshot(Version Version, string Tag, GitHubReleaseUpdate? Update);
+public sealed record ReleaseSnapshot(Version Version, string Tag, string? Notes, GitHubReleaseUpdate? Update);
 
 /// <summary>统一两个更新源的版本、资产和分卷语义；安装仍由 PortableUpdateService 负责。</summary>
 public sealed class ReleaseUpdateService
@@ -37,6 +37,8 @@ public sealed class ReleaseUpdateService
         string tag = release.GetProperty("tag_name").GetString() ?? "";
         if (!Version.TryParse(tag.TrimStart('v', 'V'), out Version? version)) return null;
         if (release.TryGetProperty("prerelease", out var pre) && pre.ValueKind == JsonValueKind.True) return null;
+        // body 是 Release 的更新说明（Markdown 原文），应用内只读展示。
+        string? notes = release.TryGetProperty("body", out var body) && body.ValueKind == JsonValueKind.String ? body.GetString() : null;
         List<ReleaseAsset> assets = [];
         foreach (var item in release.GetProperty("assets").EnumerateArray())
         {
@@ -52,7 +54,7 @@ public sealed class ReleaseUpdateService
                 : a.Name.EndsWith(".zip.001", StringComparison.OrdinalIgnoreCase) ? 3
                 : a.Name.EndsWith(".7z", StringComparison.OrdinalIgnoreCase) ? 2
                 : a.Name.EndsWith(".7z.001", StringComparison.OrdinalIgnoreCase) ? 1 : 0).FirstOrDefault();
-        if (first is null) return new(version, tag, null);
+        if (first is null) return new(version, tag, notes, null);
         List<ReleaseAsset> volumes = [first];
         if (Regex.IsMatch(first.Name, @"\.(zip|7z)\.001$", RegexOptions.IgnoreCase))
         {
@@ -71,7 +73,7 @@ public sealed class ReleaseUpdateService
                 if (int.Parse(split[i].Name[(prefix.Length + 1)..]) != i + 1) throw new InvalidDataException("Release ZIP 分卷缺失。");
             if (split.Count > 0) volumes = split.Concat([first]).ToList();
         }
-        return new(version, tag, new(version, tag, first.Name, first.Url, first.Digest) { Parts = volumes });
+        return new(version, tag, notes, new(version, tag, first.Name, first.Url, first.Digest) { Parts = volumes, Notes = notes });
     }
 
     public async Task<string> DownloadAsync(GitHubReleaseUpdate update, string dataDirectory, CancellationToken token = default)

@@ -39,6 +39,7 @@ public sealed partial class MainWindow : Window
     private BoardSettingsState _settings = new();
     private readonly bool _startFullScreen;
     private readonly string _initialView;
+    private readonly string? _launchProject;
     private AppWindow? _appWindow;
     private SingleInstanceService? _instanceGate;
     private bool _isEditing;
@@ -67,10 +68,11 @@ public sealed partial class MainWindow : Window
 
     public MainViewModel ViewModel { get; } = new();
 
-    public MainWindow(bool startFullScreen = true, string initialView = "display")
+    public MainWindow(bool startFullScreen = true, string initialView = "display", string? projectArgument = null)
     {
         _startFullScreen = startFullScreen;
         _initialView = initialView;
+        _launchProject = string.IsNullOrWhiteSpace(projectArgument) ? null : projectArgument.Trim();
         InitializeComponent();
         // 补全设置跟随当前设置对象，切换项目或回滚时无需重新创建服务。
         _autofill = new AutofillService(() => _settings.Autofill);
@@ -124,7 +126,8 @@ public sealed partial class MainWindow : Window
             _isLoaded = true;
             ApplyActualTheme();
             ApplyExtendedSettings();
-            ShowInitialView();
+            if (_launchProject is null) ShowInitialView();
+            else _ = ApplyLaunchStateAsync();
             if (_initialView != "verification")
             {
                 StartNoiseMonitoring();
@@ -174,7 +177,9 @@ public sealed partial class MainWindow : Window
         _noiseMonitor.CaptureFailed += (_, message) => DispatcherQueue.TryEnqueue(() =>
         {
             if (!_isLoaded || _noiseSuspended || ShouldSuspendNoise) return;
-            NoiseText.Text = "麦克风不可用";
+            // 异常状态整段替换：数字框收起，状态文本承担全部提示，组件恢复紧贴内容。
+            NoiseText.Visibility = Visibility.Collapsed;
+            NoiseStatusText.Text = "麦克风不可用";
             MicrophoneStatusInfoBar.Severity = InfoBarSeverity.Error;
             MicrophoneStatusInfoBar.Message = $"麦克风启动失败：{message}";
         });
@@ -188,11 +193,11 @@ public sealed partial class MainWindow : Window
         _appWindow?.Resize(new SizeInt32(1440, 900));
     }
 
-    /// <summary>接管窗口启动闸门：再次启动时按“已打开时再次启动的行为”唤醒本窗口。</summary>
+    /// <summary>接管窗口启动闸门：再次启动时按“已打开时再次启动的行为”唤醒本窗口，带参数时按参数行动。</summary>
     public void AttachSingleInstanceGate(SingleInstanceService gate)
     {
         _instanceGate = gate;
-        gate.SecondLaunchRequested += action => DispatcherQueue.TryEnqueue(() => HandleSecondLaunch(action));
+        gate.SecondLaunchRequested += request => DispatcherQueue.TryEnqueue(() => _ = HandleSecondLaunchAsync(request));
         Closed += (_, _) => gate.Dispose();
     }
 
@@ -205,12 +210,24 @@ public sealed partial class MainWindow : Window
         else gate.Dispose();
     }
 
-    /// <summary>再次启动的唤醒动作：移至前台，或全屏并移至前台；“不执行任何操作”根本不发信号。</summary>
-    private void HandleSecondLaunch(string action)
+    /// <summary>
+    /// 再次启动的唤醒动作：移至前台，或全屏并移至前台；“不执行任何操作”根本不发信号。
+    /// 转发参数存在时按参数行动：切换全屏/窗口、打开指定项目，再应用 --view。
+    /// </summary>
+    private async Task HandleSecondLaunchAsync(SecondLaunchRequest request)
     {
-        if (action == SingleInstanceService.NoneAction) return;
+        if (request.Arguments is not { } arguments)
+        {
+            if (request.Action == SingleInstanceService.NoneAction) return;
+            SingleInstanceService.BringToForeground(WinRT.Interop.WindowNative.GetWindowHandle(this));
+            if (request.Action == SingleInstanceService.FullScreenAction) SetFullScreen(true);
+            return;
+        }
         SingleInstanceService.BringToForeground(WinRT.Interop.WindowNative.GetWindowHandle(this));
-        if (action == SingleInstanceService.FullScreenAction) SetFullScreen(true);
+        if (arguments.Windowed is true) SetFullScreen(false);
+        else if (arguments.Windowed is false) SetFullScreen(true);
+        if (arguments.Project is not null) await ApplyLaunchProjectAsync(arguments.Project);
+        if (arguments.HasViewOverride) ApplyViewArgument(arguments.View);
     }
 
     private void UpdateClock()
@@ -230,18 +247,68 @@ public sealed partial class MainWindow : Window
         DayOfWeek.Thursday => "四", DayOfWeek.Friday => "五", DayOfWeek.Saturday => "六", _ => "日"
     };
 
-    private void ShowInitialView()
+    private void ShowInitialView() => ApplyViewArgument(_initialView);
+
+    /// <summary>应用 --view 参数：settings 直接进设置页（过验证入口），editor/ink 进编辑模式。</summary>
+    private void ApplyViewArgument(string view)
     {
-        if (_initialView == "settings")
+        if (view == LaunchArgs.ViewSettings)
         {
             // 启动参数直接进设置页同样要过验证入口。
             _ = TryShowSettingsAsync();
             return;
         }
         ShowBoard();
-        if (_initialView is "editor" or "ink") EnterEditing();
-        if (_initialView == "ink") GlobalPenButton.IsChecked = true;
+        if (view is LaunchArgs.ViewEditor or LaunchArgs.ViewInk) EnterEditing();
+        if (view == LaunchArgs.ViewInk) GlobalPenButton.IsChecked = true;
     }
+
+    /// <summary>启动参数带 --project 时先打开项目再应用视图，保证编辑模式落在目标项目上。</summary>
+    private async Task ApplyLaunchStateAsync()
+    {
+        if (_launchProject is not null) await ApplyLaunchProjectAsync(_launchProject);
+        ShowInitialView();
+    }
+
+    /// <summary>
+    /// 启动参数 --project：按名称（精确，其次前缀）打开已有项目；给出的是存在的 .pch 路径时先导入再打开。
+    /// </summary>
+    private async Task ApplyLaunchProjectAsync(string reference)
+    {
+        await RunProjectAction(async () =>
+        {
+            ProjectDocument? target = FindProjectByReference(reference);
+            if (target is null && File.Exists(reference))
+            {
+                string path = System.IO.Path.GetFullPath(reference);
+                if (!System.IO.Path.GetExtension(path).Equals(".pch", StringComparison.OrdinalIgnoreCase))
+                {
+                    await ShowMessageAsync("无法打开项目", "仅支持打开 .pch 作业文件。", "知道了");
+                    return;
+                }
+                target = _library.Projects.FirstOrDefault(p => string.Equals(p.LinkedFile, path, StringComparison.OrdinalIgnoreCase));
+                if (target is null)
+                {
+                    target = new PchPackageService(_projectStore).Import(path);
+                    _library.Projects.Add(target);
+                }
+            }
+            if (target is null)
+            {
+                await ShowMessageAsync("未找到项目", $"没有找到与“{reference}”匹配的项目或 .pch 文件。", "知道了");
+                return;
+            }
+            if (CurrentProject?.Id == target.Id) return;
+            if (_isEditing) FinishEditing();
+            PersistProjects();
+            await ActivateProjectAsync(target);
+        });
+    }
+
+    private ProjectDocument? FindProjectByReference(string reference) =>
+        _library.Projects.FirstOrDefault(p => string.Equals(p.Name, reference, StringComparison.Ordinal))
+        ?? _library.Projects.FirstOrDefault(p => string.Equals(p.Name, reference, StringComparison.OrdinalIgnoreCase))
+        ?? _library.Projects.FirstOrDefault(p => p.Name.StartsWith(reference, StringComparison.OrdinalIgnoreCase));
 
     private void ShowBoard()
     {
@@ -483,43 +550,67 @@ public sealed partial class MainWindow : Window
                 ? fitted.Select(s => (Math.Ceiling(s.Item1 / grid) * grid, Math.Ceiling(s.Item2 / grid) * grid)).ToList()
                 : fitted;
         }
-        List<LayoutRect>? placements;
-        if (_settings.AutoLayoutResize)
+        List<LayoutRect> ArrangeOnce(out bool skipRefit)
         {
+            if (!_settings.AutoLayoutResize)
+            {
+                // 只挪位置不改尺寸，内容不受影响，无需复测。
+                skipRefit = true;
+                return TryArrange(ViewModel.Subjects.Select(subject => (subject.TileWidth, subject.TileHeight)).ToList(), width, height)
+                    ?? throw new InvalidOperationException("当前作业板空间不足，无法在不低于最小磁贴尺寸的情况下自动排列。");
+            }
             // 先横排满一行再换行：从最多列开始试，必要时收窄磁贴让文字换行；放不下才减少列数。
             int maxColumns = Math.Min(tiles.Count,
                 Math.Max(1, (int)Math.Floor((width + gap) / (SubjectTileControl.MinimumTileWidth + gap))));
-            placements = null;
             List<(double Width, double Height)> content = [];
-            for (int columns = maxColumns; columns >= 1 && placements is null; columns--)
+            List<LayoutRect>? result = null;
+            for (int columns = maxColumns; columns >= 1 && result is null; columns--)
             {
                 double cap = columns <= 1 ? width : (width - gap * (columns - 1)) / columns;
                 content = tiles.Select(tile => tile.MeasureContentSize(cap)).ToList();
                 var sizes = AlignAndSnap(content);
                 double rowWidth = _settings.InfiniteBoard ? Math.Max(width, sizes.Max(size => size.Item1)) : width;
                 double rowHeight = _settings.InfiniteBoard ? Math.Max(height, sizes.Sum(size => size.Item2 + gap + grid)) : height;
-                placements = TryArrange(sizes, rowWidth, rowHeight);
+                result = TryArrange(sizes, rowWidth, rowHeight);
             }
-            if (placements is null)
+            skipRefit = result is null;
+            if (result is null)
             {
                 // 内容尺寸仍放不下时等比缩小，保留旧版“总能排好”的行为；磁贴内文字可滚动，不会因此丢失。
-                for (double scale = .9; scale >= .4 && placements is null; scale -= .1)
+                for (double scale = .9; scale >= .4 && result is null; scale -= .1)
                 {
-                    var scaled = content.Select(size => (Math.Max(SubjectTileControl.MinimumTileWidth, size.Width * scale),
+                    var shrunk = content.Select(size => (Math.Max(SubjectTileControl.MinimumTileWidth, size.Width * scale),
                         Math.Max(SubjectTileControl.MinimumTileHeight, size.Height * scale))).ToList();
-                    placements = TryArrange(scaled, width, height);
+                    result = TryArrange(shrunk, width, height);
                 }
             }
+            return result ?? throw new InvalidOperationException("当前作业板空间不足，无法在不低于最小磁贴尺寸的情况下自动排列。");
         }
-        else placements = TryArrange(ViewModel.Subjects.Select(subject => (subject.TileWidth, subject.TileHeight)).ToList(), width, height);
-        if (placements is null)
-            throw new InvalidOperationException("当前作业板空间不足，无法在不低于最小磁贴尺寸的情况下自动排列。");
-        for (int index = 0; index < placements.Count; index++)
+        void Apply(List<LayoutRect> values)
         {
-            var subject = ViewModel.Subjects[index];
-            var placement = placements[index];
-            subject.X = placement.X; subject.Y = placement.Y;
-            subject.TileWidth = placement.Width; subject.TileHeight = placement.Height;
+            for (int index = 0; index < values.Count; index++)
+            {
+                var subject = ViewModel.Subjects[index];
+                subject.X = values[index].X; subject.Y = values[index].Y;
+                subject.TileWidth = values[index].Width; subject.TileHeight = values[index].Height;
+                // 先套用到现有磁贴上，让下面的强制布局把富文本换行刷新到目标宽度。
+                tiles[index].ApplyModelLayout();
+            }
+        }
+        // 富文本的换行高度要等一次真实布局才刷新：单次测量拿到的是旧宽度下的行数，磁贴一收窄，底部就被裁掉，
+        // 得再点一次自动排列才恢复。这里套用后立即强制布局并复测高度，不够高就带着真实高度重排，单次点击内收敛。
+        List<LayoutRect> placements = ArrangeOnce(out bool skipRefit);
+        Apply(placements);
+        for (int attempt = 0; !skipRefit && attempt < 3; attempt++)
+        {
+            BoardCanvas.UpdateLayout();
+            bool fits = true;
+            for (int index = 0; index < placements.Count && fits; index++)
+                fits = tiles[index].MeasureContentSize(placements[index].Width).Height <= placements[index].Height + .5;
+            if (fits) break;
+            try { placements = ArrangeOnce(out skipRefit); }
+            catch (InvalidOperationException) { break; } // 复测后的真实高度可能排不进同一块画布，保留上一次能完整排下的结果。
+            Apply(placements);
         }
         BuildTiles();
         ScheduleSave();
@@ -937,7 +1028,10 @@ public sealed partial class MainWindow : Window
         if (!_isLoaded || _noiseSuspended || ShouldSuspendNoise) return;
         bool noisy = level >= _settings.NoiseThresholdDb;
         string state = noisy ? "吵闹" : level < Math.Min(45, _settings.NoiseThresholdDb) ? "安静" : "适中";
-        NoiseText.Text = $"{level:0} dB · {state}";
+        // 正常读数只有数字在变：数字框定宽居中，单位与状态是独立文本，状态固定两字，宽度不变。
+        NoiseText.Visibility = Visibility.Visible;
+        NoiseText.Text = $"{level:0}";
+        NoiseStatusText.Text = $"dB · {state}";
         MicrophoneStatusInfoBar.Severity = noisy ? InfoBarSeverity.Warning : InfoBarSeverity.Success;
         MicrophoneStatusInfoBar.Message = $"麦克风工作正常 · {level:0.0} dB";
     }
@@ -1054,6 +1148,66 @@ public sealed partial class MainWindow : Window
 
     private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e) => await CheckForUpdatesAsync(true);
 
+    private async void ViewChangelogButton_Click(object sender, RoutedEventArgs e) => await ShowChangelogAsync();
+
+    /// <summary>更新日志：读取当前更新源最新 Release 的说明文本，只读展示、可选中复制。</summary>
+    private async Task ShowChangelogAsync()
+    {
+        ReleaseSnapshot? latest;
+        try { latest = await _updateService.GetLatestAsync(_settings.UpdateSource); }
+        catch (Exception exception)
+        {
+            await ShowMessageAsync("无法获取更新日志", exception.Message, "知道了");
+            return;
+        }
+        if (_dialogOpen) return;
+        _dialogOpen = true;
+        try
+        {
+            ScrollViewer scroll = new() { MaxHeight = 420, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            scroll.Content = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(latest?.Notes) ? "最新发布没有填写更新说明。" : latest!.Notes,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true
+            };
+            ContentDialog dialog = new()
+            {
+                XamlRoot = RootShell.XamlRoot,
+                Title = latest is null ? "更新日志（当前更新源没有发布）" : $"更新日志 · {latest.Tag}",
+                Content = scroll, CloseButtonText = "关闭"
+            };
+            await dialog.ShowAsync();
+        }
+        finally { _dialogOpen = false; }
+    }
+
+    /// <summary>发现新版本的确认弹窗：附上 Release 更新说明，长文本在弹窗内滚动。</summary>
+    private async Task<ContentDialogResult> ShowUpdateConfirmAsync(string tag, string prompt, string? notes)
+    {
+        StackPanel content = new() { Spacing = 12, MinWidth = 320 };
+        content.Children.Add(new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap });
+        if (!string.IsNullOrWhiteSpace(notes))
+        {
+            content.Children.Add(new TextBlock { Text = $"{tag} 更新内容", FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, FontSize = 13 });
+            ScrollViewer scroll = new() { MaxHeight = 260, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+            scroll.Content = new TextBlock { Text = notes, FontSize = 12, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
+            content.Children.Add(scroll);
+        }
+        ContentDialog dialog = new()
+        {
+            XamlRoot = RootShell.XamlRoot, Title = "发现新版本", Content = content,
+            PrimaryButtonText = "立即更新", CloseButtonText = "稍后",
+            // 默认按钮保持“稍后”：启动时自动检查也会弹出，误按回车不应直接重启更新。
+            DefaultButton = ContentDialogButton.Close
+        };
+        // WinUI 同一时间只能显示一个 ContentDialog；重复触发按“取消”处理，避免异步点击直接崩溃。
+        if (_dialogOpen) return ContentDialogResult.None;
+        _dialogOpen = true;
+        try { return await dialog.ShowAsync(); }
+        finally { _dialogOpen = false; }
+    }
+
     private async Task CheckForUpdatesAsync(bool interactive)
     {
         if (_checkingForUpdates) return;
@@ -1077,7 +1231,7 @@ public sealed partial class MainWindow : Window
             string prompt = portable
                 ? $"已下载 {update.Tag} 便携版。现在保存项目并重启更新吗？程序将自动解压、覆盖旧版本并重新启动，项目和设置会保留。"
                 : $"已将 {update.Tag} 下载到软件目录。现在启动安装程序吗？";
-            if (await ShowConfirmAsync("发现新版本", prompt) == ContentDialogResult.Primary)
+            if (await ShowUpdateConfirmAsync(update.Tag, prompt, update.Notes) == ContentDialogResult.Primary)
             {
                 if (portable)
                 {

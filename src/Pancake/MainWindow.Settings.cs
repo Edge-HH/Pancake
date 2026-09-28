@@ -145,6 +145,8 @@ public sealed partial class MainWindow
         RegisterSettingsPage("AppearanceTheme", AppearanceSettingsPanel, ThemeSettingsCard, "主题", "调整界面主题和看板色系。");
         RegisterSettingsPage("AppearanceGrid", AppearanceSettingsPanel, grid, "网格", "设置网格的显示样式，不改变吸附逻辑。");
         RegisterSettingsPage("AppearanceToolbar", AppearanceSettingsPanel, ToolbarSettings(), "控制窗", "调整控制窗的显示、位置和外观。");
+        RegisterSettingsPage("AppearanceComponents", AppearanceSettingsPanel, ComponentLookSettings(), "组件", "调整天气与噪音组件卡的背景和毛玻璃效果。");
+        RegisterSettingsPage("AppearanceClock", AppearanceSettingsPanel, ClockLookSettings(), "时钟", "调整时钟的字体、粗细与颜色。");
         ComponentSettingsPanel.Children.Clear();
         ((StackPanel)NoiseSettingsCard.Child).Children.Insert(2,
             Toggle("最小化时暂停监测", _settings.PauseNoiseWhenMinimized, value =>
@@ -1120,6 +1122,140 @@ public sealed partial class MainWindow
         _settings.ToolbarBackgroundColor, _settings.ToolbarBackgroundOpacity,
         _settings.ToolbarBackgroundColorCleared, _settings.ToolbarGlass, _settings.ToolbarBlur);
 
+    /// <summary>外观 → 组件：时钟区天气/噪音组件卡共用背景颜色、透明度与毛玻璃设置。</summary>
+    private StackPanel ComponentLookSettings()
+    {
+        StackPanel panel = SettingsStack();
+        panel.Children.Add(CreateAppearancePreview("Components"));
+        panel.Children.Add(SurfaceColorEditor(_settings.WidgetBackgroundColor, _settings.WidgetBackgroundOpacity,
+            () => _settings.WidgetBackgroundColorCleared,
+            (value, cleared) => { _settings.WidgetBackgroundColor = value; _settings.WidgetBackgroundColorCleared = cleared; },
+            value => _settings.WidgetBackgroundOpacity = value));
+        var glass = Toggle("毛玻璃效果", _settings.WidgetGlass, value => _settings.WidgetGlass = value);
+        var blur = Range("模糊程度", 0, 100, _settings.WidgetBlur, value => _settings.WidgetBlur = value, QueueSurfaceRefresh);
+        panel.Children.Add(glass); panel.Children.Add(blur);
+        _refreshSettingAvailability.Add(() => blur.IsEnabled = _settings.WidgetGlass);
+        // 颜色层的通用说明由 SurfaceColorEditor 提供；这里只补充毛玻璃和不透明颜色的关系。
+        panel.Children.Add(Note("天气和噪音组件卡共用这套背景，默认沿用主题底色。毛玻璃的模糊透过颜色层显示：颜色层完全不透明时只能看到底色，想让模糊透出来需要适当调高透明度。"));
+        return panel;
+    }
+
+    /// <summary>组件卡背景与控制窗同一套合成规则；两个卡片各自持有画笔实例。</summary>
+    private Brush CreateWidgetBackground() => SurfaceBackground.Create(
+        _settings.WidgetBackgroundColor, _settings.WidgetBackgroundOpacity,
+        _settings.WidgetBackgroundColorCleared, _settings.WidgetGlass, _settings.WidgetBlur);
+
+    private void ApplyWidgetBackground()
+    {
+        WeatherWidget.Background = CreateWidgetBackground();
+        NoiseWidget.Background = CreateWidgetBackground();
+    }
+
+    /// <summary>外观 → 时钟：时钟块的字体、时间数字粗细与文字颜色。</summary>
+    private StackPanel ClockLookSettings()
+    {
+        StackPanel panel = SettingsStack();
+        panel.Children.Add(CreateAppearancePreview("Clock"));
+        panel.Children.Add(ClockFontPicker());
+        panel.Children.Add(Choice("时钟粗细", ["细体", "常规", "中等", "粗体"], ["Light", "Normal", "Medium", "Bold"],
+            _settings.ClockFontWeight, value => _settings.ClockFontWeight = value));
+        ColorPicker picker = new()
+        {
+            IsAlphaEnabled = false, IsHexInputVisible = true,
+            Color = GridAppearance.ParseColor(_settings.ClockColor, BoardTheme.TextBrush.Color)
+        };
+        // 打开选色器时按当前主题刷新显示：跟随主题状态下看到的就是时钟实际使用的颜色。
+        Flyout flyout = new() { Content = picker };
+        flyout.Opening += (_, _) => picker.Color = GridAppearance.ParseColor(_settings.ClockColor, BoardTheme.TextBrush.Color);
+        picker.ColorChanged += (_, args) =>
+        {
+            // 纯黑和纯白视为“跟随主题”：深色模式显示白色、浅色模式显示黑色。
+            _settings.ClockColor = IsDefaultClockColor(args.NewColor) ? "" : GridAppearance.FormatColor(args.NewColor);
+            SettingChanged();
+        };
+        StackPanel colorRow = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
+        colorRow.Children.Add(new Button { Content = "时钟颜色", Flyout = flyout });
+        Button resetColor = new() { Content = "恢复主题颜色" };
+        resetColor.Click += (_, _) => { _settings.ClockColor = ""; SettingChanged(); };
+        colorRow.Children.Add(resetColor);
+        panel.Children.Add(colorRow);
+        panel.Children.Add(Note("字体作用于时间、秒数和日期；粗细只作用于时间数字。黑色和白色会跟随深浅色模式自动反转（深色模式显示白色，浅色模式显示黑色），其他颜色固定不变。"));
+        return panel;
+    }
+
+    /// <summary>时钟字体选择：默认内置 HarmonyOS Sans SC，也可以挑选系统已安装字体。</summary>
+    private FrameworkElement ClockFontPicker()
+    {
+        AutoSuggestBox input = new()
+        {
+            Header = "时钟字体",
+            Text = FontService.NormalizeFamilyName(_settings.ClockFontFamily),
+            ItemsSource = FontService.AvailableFamilies,
+            MaxSuggestionListHeight = 300,
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        input.TextChanged += (_, args) =>
+        {
+            if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+                input.ItemsSource = FontService.AvailableFamilies
+                    .Where(font => font.Contains(input.Text, StringComparison.CurrentCultureIgnoreCase)).Take(80).ToArray();
+        };
+        void Apply(string? family)
+        {
+            string normalized = FontService.NormalizeFamilyName(family);
+            input.Text = normalized;
+            if (_settings.ClockFontFamily == normalized) return;
+            _settings.ClockFontFamily = normalized;
+            SettingChanged();
+        }
+        input.QuerySubmitted += (_, args) => Apply(args.ChosenSuggestion as string ?? args.QueryText);
+        input.SuggestionChosen += (_, args) => Apply(args.SelectedItem as string);
+        return input;
+    }
+
+    /// <summary>时钟文字颜色：空值或纯黑/纯白跟随主题文字色，其他颜色固定显示。</summary>
+    private Brush ClockTextBrush() => string.IsNullOrWhiteSpace(_settings.ClockColor)
+        ? BoardTheme.TextBrush
+        : new SolidColorBrush(GridAppearance.ParseColor(_settings.ClockColor, BoardTheme.TextBrush.Color));
+
+    private static bool IsDefaultClockColor(Windows.UI.Color color) =>
+        color is { R: 255, G: 255, B: 255 } or { R: 0, G: 0, B: 0 };
+
+    /// <summary>
+    /// 时钟字体：选择系统字体时整块时钟用同一字体；沿用内置字体时，秒数和日期保持常规字重文件，
+    /// 时间数字按粗细引用对应字重文件（内置字体的每个字重是独立 TTF，只改 FontWeight 匹配不到）。
+    /// </summary>
+    private FontFamily ClockTextFont(bool timeDigits)
+    {
+        string family = _settings.ClockFontFamily;
+        if (!string.IsNullOrWhiteSpace(family) && family != FontService.FamilyName) return new FontFamily(family);
+        return timeDigits ? FontService.BundledFamilyForWeight(_settings.ClockFontWeight) : FontService.DefaultFamily;
+    }
+
+    private static Windows.UI.Text.FontWeight ClockFontWeightFor(string value) => value switch
+    {
+        "Normal" => Microsoft.UI.Text.FontWeights.Normal,
+        "Medium" => Microsoft.UI.Text.FontWeights.Medium,
+        "Bold" => Microsoft.UI.Text.FontWeights.Bold,
+        _ => Microsoft.UI.Text.FontWeights.Light
+    };
+
+    /// <summary>时钟文本样式：字体作用于整块时钟，粗细只作用于时间数字，颜色按当前设置解析。</summary>
+    private void ApplyClockTextStyles(TextBlock time, TextBlock seconds, TextBlock date)
+    {
+        Brush color = ClockTextBrush();
+        time.FontFamily = ClockTextFont(timeDigits: true);
+        time.FontWeight = ClockFontWeightFor(_settings.ClockFontWeight);
+        time.Foreground = color;
+        FontFamily body = ClockTextFont(timeDigits: false);
+        seconds.FontFamily = body;
+        seconds.Foreground = color;
+        date.FontFamily = body;
+        date.Foreground = color;
+    }
+
+    private void ApplyClockAppearance() => ApplyClockTextStyles(MainTimeText, SecondsText, ClockDateText);
+
     /// <summary>控制窗边框：设置为空时跟随主题线条色，指定颜色后不再随深浅主题变化。</summary>
     private static Brush CreateToolbarBorder(string color) =>
         string.IsNullOrEmpty(color) ? BoardTheme.LineBrush : new SolidColorBrush(GridAppearance.ParseColor(color, BoardTheme.LineColorFor(BoardTheme.IsLight)));
@@ -1160,6 +1296,7 @@ public sealed partial class MainWindow
                 FloatingToolbar.Background = CreateToolbarBackground();
                 GlobalInkToolbar.Background = CreateToolbarBackground();
             }
+            ApplyWidgetBackground();
             RefreshAppearancePreviews();
             ScheduleSave();
         });
@@ -1195,7 +1332,7 @@ public sealed partial class MainWindow
         {
             _wasInfiniteBoard = true;
         }
-        UpdateBoardBounds(); ApplyToolbarSettings();
+        UpdateBoardBounds(); ApplyToolbarSettings(); ApplyWidgetBackground(); ApplyClockAppearance();
         RecordToolbarActivity(false);
         RefreshAppearancePreviews();
         if (!_settings.InfiniteBoard)

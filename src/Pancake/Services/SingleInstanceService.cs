@@ -5,6 +5,9 @@ using System.Text.Json;
 
 namespace Pancake.Services;
 
+/// <summary>再次启动转发的完整内容：行为代码 + 这次启动携带的命令行参数（无参数时为 null）。</summary>
+public sealed record SecondLaunchRequest(string Action, LaunchArgs? Arguments);
+
 /// <summary>
 /// 窗口启动闸门：“允许多实例”关闭后，同一安装目录只允许同时打开一个软件窗口；
 /// 再次启动按“已打开时再次启动的行为”唤醒已有窗口（移至前台 / 全屏 / 不执行任何操作）后退出。
@@ -27,8 +30,8 @@ public sealed class SingleInstanceService : IDisposable
     /// <summary>true 表示本次启动认领了闸门（第一个窗口）；false 表示同目录已有窗口在运行。</summary>
     public bool IsFirstInstance => _owned;
 
-    /// <summary>已有窗口收到再次启动时触发，参数是行为代码（Foreground / FullScreen）；在监听线程上触发。</summary>
-    public event Action<string>? SecondLaunchRequested;
+    /// <summary>已有窗口收到再次启动时触发；在监听线程上触发。</summary>
+    public event Action<SecondLaunchRequest>? SecondLaunchRequested;
 
     private SingleInstanceService(Mutex mutex, EventWaitHandle foregroundSignal, EventWaitHandle fullScreenSignal, EventWaitHandle quitSignal, bool owned)
     {
@@ -57,11 +60,65 @@ public sealed class SingleInstanceService : IDisposable
         return new SingleInstanceService(mutex, foregroundSignal, fullScreenSignal, quitSignal, createdNew);
     }
 
-    /// <summary>把这次启动转成一次唤醒，交给已有窗口执行；“不执行任何操作”不发任何信号。</summary>
-    public void ForwardToRunningInstance(string action)
+    /// <summary>
+    /// 把这次启动转成一次唤醒，交给已有窗口执行；“不执行任何操作”不发任何信号。
+    /// 带显式参数（--project、--view、--windowed/--fullscreen）时无视行为设置，
+    /// 先把参数写入数据目录的约定文件再发前台信号，让已有窗口按参数行动。
+    /// </summary>
+    public void ForwardToRunningInstance(string action, LaunchArgs? arguments = null)
     {
+        if (arguments is not null && (arguments.Project is not null || arguments.HasViewOverride || arguments.Windowed is not null))
+        {
+            WritePayload(arguments);
+            _foregroundSignal.Set();
+            return;
+        }
         if (action == FullScreenAction) _fullScreenSignal.Set();
         else if (action == ForegroundAction) _foregroundSignal.Set();
+    }
+
+    private static void WritePayload(LaunchArgs arguments)
+    {
+        try
+        {
+            string directory = Path.Combine(AppContext.BaseDirectory, "data");
+            Directory.CreateDirectory(directory);
+            var payload = new Payload(
+                arguments.Project is null ? null : ResolveProjectReference(arguments.Project),
+                arguments.HasViewOverride ? arguments.View : null,
+                arguments.Windowed, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            File.WriteAllText(Path.Combine(directory, PayloadFileName), JsonSerializer.Serialize(payload));
+        }
+        catch
+        {
+            // 参数文件写不进去时退化为普通唤醒，不能让二次启动直接崩溃。
+        }
+    }
+
+    /// <summary>读取并删除转发参数文件；文件缺失、损坏或超过 15 秒（残留）时按普通唤醒处理。</summary>
+    private LaunchArgs? TryReadPayload()
+    {
+        try
+        {
+            string path = Path.Combine(AppContext.BaseDirectory, "data", PayloadFileName);
+            if (!File.Exists(path)) return null;
+            Payload? payload = JsonSerializer.Deserialize<Payload>(File.ReadAllText(path));
+            File.Delete(path);
+            if (payload is null) return null;
+            if (Math.Abs(DateTimeOffset.UtcNow.ToUnixTimeSeconds() - payload.CreatedAt) > 15) return null;
+            return new LaunchArgs { Project = payload.Project, View = payload.View ?? LaunchArgs.ViewDisplay, Windowed = payload.Windowed };
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>项目名或 .pch 路径交给已有窗口处理前，把存在的相对路径转成绝对路径。</summary>
+    private static string ResolveProjectReference(string project)
+    {
+        try { return File.Exists(project) ? Path.GetFullPath(project) : project; }
+        catch { return project; }
     }
 
     /// <summary>
@@ -117,7 +174,10 @@ public sealed class SingleInstanceService : IDisposable
     {
         WaitHandle[] signals = [_foregroundSignal, _fullScreenSignal, _quitSignal];
         while (WaitHandle.WaitAny(signals) is int index && index != 2)
-            SecondLaunchRequested?.Invoke(index == 0 ? ForegroundAction : FullScreenAction);
+        {
+            LaunchArgs? arguments = index == 0 ? TryReadPayload() : null;
+            SecondLaunchRequested?.Invoke(new SecondLaunchRequest(index == 0 ? ForegroundAction : FullScreenAction, arguments));
+        }
     }
 
     public void Dispose()
@@ -144,10 +204,13 @@ public sealed class SingleInstanceService : IDisposable
         public BoardSettingsState? Settings { get; set; }
     }
 
+    private sealed record Payload(string? Project, string? View, bool? Windowed, long CreatedAt);
+
     private const string MutexPrefix = "Local\\Pancake.SingleInstance.";
     private const string ForegroundSignalPrefix = "Local\\Pancake.SecondLaunch.Foreground.";
     private const string FullScreenSignalPrefix = "Local\\Pancake.SecondLaunch.FullScreen.";
     private const string QuitSignalPrefix = "Local\\Pancake.SingleInstance.Quit.";
+    private const string PayloadFileName = "second-launch.json";
 
     private static string InstanceSuffix()
     {

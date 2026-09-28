@@ -22,6 +22,18 @@ public static class FontService
     public static string NormalizeFamilyName(string? name) =>
         !string.IsNullOrWhiteSpace(name) && IsInstalledFamily(name) ? name : FamilyName;
 
+    /// <summary>
+    /// 内置字体的每个字重是单独的 TTF 文件，家族名相同；只改 FontWeight 时
+    /// DirectWrite 只能在被引用文件里就近匹配，因此粗细必须换成对应字重的文件来引用。
+    /// </summary>
+    public static FontFamily BundledFamilyForWeight(string weight) => weight switch
+    {
+        "Light" => new("ms-appx:///Assets/Fonts/HarmonyOS_Sans_SC_Light.ttf#HarmonyOS Sans SC"),
+        "Medium" => new("ms-appx:///Assets/Fonts/HarmonyOS_Sans_SC_Medium.ttf#HarmonyOS Sans SC"),
+        "Bold" => new("ms-appx:///Assets/Fonts/HarmonyOS_Sans_SC_Bold.ttf#HarmonyOS Sans SC"),
+        _ => DefaultFamily
+    };
+
     public static FontFamily Family(string? name)
     {
         string normalized = NormalizeFamilyName(name);

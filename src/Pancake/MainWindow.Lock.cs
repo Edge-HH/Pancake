@@ -1,5 +1,8 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Pancake.Services;
 
 namespace Pancake;
@@ -108,24 +111,40 @@ public sealed partial class MainWindow
         _refreshLockSettings?.Invoke();
     }
 
-    /// <summary>绑定验证器：生成新密钥并展示 otpauth 链接与密钥文本，验证一次通过后才保存。</summary>
+    /// <summary>绑定验证器：生成新密钥，弹窗左侧显示扫码用二维码，右侧为链接、密钥文本与验证码输入。</summary>
     private async Task BindTotpAsync()
     {
         if (LockService.HasTotp(_settings.Lock) && !await AuthorizeAsync()) return;
         string secret = LockService.CreateTotpSecret();
+        string provisioningUri = LockService.TotpProvisioningUri(secret);
         TextBox code = new() { Header = "验证器中显示的 6 位验证码", PlaceholderText = "000000", MaxLength = 8 };
-        StackPanel content = new() { Spacing = 10 };
-        content.Children.Add(new TextBlock
+        StackPanel details = new() { Spacing = 10 };
+        details.Children.Add(new TextBlock
         {
             Text = "在验证器应用（如 Microsoft Authenticator、Google Authenticator）中扫码或手动输入密钥：",
             TextWrapping = TextWrapping.Wrap
         });
-        TextBox uri = new() { IsReadOnly = true, Text = LockService.TotpProvisioningUri(secret), TextWrapping = TextWrapping.Wrap, MaxHeight = 80 };
-        content.Children.Add(uri);
-        TextBox key = new() { IsReadOnly = true, Text = secret };
-        content.Children.Add(new TextBlock { Text = "密钥", FontSize = 12 });
-        content.Children.Add(key);
-        content.Children.Add(code);
+        details.Children.Add(new TextBox { IsReadOnly = true, Text = provisioningUri, TextWrapping = TextWrapping.Wrap, MaxHeight = 80 });
+        details.Children.Add(new TextBlock { Text = "密钥", FontSize = 12 });
+        details.Children.Add(new TextBox { IsReadOnly = true, Text = secret });
+        details.Children.Add(code);
+        // 二维码固定黑模块白底并包白边，深浅色主题下都能被验证器识别；生成放后台线程，弹窗打开前完成。
+        Image qrImage = new() { Width = 168, Height = 168 };
+        Border qrFrame = new()
+        {
+            Background = new SolidColorBrush(Microsoft.UI.Colors.White),
+            Padding = new Thickness(8),
+            CornerRadius = new CornerRadius(8),
+            VerticalAlignment = VerticalAlignment.Top
+        };
+        qrFrame.Child = qrImage;
+        Grid content = new() { ColumnSpacing = 20 };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(qrFrame, 0);
+        Grid.SetColumn(details, 1);
+        content.Children.Add(qrFrame);
+        content.Children.Add(details);
         ContentDialog dialog = new()
         {
             Title = "绑定验证器", Content = content, PrimaryButtonText = "绑定", CloseButtonText = "取消",
@@ -133,6 +152,18 @@ public sealed partial class MainWindow
         };
         code.TextChanged += (_, _) => dialog.IsPrimaryButtonEnabled = code.Text.Trim().Length > 0;
         dialog.IsPrimaryButtonEnabled = false;
+        try
+        {
+            byte[] png = await Task.Run(() => QrCodeImage.CreatePng(provisioningUri));
+            BitmapImage bitmap = new();
+            using MemoryStream stream = new(png);
+            await bitmap.SetSourceAsync(stream.AsRandomAccessStream());
+            qrImage.Source = bitmap;
+        }
+        catch (Exception)
+        {
+            // 二维码生成或解码失败不拦绑定：右侧的 otpauth 链接和密钥文本仍可手动添加。
+        }
         if (_dialogOpen) return;
         _dialogOpen = true;
         ContentDialogResult result;
@@ -239,10 +270,10 @@ public sealed partial class MainWindow
         });
     }
 
-    /// <summary>解锁对话框：密码或两步验证码任一通过即可。</summary>
+    /// <summary>解锁对话框：密码或两步验证码任一通过即可；输入打码，需要时可点揭示按钮核对验证码。</summary>
     private async Task<bool> UnlockAsync()
     {
-        TextBox input = new() { Header = "密码或验证码", PlaceholderText = "输入密码或 6 位验证码" };
+        PasswordBox input = new() { Header = "密码或验证码", PlaceholderText = "输入密码或 6 位验证码" };
         ContentDialog dialog = new()
         {
             Title = "已锁定", Content = input, PrimaryButtonText = "解锁", CloseButtonText = "取消",
@@ -254,7 +285,7 @@ public sealed partial class MainWindow
         try { result = await dialog.ShowAsync(); }
         finally { _dialogOpen = false; }
         if (result != ContentDialogResult.Primary) return false;
-        string text = input.Text.Trim();
+        string text = input.Password.Trim();
         bool ok = LockService.VerifyPassword(_settings.Lock, text) || LockService.VerifyTotp(_settings.Lock.TotpSecret, text, DateTimeOffset.Now);
         if (!ok) await ShowMessageAsync("解锁失败", "密码或验证码不正确。", "知道了");
         return ok;

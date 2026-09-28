@@ -30,7 +30,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        string commandLine = string.Join(' ', Environment.GetCommandLineArgs().Skip(1));
+        LaunchArgs launchArgs = LaunchArgs.Parse(Environment.GetCommandLineArgs().Skip(1));
         // 发布流水线使用真实窗口及资源加载路径；隔离复制目录由验证脚本负责。
         if (Environment.GetCommandLineArgs().Contains("--smoke-test"))
         {
@@ -44,15 +44,11 @@ public partial class App : Application
             _window.Activate();
             return;
         }
-        bool startFullScreen = !commandLine.Contains("--windowed", StringComparison.OrdinalIgnoreCase);
-        string initialView = commandLine.Contains("--view=editor", StringComparison.OrdinalIgnoreCase)
-            ? "editor"
-            : commandLine.Contains("--view=settings", StringComparison.OrdinalIgnoreCase)
-                ? "settings"
-                : commandLine.Contains("--view=ink", StringComparison.OrdinalIgnoreCase)
-                    ? "ink"
-                    : "display";
+        // --fullscreen 与默认行为一致，显式写出是为了让参数表完整；--windowed 才是切换窗口模式。
+        bool startFullScreen = launchArgs.Windowed is not true;
 #if PANCAKE_UI_TESTS
+        // LaunchArgs 只解析常规启动开关；验证分支仍按子串匹配 --verify-*，这里保留原始命令行供其使用。
+        string commandLine = string.Join(' ', Environment.GetCommandLineArgs().Skip(1));
         if (commandLine.Contains("--verify-media-performance", StringComparison.OrdinalIgnoreCase))
         {
             _window = new MainWindow(false, "verification");
@@ -119,12 +115,12 @@ public partial class App : Application
             instanceGate = SingleInstanceService.Start();
             if (!instanceGate.IsFirstInstance)
             {
-                instanceGate.ForwardToRunningInstance(secondLaunchAction);
+                instanceGate.ForwardToRunningInstance(secondLaunchAction, launchArgs);
                 instanceGate.Dispose();
                 return;
             }
         }
-        _window = new MainWindow(startFullScreen, initialView);
+        _window = new MainWindow(startFullScreen, launchArgs.View, launchArgs.Project);
         if (instanceGate is not null) _window.AttachSingleInstanceGate(instanceGate);
         _window.Activate();
     }

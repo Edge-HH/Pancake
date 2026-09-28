@@ -121,7 +121,9 @@ public sealed partial class MainWindow
             _noiseMonitor.Stop();
             _noiseAlertPlayer.Dispose();
             _noiseAlertGate.Reset();
-            NoiseText.Text = "监测已暂停";
+            // 暂停态整段替换：数字框收起，状态文本承担提示；恢复监测后由读数更新恢复数字框。
+            NoiseText.Visibility = Visibility.Collapsed;
+            NoiseStatusText.Text = "监测已暂停";
             MicrophoneStatusInfoBar.Severity = Microsoft.UI.Xaml.Controls.InfoBarSeverity.Informational;
             MicrophoneStatusInfoBar.Message = "窗口已最小化，恢复窗口后继续监测。";
         }

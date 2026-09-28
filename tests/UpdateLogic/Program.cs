@@ -72,8 +72,8 @@ try
     string valid = Package("valid", ("Assets/new.txt", "asset"));
     Check(!ReleaseUpdateService.IsNewer(new Version(2, 0, 3), new Version(2, 0, 3, 0)), "相同发布与程序集版本不能误报更新");
     Check(ReleaseUpdateService.IsNewer(new Version(2, 0, 4), new Version(2, 0, 3, 0)), "较新发布未识别");
-    var githubRelease = new ReleaseSnapshot(new Version(2, 0, 4), "v2.0.4", null);
-    Check(ReleaseUpdateService.RecommendGitHub(new(new Version(2, 0, 3), "v2.0.3", null), githubRelease), "Gitee 版本落后时必须建议切换 GitHub");
+    var githubRelease = new ReleaseSnapshot(new Version(2, 0, 4), "v2.0.4", null, null);
+    Check(ReleaseUpdateService.RecommendGitHub(new(new Version(2, 0, 3), "v2.0.3", null, null), githubRelease), "Gitee 版本落后时必须建议切换 GitHub");
     Check(!ReleaseUpdateService.RecommendGitHub(githubRelease, githubRelease), "同版本不应误报 Gitee 延迟");
     Check(ReleaseUpdateService.RecommendGitHub(null, githubRelease), "Gitee 无发布时应提示已有 GitHub 版本");
     GitHubReleaseUpdate Parse(params string[] names)
@@ -84,8 +84,16 @@ try
         }));
         return ReleaseUpdateService.ParseRelease(json.RootElement)!.Update!;
     }
+    // 更新日志：Release 的 body 原样进入快照与更新对象；没有 body 字段时保持为空。
+    using var notesJson = System.Text.Json.JsonDocument.Parse(
+        "{\"tag_name\":\"v2.0.4\",\"body\":\"## 更新内容\\n- 新增启动参数\",\"assets\":[]}");
+    var withNotes = ReleaseUpdateService.ParseRelease(notesJson.RootElement);
+    Check(withNotes!.Notes == "## 更新内容\n- 新增启动参数", "Release 正文应解析为更新日志");
+    Check(withNotes.Update is null && withNotes.Notes == "## 更新内容\n- 新增启动参数",
+        "没有可安装资产时更新日志仍随快照返回");
     var splitUpdate = Parse("Pancake-win-x64.zip.003", "Pancake-win-x64.zip.001", "Pancake-win-x64.zip.002", "v2.0.4.zip");
     Check(splitUpdate.Parts.Count == 3 && splitUpdate.Parts[0].Name.EndsWith("001"), "分卷应按数字排序且排除源码包");
+    Check(splitUpdate.Notes is null, "Release 没有 body 字段时更新日志为空");
     Reject(() => Parse("Pancake-win-x64.zip.001", "Pancake-win-x64.zip.003"));
     Check(Parse("Pancake-win-x64.z02", "Pancake-win-x64.zip", "Pancake-win-x64.z01").Parts.Count == 3, "标准 ZIP 分卷未识别");
     byte[] zipBytes = File.ReadAllBytes(valid);
