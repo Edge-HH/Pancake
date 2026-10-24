@@ -54,6 +54,8 @@ public static class FluentGlyphs
     public const string Save = "\uEEB5"; // ic_fluent_save_20_regular
     public const string ArrowDownload = "\uE0D3"; // ic_fluent_arrow_download_20_regular
     public const string ArrowSync = "\uE161"; // ic_fluent_arrow_sync_20_regular
+    public const string Cloud = "\uE4DC"; // ic_fluent_cloud_20_regular
+    public const string CloudCheckmark = "\uE4EC"; // ic_fluent_cloud_checkmark_20_regular
     // 组件右下角缩放手柄的方向提示；同时用于校验该字形确实随字体分发。
     public const string ArrowDownRight = "\uE0D1"; // ic_fluent_arrow_down_right_20_regular
     // 外观 → 时钟设置页的导航图标。
@@ -105,6 +107,8 @@ public static class FluentGlyphs
         nameof(Save) => Save,
         nameof(ArrowDownload) => ArrowDownload,
         nameof(ArrowSync) => ArrowSync,
+        nameof(Cloud) => Cloud,
+        nameof(CloudCheckmark) => CloudCheckmark,
         _ => throw new ArgumentException("未知图标名称", nameof(symbol))
     };
 }

@@ -35,6 +35,7 @@
                             <icons:FluentIcon Symbol="Folder" />
                             <TextBlock x:Name="ProjectNameText" Text="选择项目" />
                             <TextBlock x:Name="SubjectCountText" Foreground="{ThemeResource BoardTextMutedBrush}" />
+                            <icons:FluentIcon x:Name="ProjectSyncIcon" Symbol="Cloud" Foreground="{ThemeResource BoardSuccessBrush}" Visibility="Collapsed" />
                         </StackPanel>
                     </DropDownButton.Content>
                     <DropDownButton.Flyout><Flyout Opening="RecentProjects_Opening"><ScrollViewer MaxHeight="420" Width="240"><StackPanel x:Name="RecentProjectsPanel" Spacing="8" /></ScrollViewer></Flyout></DropDownButton.Flyout>
@@ -112,6 +113,37 @@
                 </Grid>
             </Grid>
             <Canvas x:Name="FreeWidgetsCanvas" /><Canvas x:Name="FreeLayoutHandles" IsHitTestVisible="False" />
+            <!-- 集控班务条：重要公告与今日值日，点按收起，内容变化后重新出现。 -->
+            <StackPanel x:Name="BoardBanner" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="16,14,16,0" Orientation="Horizontal" Spacing="10"
+                        Visibility="Collapsed" Canvas.ZIndex="40" Tapped="BoardBanner_Tapped" AutomationProperties.Name="班务条" />
+        </Grid>
+
+        <Grid x:Name="CloudControlRoot" Grid.Row="1" Background="{ThemeResource BoardBackgroundBrush}" Visibility="Collapsed">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" MinWidth="240" />
+                <ColumnDefinition Width="260" MinWidth="220" />
+                <ColumnDefinition Width="*" MinWidth="420" />
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Background="{ThemeResource BoardSurfaceBrush}" BorderBrush="{ThemeResource BoardLineBrush}" BorderThickness="0,0,1,0">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <StackPanel Padding="20,22,16,14" Spacing="4"><TextBlock Text="班级" FontSize="22" FontWeight="SemiBold" /><TextBlock Text="班务、同步状态与公告" Foreground="{ThemeResource BoardTextMutedBrush}" FontSize="12" /></StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="CloudClassesPanel" Padding="12,0,12,12" Spacing="4" /></ScrollViewer>
+                </Grid>
+            </Border>
+            <Border Grid.Column="1" Background="{ThemeResource BoardSurfaceBrush}" BorderBrush="{ThemeResource BoardLineBrush}" BorderThickness="0,0,1,0">
+                <Grid>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                    <StackPanel Padding="20,22,16,14" Spacing="4"><TextBlock Text="项目" FontSize="22" FontWeight="SemiBold" /><TextBlock x:Name="CloudProjectHint" Text="选择班级查看全部项目" Foreground="{ThemeResource BoardTextMutedBrush}" FontSize="12" /></StackPanel>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="CloudProjectsPanel" Padding="12,0,12,12" Spacing="4" /></ScrollViewer>
+                    <TextBlock x:Name="CloudSyncProgressText" Grid.Row="2" Padding="16,12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="未连接" TextWrapping="Wrap" />
+                </Grid>
+            </Border>
+            <Grid Grid.Column="2" Padding="32,26,32,32">
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <StackPanel Spacing="5"><TextBlock x:Name="CloudHomeworkTitle" FontSize="30" FontWeight="SemiBold" Text="选择项目" /><TextBlock x:Name="CloudHomeworkSubtitle" Foreground="{ThemeResource BoardTextMutedBrush}" Text="作业会在同步后自动显示在这里" /></StackPanel>
+                <ScrollViewer Grid.Row="1" Margin="0,24,0,0" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="CloudHomeworkPanel" Spacing="16" /></ScrollViewer>
+            </Grid>
         </Grid>
 
         <NavigationView x:Name="SettingsRoot" Grid.Row="1" Visibility="Collapsed"
@@ -147,6 +179,7 @@
                         <NavigationViewItem Content="作业补全" Tag="AutofillHomework"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Document" /></NavigationViewItem.Icon></NavigationViewItem>
                     </NavigationViewItem.MenuItems>
                 </NavigationViewItem>
+                <NavigationViewItem Content="集控" Tag="CloudSync"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Cloud" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="数据" Tag="Data"><NavigationViewItem.Icon><icons:FluentIcon Symbol="ArrowDownload" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="锁定" Tag="Lock"><NavigationViewItem.Icon><icons:FluentIcon Symbol="LockClosed" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem x:Name="AboutNavigationGroup" Content="关于" Tag="About">
@@ -296,6 +329,7 @@
                     </Border>
                 </StackPanel>
                 <StackPanel x:Name="AutofillSettingsPanel" Spacing="22" Visibility="Collapsed" />
+                <StackPanel x:Name="CloudSyncSettingsPanel" Spacing="22" Visibility="Collapsed" />
                 <StackPanel x:Name="DataSettingsPanel" Spacing="22" Visibility="Collapsed" />
                 <StackPanel x:Name="LockSettingsPanel" Spacing="22" Visibility="Collapsed" />
             </StackPanel>
@@ -400,6 +434,9 @@
                 </ToggleButton>
                 <Button x:Name="SettingsButton" Click="SettingsButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="设置">
                     <icons:FluentIcon Symbol="Settings" />
+                </Button>
+                <Button x:Name="CloudControlButton" Click="CloudControlButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="班级" Visibility="Collapsed">
+                    <icons:FluentIcon Symbol="Cloud" />
                 </Button>
                 <Button x:Name="FullScreenButton" Click="FullScreenButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="进入全屏">
                     <icons:FluentIcon x:Name="FullScreenIcon" Symbol="FullScreen" />

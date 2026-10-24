@@ -8,6 +8,13 @@ public sealed class ProjectDocument
     public int Version { get; set; } = 1;
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = "";
+    /// <summary>集控日期筛选字段；为空时项目仍可在本地模式正常使用。</summary>
+    public DateOnly? AssignmentDate { get; set; }
+    /// <summary>服务端最后确认的修订号。0 表示项目尚未上传。</summary>
+    public long SyncRevision { get; set; }
+    public bool SyncDeleted { get; set; }
+    /// <summary>最后一次与服务器一致时的内容哈希；与当前内容相同则无需上传。</summary>
+    public string? SyncHash { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime LastUsedAt { get; set; } = DateTime.Now;
     public string? LinkedFile { get; set; }
@@ -24,6 +31,18 @@ public sealed class ProjectLibrary
     public Guid? ActiveProjectId { get; set; }
     public BoardSettingsState Settings { get; set; } = new();
     public List<ProjectDocument> Projects { get; set; } = [];
+    /// <summary>断网期间的最小同步队列；保留项目快照，避免重启后丢失本地修改。</summary>
+    public List<SyncOperationState> SyncQueue { get; set; } = [];
+}
+
+public sealed class SyncOperationState
+{
+    public Guid ProjectId { get; set; }
+    public long ExpectedRevision { get; set; }
+    public DateTime QueuedAt { get; set; } = DateTime.UtcNow;
+    /// <summary>upsert：上传项目当前内容；delete：本地已删除，通知服务器删除（项目已不在清单里，名称记在这里）。</summary>
+    public string Kind { get; set; } = "upsert";
+    public string Name { get; set; } = "";
 }
 
 /// <summary>本地事务快照和项目资源。清单与所有项目一次替换，避免切换时留下半份状态。</summary>
@@ -103,7 +122,7 @@ public sealed class ProjectStore(string? directory = null)
         string basis = $"{DateTime.Now:M月d日}";
         string name = basis;
         for (int i = 2; library.Projects.Any(p => p.Name == name); i++) name = $"{basis} ({i})";
-        ProjectDocument project = new() { Name = name, Theme = library.Settings.Theme, Palette = library.Settings.Palette };
+        ProjectDocument project = new() { Name = name, AssignmentDate = DateOnly.FromDateTime(DateTime.Now), Theme = library.Settings.Theme, Palette = library.Settings.Palette };
         if (keepLayout && current is not null)
         {
             project.Theme = current.Theme;

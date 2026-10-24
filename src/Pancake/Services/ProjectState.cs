@@ -78,6 +78,8 @@ public sealed class BoardSettingsState
     public double NoiseAlertVolume { get; set; } = 1;
     public double CalibrationTargetDb { get; set; } = 40;
     public bool ShowWeatherAlerts { get; set; } = true;
+    /// <summary>班务条显示哪些公告：All（全部生效公告）或 ImportantOnly（仅重要、紧急与置顶）。</summary>
+    public string BoardBannerLevels { get; set; } = "All";
     // 保留旧配置字段以兼容已有数据；共享采集格式现在由 Windows 输入设备决定。
     public int MicrophoneSampleRate { get; set; } = 16000;
     public double MicrophoneCalibrationDb { get; set; }
@@ -94,10 +96,33 @@ public sealed class BoardSettingsState
     public AutofillSettings Autofill { get; set; } = new();
     public LockSettings Lock { get; set; } = new();
     public DataSettings Data { get; set; } = new();
+    public CloudSyncSettings CloudSync { get; set; } = new();
 
     /// <summary>再次启动行为只认三种取值；旧配置或手改值一律回到“移至前台”。</summary>
     public static string NormalizeSecondLaunchAction(string? value) =>
         value is "Foreground" or "FullScreen" or "None" ? value : "Foreground";
+}
+
+/// <summary>集控连接设置。未配对时保持空值，主程序继续走原有本地保存路径。</summary>
+public sealed class CloudSyncSettings
+{
+    public string ServerUrl { get; set; } = "";
+    public Guid? ClassId { get; set; }
+    public string ClassName { get; set; } = "";
+    public string DeviceToken { get; set; } = "";
+    public Guid? DeviceId { get; set; }
+    /// <summary>本机设置为“不同步布局”时只同步项目；班级策略为关闭时同样不同步。</summary>
+    public bool SyncLayout { get; set; } = true;
+    /// <summary>
+    /// 已应用或已上传的服务器布局修订号，以及当时与服务器一致的设置 JSON（Base）。
+    /// 按键三方合并时，本机相对 Base 的改动上传，服务器相对 Base 的改动应用。
+    /// </summary>
+    public long LayoutRevision { get; set; }
+    public string LayoutBaseJson { get; set; } = "";
+    public string LayoutPolicy { get; set; } = "Shared";
+    /// <summary>在看板顶部显示公告与今日值日。</summary>
+    public bool ShowBoardBanner { get; set; } = true;
+    public bool Enabled => !string.IsNullOrWhiteSpace(ServerUrl) && ClassId.HasValue && !string.IsNullOrWhiteSpace(DeviceToken);
 }
 
 /// <summary>数据页设置：作业保留、备份与自动备份属于软件设置，跨项目共享。</summary>

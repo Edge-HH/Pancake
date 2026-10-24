@@ -113,7 +113,9 @@ public sealed partial class MainWindow
         if (!_storageReady) throw new IOException("原项目数据未能读取，已停止写入。请先恢复数据并重启软件。");
         CaptureCurrentProject();
         _library.Settings = _settings;
+        if (CurrentProject is { } changed) CloudSyncService.Queue(_library, changed);
         _projectStore.Save(_library);
+        RequestCloudSync();
     }
 
     private void RememberAppearance()
@@ -129,6 +131,8 @@ public sealed partial class MainWindow
         bool exists = CurrentProject is not null;
         ProjectNameText.Text = CurrentProject?.Name ?? "选择项目";
         SubjectCountText.Text = exists ? $"{ViewModel.Subjects.Count} 个科目" : "";
+        ProjectSyncIcon.Visibility = exists && _settings.CloudSync.Enabled && CloudSyncService.IsSynced(_library, CurrentProject!)
+            ? Visibility.Visible : Visibility.Collapsed;
         ProjectCommands.Visibility = SettingsRoot.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
         RenameProjectMenu.IsEnabled = DeleteProjectMenu.IsEnabled = SaveProjectMenu.IsEnabled = ExportProjectMenu.IsEnabled = exists && _storageReady;
         GlobalPenButton.IsEnabled = exists;
@@ -175,7 +179,11 @@ public sealed partial class MainWindow
         RecentProjectsPanel.Children.Clear();
         foreach (ProjectDocument project in _library.Projects.OrderByDescending(p => p.LastUsedAt))
         {
-            Button button = new() { Content = project.Name, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
+            StackPanel content = new() { Orientation = Orientation.Horizontal, Spacing = 7 };
+            content.Children.Add(new TextBlock { Text = project.Name, TextTrimming = TextTrimming.CharacterEllipsis });
+            if (_settings.CloudSync.Enabled && CloudSyncService.IsSynced(_library, project))
+                content.Children.Add(new FluentIcon { Symbol = "CloudCheckmark", Foreground = (Brush)Application.Current.Resources["BoardSuccessBrush"], FontSize = 14 });
+            Button button = new() { Content = content, HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left };
             ToolTipService.SetToolTip(button, $"创建于 {project.CreatedAt:yyyy年M月d日 HH:mm}");
             button.Click += async (_, _) =>
             {
@@ -215,6 +223,14 @@ public sealed partial class MainWindow
         bool themeDiffers = project.Theme != _settings.Theme;
         bool paletteDiffers = project.Palette != _settings.Palette;
         if (!themeDiffers && !paletteDiffers) return;
+        // 集控同步班级设置时，主题与色系由班级统一决定：不询问，项目跟随班级外观。
+        CloudSyncSettings cloud = _settings.CloudSync;
+        if (cloud.Enabled && cloud.SyncLayout && cloud.LayoutPolicy != Pancake.Shared.LayoutPolicies.Off)
+        {
+            project.Theme = _settings.Theme;
+            project.Palette = _settings.Palette;
+            return;
+        }
         CheckBox theme = new() { Content = $"应用项目主题：{project.Theme switch { "Light" => "浅色", "Dark" => "深色", _ => "跟随系统" }}", IsChecked = themeDiffers, Visibility = themeDiffers ? Visibility.Visible : Visibility.Collapsed };
         CheckBox palette = new() { Content = $"应用项目色系：{(project.Palette == "Macaron" ? "马卡龙" : "鲜明")}", IsChecked = paletteDiffers, Visibility = paletteDiffers ? Visibility.Visible : Visibility.Collapsed };
         StackPanel content = new() { Spacing = 12 };
@@ -272,6 +288,8 @@ public sealed partial class MainWindow
         if (await ShowConfirmAsync("删除本地项目", $"删除“{project.Name}”的本地内容？关联的 .pch 文件会保留。") != ContentDialogResult.Primary) return;
         if (_isEditing) FinishEditing();
         _library.Projects.Remove(project);
+        // 已上传的项目通知集控一并删除；集控保留最后一份内容，可在网页上恢复。
+        CloudSyncService.QueueDelete(_library, project);
         _library.ActiveProjectId = null;
         await ActivateProjectAsync(_library.Projects.OrderByDescending(p => p.LastUsedAt).FirstOrDefault());
         // 清单提交后才回收附件；清理失败仅留下无引用资源，不恢复已经删除的项目。

@@ -61,7 +61,7 @@ public sealed partial class MainWindow
         {
             style.PlaylistEnabled = value;
             if (value && style.Playlist.Count == 0 && File.Exists(style.ImagePath)) style.Playlist.Add(style.ImagePath);
-        }));
+        }, read: () => style.PlaylistEnabled));
         StackPanel queue = SettingsStack();
         Button add = new() { Content = "添加多个媒体" };
         add.Click += async (_, _) =>
@@ -71,8 +71,8 @@ public sealed partial class MainWindow
         };
         queue.Children.Add(add);
         queue.Children.Add(rows);
-        queue.Children.Add(Choice("播放顺序", ["按列表顺序", "随机播放"], ["Ordered", "Shuffle"], style.Shuffle ? "Shuffle" : "Ordered", value => style.Shuffle = value == "Shuffle"));
-        queue.Children.Add(Toggle("按固定时间切换", style.SwitchOnTimer, value => style.SwitchOnTimer = value));
+        queue.Children.Add(Choice("播放顺序", ["按列表顺序", "随机播放"], ["Ordered", "Shuffle"], style.Shuffle ? "Shuffle" : "Ordered", value => style.Shuffle = value == "Shuffle", read: () => style.Shuffle ? "Shuffle" : "Ordered"));
+        queue.Children.Add(Toggle("按固定时间切换", style.SwitchOnTimer, value => style.SwitchOnTimer = value, read: () => style.SwitchOnTimer));
         NumberBox interval = new() { Header = "切换间隔（秒）", Minimum = 1, Maximum = 86400,
             Value = BackgroundPlaylist.NormalizeInterval(style.SwitchIntervalSeconds), SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
         interval.ValueChanged += (_, args) =>
@@ -81,7 +81,7 @@ public sealed partial class MainWindow
             style.SwitchIntervalSeconds = BackgroundPlaylist.NormalizeInterval(args.NewValue); SettingChanged();
         };
         queue.Children.Add(interval);
-        queue.Children.Add(Toggle("视频播放完成时切换", style.SwitchOnMediaEnded, value => style.SwitchOnMediaEnded = value));
+        queue.Children.Add(Toggle("视频播放完成时切换", style.SwitchOnMediaEnded, value => style.SwitchOnMediaEnded = value, read: () => style.SwitchOnMediaEnded));
         queue.Children.Add(Note("两种切换都开启时，先触发的条件生效。关闭播放完成切换后视频循环播放；图片、GIF 和网页壁纸通过定时切换。两个开关都关闭时停留在当前媒体。"));
         panel.Children.Add(queue);
         string signature = "";

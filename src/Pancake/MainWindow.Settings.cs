@@ -13,6 +13,8 @@ namespace Pancake;
 public sealed partial class MainWindow
 {
     private readonly List<Action> _refreshSettingAvailability = [];
+    private readonly List<Action> _refreshSettingControls = [];
+    private bool _refreshingSettingControls;
     private readonly Dictionary<ButtonBase, (UIElement Icon, TextBlock Label)> _toolbarLabels = [];
     private readonly Dictionary<string, SettingsPage> _settingsPages = [];
     private ComboBox? _layoutChoice;
@@ -29,14 +31,14 @@ public sealed partial class MainWindow
     {
         StackPanel layout = SettingsStack();
         _layoutChoice = Choice("布局模式", ["分屏", "仅作业", "仅时钟", "自由布局"],
-            ["Split", "Board", "Clock", "Free"], _settings.LayoutMode, value => _settings.LayoutMode = value);
+            ["Split", "Board", "Clock", "Free"], _settings.LayoutMode, value => _settings.LayoutMode = value, read: () => _settings.LayoutMode);
         layout.Children.Add(_layoutChoice);
-        layout.Children.Add(Toggle("无限作业板", _settings.InfiniteBoard, value => _settings.InfiniteBoard = value));
+        layout.Children.Add(Toggle("无限作业板", _settings.InfiniteBoard, value => _settings.InfiniteBoard = value, read: () => _settings.InfiniteBoard));
         layout.Children.Add(Note("开启后可滚动、触摸平移、Ctrl + 滚轮缩放；编辑磁贴时可用滚动条平移。"));
         // 网格大小与自动布局共用同一张预览，改任一项都能立刻看到结果。
         layout.Children.Add(CreateAppearancePreview("Layout"));
         _gridSizeSlider = Range("网格大小", 16, 160, Math.Round(_settings.GridSize), value =>
-        { _settings.GridSize = Math.Round(value); _renderedGridWidth = 0; }, GridSizeChanged);
+        { _settings.GridSize = Math.Round(value); _renderedGridWidth = 0; }, GridSizeChanged, read: () => Math.Round(_settings.GridSize));
         // 网格大小按整数调节，避免出现 48.37 px 这类没有意义的取值。
         _gridSizeSlider.StepFrequency = 1;
         _gridSizeSlider.SmallChange = 1;
@@ -46,13 +48,13 @@ public sealed partial class MainWindow
         LayoutSettingsPanel.Children.Clear();
         layout.Children.Add(Heading("自动布局"));
         // 与编辑工具栏的吸附按钮是同一个设置，两边状态实时同步。
-        _gridSnapToggle = Toggle("吸附到网格", _settings.GridSnappingEnabled, SetGridSnapping);
+        _gridSnapToggle = Toggle("吸附到网格", _settings.GridSnappingEnabled, SetGridSnapping, read: () => _settings.GridSnappingEnabled);
         layout.Children.Add(_gridSnapToggle);
         _autoLayoutGapSlider = Range("自动排版磁贴间隔", 0, 120, _settings.AutoLayoutGap,
-            value => _settings.AutoLayoutGap = value, AutoLayoutGapChanged);
+            value => _settings.AutoLayoutGap = value, AutoLayoutGapChanged, read: () => _settings.AutoLayoutGap);
         layout.Children.Add(_autoLayoutGapSlider);
-        layout.Children.Add(Toggle("自动对齐", _settings.AutoLayoutAlign, value => _settings.AutoLayoutAlign = value));
-        layout.Children.Add(Toggle("自动调整磁贴大小", _settings.AutoLayoutResize, value => _settings.AutoLayoutResize = value));
+        layout.Children.Add(Toggle("自动对齐", _settings.AutoLayoutAlign, value => _settings.AutoLayoutAlign = value, read: () => _settings.AutoLayoutAlign));
+        layout.Children.Add(Toggle("自动调整磁贴大小", _settings.AutoLayoutResize, value => _settings.AutoLayoutResize = value, read: () => _settings.AutoLayoutResize));
         layout.Children.Add(Note("点击自动排列时按文字、图片和笔迹收紧磁贴；自动对齐会尽量统一相近尺寸并对齐行列。看板与图片导出共用这些设置，优先从左上角排列。"));
         _refreshSettingAvailability.Add(UpdateAutoLayoutGapStep);
         RegisterSettingsPage("Layout", LayoutSettingsPanel, layout, "布局", "调整布局模式、无限作业板与网格。");
@@ -64,7 +66,7 @@ public sealed partial class MainWindow
             _settings.AllowMultipleInstances = value;
             // 允许多实例期间启动的窗口没有认领过启动闸门，关闭后要补上，后续启动才会被拦下。
             if (!value) ClaimSingleInstanceGate();
-        }));
+        }, read: () => _settings.AllowMultipleInstances));
         multiInstanceBlock.Children.Add(new TextBlock
         {
             Text = "不建议开启，可能导致未知问题", TextWrapping = TextWrapping.Wrap, FontSize = 12,
@@ -74,7 +76,7 @@ public sealed partial class MainWindow
         StackPanel secondLaunchBlock = new() { Spacing = 3 };
         ComboBox secondLaunch = Choice("已打开时再次启动行为", ["移至前台", "全屏", "不执行任何操作"],
             [SingleInstanceService.ForegroundAction, SingleInstanceService.FullScreenAction, SingleInstanceService.NoneAction],
-            _settings.SecondLaunchAction, value => _settings.SecondLaunchAction = value);
+            _settings.SecondLaunchAction, value => _settings.SecondLaunchAction = value, read: () => _settings.SecondLaunchAction);
         secondLaunchBlock.Children.Add(secondLaunch);
         secondLaunchBlock.Children.Add(new TextBlock
         {
@@ -88,23 +90,23 @@ public sealed partial class MainWindow
 
         StackPanel tile = SettingsStack();
         tile.Children.Add(CreateAppearancePreview("Tile"));
-        tile.Children.Add(Range("标题大小", 16, 72, _settings.TileTitleSize, value => _settings.TileTitleSize = value, TileTitleSizeChanged));
-        Slider bodyFontSizeSlider = Range("正文默认字号", 12, 72, Math.Round(_settings.TileBodyFontSize, MidpointRounding.AwayFromZero), value => _settings.TileBodyFontSize = Math.Round(value, MidpointRounding.AwayFromZero), TileBodyStyleChanged);
+        tile.Children.Add(Range("标题大小", 16, 72, _settings.TileTitleSize, value => _settings.TileTitleSize = value, TileTitleSizeChanged, read: () => _settings.TileTitleSize));
+        Slider bodyFontSizeSlider = Range("正文默认字号", 12, 72, Math.Round(_settings.TileBodyFontSize, MidpointRounding.AwayFromZero), value => _settings.TileBodyFontSize = Math.Round(value, MidpointRounding.AwayFromZero), TileBodyStyleChanged, read: () => Math.Round(_settings.TileBodyFontSize, MidpointRounding.AwayFromZero));
         // 字号按整数调节，避免出现 20.37 这类没有意义的取值。
         bodyFontSizeSlider.StepFrequency = 1;
         bodyFontSizeSlider.SmallChange = 1;
         bodyFontSizeSlider.LargeChange = 4;
         tile.Children.Add(bodyFontSizeSlider);
         tile.Children.Add(DefaultBodyFontPicker());
-        tile.Children.Add(Toggle("正文默认粗体", _settings.TileBodyBold, value => _settings.TileBodyBold = value, TileBodyStyleChanged));
-        tile.Children.Add(Toggle("正文默认斜体", _settings.TileBodyItalic, value => _settings.TileBodyItalic = value, TileBodyStyleChanged));
-        tile.Children.Add(Toggle("仅粘贴纯文本", _settings.PastePlainTextOnly, value => _settings.PastePlainTextOnly = value));
+        tile.Children.Add(Toggle("正文默认粗体", _settings.TileBodyBold, value => _settings.TileBodyBold = value, TileBodyStyleChanged, read: () => _settings.TileBodyBold));
+        tile.Children.Add(Toggle("正文默认斜体", _settings.TileBodyItalic, value => _settings.TileBodyItalic = value, TileBodyStyleChanged, read: () => _settings.TileBodyItalic));
+        tile.Children.Add(Toggle("仅粘贴纯文本", _settings.PastePlainTextOnly, value => _settings.PastePlainTextOnly = value, read: () => _settings.PastePlainTextOnly));
         tile.Children.Add(Note("默认正文样式用于新建和尚未单独设置格式的正文；已有的局部字体、粗体、斜体、颜色与高光不会被覆盖。开启纯文本粘贴后，Ctrl+V 和右键粘贴都会移除来源格式。"));
         tile.Children.Add(BackgroundEditor(_settings.TileBackground, () => true, () => true, surface: true, scope: MediaScope.Tile));
         StackPanel backgrounds = SettingsStack();
         // 背景板预览把跨区、时钟和作业板合成一张主界面式场景，并在宽窗口固定到右侧。
         backgrounds.Children.Add(CreateAppearancePreview("Background"));
-        var shared = Toggle("使用跨区背景", _settings.SharedBackgroundEnabled, value => _settings.SharedBackgroundEnabled = value);
+        var shared = Toggle("使用跨区背景", _settings.SharedBackgroundEnabled, value => _settings.SharedBackgroundEnabled = value, read: () => _settings.SharedBackgroundEnabled);
         backgrounds.Children.Add(shared);
         _refreshSettingAvailability.Add(() => shared.IsEnabled = _settings.LayoutMode == "Split");
         backgrounds.Children.Add(BackgroundEditor(_settings.SharedBackground, () => _settings.LayoutMode == "Split" && _settings.SharedBackgroundEnabled, () => false, false));
@@ -120,19 +122,19 @@ public sealed partial class MainWindow
         StackPanel grid = SettingsStack();
         grid.Children.Add(CreateAppearancePreview("Grid"));
         grid.Children.Add(Choice("样式", ["网格", "点阵", "不显示"], ["Grid", "Dots", "None"], _settings.GridStyle, value =>
-        { _settings.GridStyle = value; _renderedGridAppearance = string.Empty; }));
+        { _settings.GridStyle = value; _renderedGridAppearance = string.Empty; }, read: () => _settings.GridStyle));
         StackPanel gridLineSettings = SettingsStack();
         gridLineSettings.Children.Add(ColorSetting("网格颜色", _settings.GridColor, value => _settings.GridColor = value));
         gridLineSettings.Children.Add(Range("网格粗细", .5, 5, _settings.GridLineThickness, value =>
-        { _settings.GridLineThickness = value; _renderedGridAppearance = string.Empty; }));
+        { _settings.GridLineThickness = value; _renderedGridAppearance = string.Empty; }, read: () => _settings.GridLineThickness));
         StackPanel gridDotSettings = SettingsStack();
         gridDotSettings.Children.Add(ColorSetting("点阵颜色", _settings.GridDotColor, value => _settings.GridDotColor = value));
         gridDotSettings.Children.Add(Range("点的直径", 1, 12, _settings.GridDotDiameter, value =>
-        { _settings.GridDotDiameter = value; _renderedGridAppearance = string.Empty; }));
+        { _settings.GridDotDiameter = value; _renderedGridAppearance = string.Empty; }, read: () => _settings.GridDotDiameter));
         grid.Children.Add(gridLineSettings);
         grid.Children.Add(gridDotSettings);
         grid.Children.Add(Toggle("编辑时显示常规网格", _settings.ShowGridWhileEditing, value =>
-        { _settings.ShowGridWhileEditing = value; _renderedGridAppearance = string.Empty; }));
+        { _settings.ShowGridWhileEditing = value; _renderedGridAppearance = string.Empty; }, read: () => _settings.ShowGridWhileEditing));
         grid.Children.Add(Note("此页只改变网格显示样貌；网格吸附仍由编辑工具栏中的吸附按钮独立控制。"));
         _refreshSettingAvailability.Add(() =>
         {
@@ -150,12 +152,13 @@ public sealed partial class MainWindow
         ComponentSettingsPanel.Children.Clear();
         ((StackPanel)NoiseSettingsCard.Child).Children.Insert(2,
             Toggle("最小化时暂停监测", _settings.PauseNoiseWhenMinimized, value =>
-            { _settings.PauseNoiseWhenMinimized = value; RefreshNoiseSuspension(); }));
+            { _settings.PauseNoiseWhenMinimized = value; RefreshNoiseSuspension(); }, read: () => _settings.PauseNoiseWhenMinimized));
         RegisterSettingsPage("ComponentsWeather", ComponentSettingsPanel, WeatherSettingsCard, "天气", "选择天气地区并查看预警。");
         RegisterSettingsPage("ComponentsNoise", ComponentSettingsPanel, NoiseSettingsCard, "噪音检测", "设置麦克风检测、报警与校准。");
         AutofillSettingsPanel.Children.Clear();
         RegisterSettingsPage("AutofillSubject", AutofillSettingsPanel, SubjectAutofillSettings(), "学科补全", "设置可补全的学科、默认颜色与匹配严格度。");
         RegisterSettingsPage("AutofillHomework", AutofillSettingsPanel, HomeworkAutofillSettings(), "作业补全", "记录常输入的作业名称，并按学科范围提示补全。");
+        RegisterSettingsPage("CloudSync", CloudSyncSettingsPanel, BuildCloudSyncPage(), "集控", "连接班级，同步项目、班级布局、公告与值日。");
         RegisterSettingsPage("Data", DataSettingsPanel, BuildDataPage(), "数据", "管理自动保存、数据导出与自动备份。");
         RegisterSettingsPage("Lock", LockSettingsPanel, BuildLockPage(), "锁定", "设置密码与两步验证，保护看板与设置。");
         // 仓库卡片已在 XAML 中声明 GitHub / Gitee 两个链接，并绑定主题色，切浅色时背景和文字一起换。
@@ -217,9 +220,9 @@ public sealed partial class MainWindow
     private StackPanel SubjectAutofillSettings()
     {
         StackPanel page = SettingsStack();
-        page.Children.Add(Toggle("学科补全", _settings.Autofill.Subject.Enabled, value => _settings.Autofill.Subject.Enabled = value));
+        page.Children.Add(Toggle("学科补全", _settings.Autofill.Subject.Enabled, value => _settings.Autofill.Subject.Enabled = value, read: () => _settings.Autofill.Subject.Enabled));
         page.Children.Add(Choice("匹配程度", ["宽松", "正常", "严格"], ["Loose", "Normal", "Strict"],
-            _settings.Autofill.Subject.MatchLevel, value => _settings.Autofill.Subject.MatchLevel = value));
+            _settings.Autofill.Subject.MatchLevel, value => _settings.Autofill.Subject.MatchLevel = value, read: () => _settings.Autofill.Subject.MatchLevel));
         page.Children.Add(Note("开启后，在磁贴标题里输入中文、全拼或首字母会弹出候选，上下键切换、Tab 或回车采纳，也可以直接点击；采纳候选会把标题与磁贴主题色切换为该学科的默认颜色。"));
         page.Children.Add(Note("宽松：输入 1 个字符即提示，首字母允许跳字；正常：汉字 1 个或字母 2 个起按前缀匹配；严格：2 个字符起，只认完整前缀。"));
         page.Children.Add(Note("行内的色卡始终显示当前色系下的学科颜色。颜色浮层默认只给常用预设色，需要精确取色时展开「自定义颜色」；点「随机」后，每次采纳该学科都从预设色里随机取一个（不连续重复），再点一次恢复固定颜色，手动取色也会关闭随机。"));
@@ -445,12 +448,12 @@ public sealed partial class MainWindow
     private StackPanel HomeworkAutofillSettings()
     {
         StackPanel page = SettingsStack();
-        page.Children.Add(Toggle("作业补全", _settings.Autofill.Homework.Enabled, value => _settings.Autofill.Homework.Enabled = value));
-        page.Children.Add(Toggle("自动记录常输入的作业名称", _settings.Autofill.Homework.AutoRecord, value => _settings.Autofill.Homework.AutoRecord = value));
+        page.Children.Add(Toggle("作业补全", _settings.Autofill.Homework.Enabled, value => _settings.Autofill.Homework.Enabled = value, read: () => _settings.Autofill.Homework.Enabled));
+        page.Children.Add(Toggle("自动记录常输入的作业名称", _settings.Autofill.Homework.AutoRecord, value => _settings.Autofill.Homework.AutoRecord = value, read: () => _settings.Autofill.Homework.AutoRecord));
         page.Children.Add(Choice("自动记录阈值", ["宽松（2 次）", "正常（3 次）", "严格（5 次）"], ["Loose", "Normal", "Strict"],
-            _settings.Autofill.Homework.RecordLevel, value => _settings.Autofill.Homework.RecordLevel = value));
+            _settings.Autofill.Homework.RecordLevel, value => _settings.Autofill.Homework.RecordLevel = value, read: () => _settings.Autofill.Homework.RecordLevel));
         page.Children.Add(Choice("记录隔离", ["全局", "分学科"], ["Global", "Subject"],
-            _settings.Autofill.Homework.Isolation, value => _settings.Autofill.Homework.Isolation = value));
+            _settings.Autofill.Homework.Isolation, value => _settings.Autofill.Homework.Isolation = value, read: () => _settings.Autofill.Homework.Isolation));
         page.Children.Add(Note("一条作业编辑结束时统计一次：按空白、标点与数字切分，只保留长度 2–12 且含汉字或两个以上连续字母的词；页码碎片、单字母（如 P）和默认占位文字不会记录。"));
         page.Children.Add(Note("「双练一测P30」「双练一测第 3 页」这类写法只记录「双练一测」，不会把页码字母或「第」带进名称；只有文本真正改动过的作业才计入次数，反复打开同一条不会重复累计。"));
         page.Children.Add(Note("全局隔离把所有词记进同一个词库；分学科隔离把自动学习写入当前学科，全局词仍然始终可用。待收录 14 天未再出现即清除，已收录 90 天未使用自动移除，手动添加的条目永不过期。"));
@@ -877,11 +880,23 @@ public sealed partial class MainWindow
         ScheduleSave();
     }
 
-    private ToggleSwitch Toggle(string label, bool value, Action<bool> update, Action? changed = null)
+    /// <summary>
+    /// 设置控件可以带一个读取函数：集控下发设置后调用 RefreshSettingControls，控件按当前设置刷新显示，
+    /// 刷新期间不会把值再写回设置或触发保存。
+    /// </summary>
+    private ToggleSwitch Toggle(string label, bool value, Action<bool> update, Action? changed = null, Func<bool>? read = null)
     {
         ToggleSwitch toggle = new() { Header = label, IsOn = value };
-        toggle.Toggled += (_, _) => { update(toggle.IsOn); (changed ?? SettingChanged)(); };
+        toggle.Toggled += (_, _) => { if (_refreshingSettingControls) return; update(toggle.IsOn); (changed ?? SettingChanged)(); };
+        if (read is not null) _refreshSettingControls.Add(() => { if (toggle.IsOn != read()) toggle.IsOn = read(); });
         return toggle;
+    }
+
+    private void RefreshSettingControls()
+    {
+        _refreshingSettingControls = true;
+        try { foreach (Action refresh in _refreshSettingControls) refresh(); }
+        finally { _refreshingSettingControls = false; }
     }
 
     private void TileTitleSizeChanged()
@@ -973,19 +988,30 @@ public sealed partial class MainWindow
         UpdateAutoLayoutGapStep();
     }
 
-    private Slider Range(string label, double min, double max, double value, Action<double> update, Action? changed = null)
+    private Slider Range(string label, double min, double max, double value, Action<double> update, Action? changed = null, Func<double>? read = null)
     {
         Slider slider = new() { Header = label, Minimum = min, Maximum = max, Value = Math.Clamp(double.IsFinite(value) ? value : min, min, max), StepFrequency = .01 };
-        slider.ValueChanged += (_, args) => { update(args.NewValue); (changed ?? SettingChanged)(); };
+        slider.ValueChanged += (_, args) => { if (_refreshingSettingControls) return; update(args.NewValue); (changed ?? SettingChanged)(); };
+        if (read is not null) _refreshSettingControls.Add(() =>
+        {
+            double current = read();
+            current = Math.Clamp(double.IsFinite(current) ? current : min, min, max);
+            if (Math.Abs(slider.Value - current) > 1e-9) slider.Value = current;
+        });
         return slider;
     }
 
-    private ComboBox Choice(string label, string[] labels, string[] values, string value, Action<string> update)
+    private ComboBox Choice(string label, string[] labels, string[] values, string value, Action<string> update, Func<string>? read = null)
     {
         ComboBox combo = new() { Header = label, HorizontalAlignment = HorizontalAlignment.Stretch };
         for (int i = 0; i < labels.Length; i++) combo.Items.Add(new ComboBoxItem { Content = labels[i], Tag = values[i] });
         combo.SelectedIndex = Math.Max(0, Array.IndexOf(values, value));
-        combo.SelectionChanged += (_, _) => { if (combo.SelectedItem is ComboBoxItem item) { update((string)item.Tag); SettingChanged(); } };
+        combo.SelectionChanged += (_, _) => { if (!_refreshingSettingControls && combo.SelectedItem is ComboBoxItem item) { update((string)item.Tag); SettingChanged(); } };
+        if (read is not null) _refreshSettingControls.Add(() =>
+        {
+            int index = Math.Max(0, Array.IndexOf(values, read()));
+            if (combo.SelectedIndex != index) combo.SelectedIndex = index;
+        });
         return combo;
     }
 
@@ -1036,7 +1062,7 @@ public sealed partial class MainWindow
         else
             imageControls.Children.Add(new Button { Content = "背景颜色", Flyout = new Flyout { Content = color } });
         imageControls.Children.Add(new ContentControl { Content = CreateBackgroundMediaEditor(style, scope), HorizontalContentAlignment = HorizontalAlignment.Stretch });
-        imageControls.Children.Add(Choice("图片模式", ["缩放", "拉伸", "适应"], ["Zoom", "Stretch", "Fit"], style.ImageMode, value => style.ImageMode = value));
+        imageControls.Children.Add(Choice("图片模式", ["缩放", "拉伸", "适应"], ["Zoom", "Stretch", "Fit"], style.ImageMode, value => style.ImageMode = value, read: () => style.ImageMode));
         Button clear = new() { Content = "清除背景媒体" };
         clear.Click += (_, _) => { style.ImagePath = ""; style.Playlist.Clear(); SettingChanged(); };
         imageControls.Children.Add(clear);
@@ -1051,8 +1077,8 @@ public sealed partial class MainWindow
         });
         if (includeGlass)
         {
-            var glass = Toggle("毛玻璃效果", style.Glass, value => style.Glass = value);
-            var blur = Range("模糊程度", 0, 100, style.Blur, value => style.Blur = value, QueueSurfaceRefresh);
+            var glass = Toggle("毛玻璃效果", style.Glass, value => style.Glass = value, read: () => style.Glass);
+            var blur = Range("模糊程度", 0, 100, style.Blur, value => style.Blur = value, QueueSurfaceRefresh, read: () => style.Blur);
             panel.Children.Add(glass); panel.Children.Add(blur);
             _refreshSettingAvailability.Add(() => { glass.IsEnabled = allowGlass(); blur.IsEnabled = allowGlass() && style.Glass; });
         }
@@ -1068,7 +1094,7 @@ public sealed partial class MainWindow
             () => _settings.ToolbarBackgroundColorCleared,
             (value, cleared) => { _settings.ToolbarBackgroundColor = value; _settings.ToolbarBackgroundColorCleared = cleared; },
             value => _settings.ToolbarBackgroundOpacity = value));
-        panel.Children.Add(Toggle("自动隐藏", _settings.ToolbarAutoHide, value => _settings.ToolbarAutoHide = value));
+        panel.Children.Add(Toggle("自动隐藏", _settings.ToolbarAutoHide, value => _settings.ToolbarAutoHide = value, read: () => _settings.ToolbarAutoHide));
         NumberBox hideTime = new() { Header = "自动隐藏时间（秒）", Minimum = 1, Maximum = 600,
             Value = ToolbarAutoHidePolicy.NormalizeDelay(_settings.ToolbarAutoHideSeconds),
             SmallChange = 1, SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline };
@@ -1080,15 +1106,15 @@ public sealed partial class MainWindow
         };
         panel.Children.Add(hideTime);
         var animation = Choice("隐藏动画", ["渐入渐出", "飞出"], ["Fade", "Fly"],
-            _settings.ToolbarHideAnimation, value => _settings.ToolbarHideAnimation = value);
+            _settings.ToolbarHideAnimation, value => _settings.ToolbarHideAnimation = value, read: () => _settings.ToolbarHideAnimation);
         panel.Children.Add(animation);
         panel.Children.Add(Note("仅在查看模式下无操作时隐藏；移动鼠标、触摸或按键后重新显示。飞出动画朝最近的窗口边框移动。"));
         _refreshSettingAvailability.Add(() => hideTime.IsEnabled = animation.IsEnabled = _settings.ToolbarAutoHide);
-        panel.Children.Add(Toggle("无字模式", _settings.ToolbarIconOnly, value => _settings.ToolbarIconOnly = value));
-        panel.Children.Add(Range("大小", .6, 2, _settings.ToolbarScale, value => _settings.ToolbarScale = value));
-        panel.Children.Add(Range("圆角", 0, 60, _settings.ToolbarRadius, value => _settings.ToolbarRadius = value));
+        panel.Children.Add(Toggle("无字模式", _settings.ToolbarIconOnly, value => _settings.ToolbarIconOnly = value, read: () => _settings.ToolbarIconOnly));
+        panel.Children.Add(Range("大小", .6, 2, _settings.ToolbarScale, value => _settings.ToolbarScale = value, read: () => _settings.ToolbarScale));
+        panel.Children.Add(Range("圆角", 0, 60, _settings.ToolbarRadius, value => _settings.ToolbarRadius = value, read: () => _settings.ToolbarRadius));
         panel.Children.Add(Range("边框粗细", 0, 20, _settings.ToolbarBorderThickness,
-            value => _settings.ToolbarBorderThickness = value, ToolbarBorderChanged));
+            value => _settings.ToolbarBorderThickness = value, ToolbarBorderChanged, read: () => _settings.ToolbarBorderThickness));
         ColorPicker borderColor = new()
         {
             IsAlphaEnabled = true, IsHexInputVisible = true,
@@ -1104,11 +1130,11 @@ public sealed partial class MainWindow
         resetBorder.Click += (_, _) => { _settings.ToolbarBorderColor = ""; ToolbarBorderChanged(); };
         panel.Children.Add(resetBorder);
         panel.Children.Add(Note("控制窗、画笔栏和浮岛共用这套边框；粗细为 0 时没有边框。颜色默认跟随主题线条色，设定后不再随深浅主题变化。"));
-        var horizontal = Range("距左右边框", 0, 200, _settings.ToolbarHorizontalInset, value => _settings.ToolbarHorizontalInset = value);
-        var vertical = Range("距上下边框", 0, 200, _settings.ToolbarVerticalInset, value => _settings.ToolbarVerticalInset = value);
+        var horizontal = Range("距左右边框", 0, 200, _settings.ToolbarHorizontalInset, value => _settings.ToolbarHorizontalInset = value, read: () => _settings.ToolbarHorizontalInset);
+        var vertical = Range("距上下边框", 0, 200, _settings.ToolbarVerticalInset, value => _settings.ToolbarVerticalInset = value, read: () => _settings.ToolbarVerticalInset);
         panel.Children.Add(horizontal); panel.Children.Add(vertical);
-        panel.Children.Add(Toggle("毛玻璃效果", _settings.ToolbarGlass, value => _settings.ToolbarGlass = value));
-        var blur = Range("模糊程度", 0, 100, _settings.ToolbarBlur, value => _settings.ToolbarBlur = value, QueueSurfaceRefresh); panel.Children.Add(blur);
+        panel.Children.Add(Toggle("毛玻璃效果", _settings.ToolbarGlass, value => _settings.ToolbarGlass = value, read: () => _settings.ToolbarGlass));
+        var blur = Range("模糊程度", 0, 100, _settings.ToolbarBlur, value => _settings.ToolbarBlur = value, QueueSurfaceRefresh, read: () => _settings.ToolbarBlur); panel.Children.Add(blur);
         _refreshSettingAvailability.Add(() =>
         {
             horizontal.Visibility = _settings.ToolbarPosition.EndsWith("Center") ? Visibility.Collapsed : Visibility.Visible;
@@ -1131,8 +1157,8 @@ public sealed partial class MainWindow
             () => _settings.WidgetBackgroundColorCleared,
             (value, cleared) => { _settings.WidgetBackgroundColor = value; _settings.WidgetBackgroundColorCleared = cleared; },
             value => _settings.WidgetBackgroundOpacity = value));
-        var glass = Toggle("毛玻璃效果", _settings.WidgetGlass, value => _settings.WidgetGlass = value);
-        var blur = Range("模糊程度", 0, 100, _settings.WidgetBlur, value => _settings.WidgetBlur = value, QueueSurfaceRefresh);
+        var glass = Toggle("毛玻璃效果", _settings.WidgetGlass, value => _settings.WidgetGlass = value, read: () => _settings.WidgetGlass);
+        var blur = Range("模糊程度", 0, 100, _settings.WidgetBlur, value => _settings.WidgetBlur = value, QueueSurfaceRefresh, read: () => _settings.WidgetBlur);
         panel.Children.Add(glass); panel.Children.Add(blur);
         _refreshSettingAvailability.Add(() => blur.IsEnabled = _settings.WidgetGlass);
         // 颜色层的通用说明由 SurfaceColorEditor 提供；这里只补充毛玻璃和不透明颜色的关系。
@@ -1158,7 +1184,7 @@ public sealed partial class MainWindow
         panel.Children.Add(CreateAppearancePreview("Clock"));
         panel.Children.Add(ClockFontPicker());
         panel.Children.Add(Choice("时钟粗细", ["细体", "常规", "中等", "粗体"], ["Light", "Normal", "Medium", "Bold"],
-            _settings.ClockFontWeight, value => _settings.ClockFontWeight = value));
+            _settings.ClockFontWeight, value => _settings.ClockFontWeight = value, read: () => _settings.ClockFontWeight));
         ColorPicker picker = new()
         {
             IsAlphaEnabled = false, IsHexInputVisible = true,
