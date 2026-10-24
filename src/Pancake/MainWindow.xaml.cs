@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Shapes;
 using Pancake.Controls;
 using Pancake.Models;
 using Pancake.Services;
+using Pancake.Shared;
 using Pancake.ViewModels;
 using Windows.Graphics;
 using Windows.Foundation;
@@ -120,6 +121,7 @@ public sealed partial class MainWindow : Window
         InitializeAppWindow();
         InitializeTimersAndServices();
         InitializePresentationBehavior();
+        InitializeCloudSync();
 
         RootShell.Loaded += (_, _) =>
         {
@@ -316,12 +318,15 @@ public sealed partial class MainWindow : Window
         UpdateEditButtonPosition();
         DisplayRoot.Visibility = Visibility.Visible;
         SettingsRoot.Visibility = Visibility.Collapsed;
+        CloudControlRoot.Visibility = Visibility.Collapsed;
         // 设置页里调整过网格大小或吸附后，回到看板时一次性应用磁贴位置与网格。
         ApplyPendingBoardLayout();
         UpdateProjectCommands();
         BackToBoardButton.Visibility = Visibility.Collapsed;
         EditBoardButton.Visibility = Visibility.Visible;
         SettingsButton.Visibility = Visibility.Visible;
+        // 连接集控后控制窗显示“班级”入口，查看班务、同步状态与全部作业。
+        UpdateCloudToolbarButton();
         // 回到作业板时缩放岛重新出现，并重新贴合控制窗。
         RefreshIslands();
     }
@@ -334,6 +339,7 @@ public sealed partial class MainWindow : Window
         RecordToolbarActivity(false);
         DisplayRoot.Visibility = Visibility.Collapsed;
         SettingsRoot.Visibility = Visibility.Visible;
+        CloudControlRoot.Visibility = Visibility.Collapsed;
         if (SettingsRoot.SelectedItem is null)
         {
             // 等导航模板加载并显示后再设置默认项，确保背景和选中指示条使用同一状态。
@@ -345,6 +351,7 @@ public sealed partial class MainWindow : Window
         BackToBoardButton.Visibility = Visibility.Visible;
         EditBoardButton.Visibility = Visibility.Collapsed;
         SettingsButton.Visibility = Visibility.Collapsed;
+        CloudControlButton.Visibility = Visibility.Collapsed;
         UpdateEditingToolbarVisibility();
         // 设置页里没有作业板，缩放岛随作业板一起收起。
         RefreshIslands();
@@ -391,6 +398,7 @@ public sealed partial class MainWindow : Window
         UpdateEditingToolbarVisibility();
         SetTilesEditing(false);
         ApplyExtendedSettings();
+        if (_cloudTilesRebuildPending) { _cloudTilesRebuildPending = false; BuildTiles(); }
         ScheduleSave();
     }
 
@@ -916,6 +924,8 @@ public sealed partial class MainWindow : Window
         // 已有笔迹保留原始颜色；富文本在加载和保存时进行默认内容色转换。
         BuildTiles();
         HideFullScreenExitHint();
+        // 班级页与班务条由代码生成，按新主题重建配色。
+        RefreshCloudStatusViews();
         if (_appWindow is not null)
         {
             _appWindow.TitleBar.ButtonForegroundColor = BoardTheme.TextColor;
@@ -1298,6 +1308,8 @@ public sealed partial class MainWindow : Window
             _settings.Data ??= new DataSettings();
             _settings.Data.Backup ??= new BackupSettings();
             _settings.Data.AutoBackup ??= new BackupSettings();
+            _settings.CloudSync ??= new CloudSyncSettings();
+            if (string.IsNullOrWhiteSpace(_settings.CloudSync.LayoutPolicy)) _settings.CloudSync.LayoutPolicy = LayoutPolicies.Shared;
             _autofill.EnsureBuiltIns();
             _autofill.Prune(DateTime.Now);
             _settings.GridLineThickness = Math.Clamp(_settings.GridLineThickness, .5, 5);
@@ -1339,8 +1351,8 @@ public sealed partial class MainWindow : Window
     private void ScheduleSave()
     {
         if (!_isLoaded) return;
-        // 自动保存关闭后只在退出、手动保存或立即保存时写盘，防止意外损坏来不及挽救。
-        if (!_settings.AutoSaveEnabled) return;
+        // 自动保存关闭后只在退出、手动保存或立即保存时写盘，防止意外损坏来不及挽救；设置改动仍会同步到集控。
+        if (!_settings.AutoSaveEnabled) { RequestCloudLayoutSync(); return; }
         _saveTimer.Stop();
         _saveTimer.Start();
     }
@@ -1355,6 +1367,8 @@ public sealed partial class MainWindow : Window
             CaptureCurrentProject();
             _library.Settings = _settings;
             _projectStore.Save(_library);
+            // 自动保存也要把改动送到集控；内容没变时同步服务会直接跳过。
+            if (!_skipSaveOnClose && _isLoaded) RequestCloudSync();
         }
         catch (Exception exception)
         {
@@ -1427,6 +1441,7 @@ public sealed partial class MainWindow : Window
     private void RootShell_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         ApplyDisplayLayout();
+        RenderBoardBanner();
         ApplyToolbarSettings();
         RecordToolbarActivity(false);
         RefreshAppearancePreviews();

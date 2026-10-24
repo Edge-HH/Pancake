@@ -3,3 +3,6 @@
 **/obj/
 artifacts/
 .mimosa/
+src/Pancake.Server/*.db*
+pancake.db*
+src/Pancake.Server/assets/

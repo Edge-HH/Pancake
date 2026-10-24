@@ -12,6 +12,21 @@
       "stopAtEntry": false,
       "console": "internalConsole",
       "justMyCode": true
+    },
+    {
+      "name": "Pancake Server",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "build Pancake.Server (Debug)",
+      "program": "${workspaceFolder}/src/Pancake.Server/bin/Debug/net8.0/Pancake.Server.dll",
+      "cwd": "${workspaceFolder}/src/Pancake.Server",
+      "args": [],
+      "stopAtEntry": false,
+      "console": "internalConsole",
+      "justMyCode": true,
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
     }
   ]
 }

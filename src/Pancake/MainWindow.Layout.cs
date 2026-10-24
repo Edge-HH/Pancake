@@ -145,6 +145,8 @@ public sealed partial class MainWindow
 
     private void ClockPanel_SizeChanged(object sender, SizeChangedEventArgs e)
     {
+        // 班务条在分屏模式下按时钟区宽度排版。
+        if (_isLoaded) RenderBoardBanner();
         if (!_isLoaded || _settings.LayoutMode is not ("Split" or "Clock")) return;
         ApplyDockedClockLayout();
         UpdateLayoutHandles();

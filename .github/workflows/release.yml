@@ -43,6 +43,14 @@ jobs:
           }
           "version=$version" >> $env:GITHUB_OUTPUT
 
+      - name: 🧪 集控服务端与同步测试
+        shell: pwsh
+        run: |
+          dotnet run --project ./tests/ServerLogic/ServerLogic.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw "集控服务端测试失败。" }
+          dotnet run --project ./tests/SyncLogic/SyncLogic.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { throw "集控同步测试失败。" }
+
       - name: 📦 生成自带运行环境的程序
         shell: pwsh
         run: |
