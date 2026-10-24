@@ -17,6 +17,7 @@ public sealed partial class MainWindow
     private bool _layingOut;
     private bool _splitDragging;
     private double _splitDragRatio;
+    private bool _splitDragFramePending;
     private Dictionary<string, RegionPlacement>? _widgetEditSnapshot;
     private HashSet<string>? _dockedCustomizationEditSnapshot;
     private bool _boardLayoutPending;
@@ -281,26 +282,62 @@ public sealed partial class MainWindow
     {
         _splitDragging = true;
         _splitDragRatio = _settings.LayoutMode switch { "Clock" => 1, "Board" => 0, _ => _settings.SplitRatio };
+        // 先按整块显示区铺好网格，拖动中作业区变大也不用逐帧重建成百上千条网格线。
+        RenderSplitDragGrid();
     }
 
-    /// <summary>拖动分隔条：按位移换算比例，拖进分屏范围就即时切回分屏预览。</summary>
+    /// <summary>拖动分隔条：按位移换算比例，分隔条即时跟手，两区尺寸合并到下一帧统一重排。</summary>
     private void DragSplitHandle(bool compact, double horizontalChange, double verticalChange)
     {
         double width = Math.Max(1, DisplayRoot.ActualWidth), height = Math.Max(1, DisplayRoot.ActualHeight);
         _splitDragRatio = Math.Clamp(_splitDragRatio + (compact ? verticalChange : horizontalChange) / (compact ? height : width), .01, .99);
+        if (_splitter is not null)
+        {
+            if (compact) Canvas.SetTop(_splitter, height * _splitDragRatio - 5);
+            else Canvas.SetLeft(_splitter, width * _splitDragRatio - 5);
+        }
+        // 指针事件的频率常高于刷新率，每次都重排两区会堆积布局；一帧只应用一次最新比例。
+        if (_splitDragFramePending) return;
+        _splitDragFramePending = true;
+        CompositionTarget.Rendering += ApplySplitDragFrame;
+    }
+
+    private void ApplySplitDragFrame(object? sender, object e)
+    {
+        CompositionTarget.Rendering -= ApplySplitDragFrame;
+        if (!_splitDragFramePending) return;
+        _splitDragFramePending = false;
         _settings.SplitRatio = _splitDragRatio;
         // 拖回分屏范围时立即切回分屏，松手前就能看到分屏比例，松手时才写入最终模式。
-        if (_settings.LayoutMode != "Split" && WidgetLayout.CompleteSplit(_splitDragRatio) == "Split") _settings.LayoutMode = "Split";
-        ApplyDisplayLayout();
-        if (_splitter is null) return;
-        if (compact) Canvas.SetTop(_splitter, height * _settings.SplitRatio - 5);
-        else Canvas.SetLeft(_splitter, width * _settings.SplitRatio - 5);
+        if (_settings.LayoutMode != "Split")
+        {
+            if (WidgetLayout.CompleteSplit(_splitDragRatio) != "Split") return;
+            _settings.LayoutMode = "Split";
+            ApplyDisplayLayout();
+            return;
+        }
+        // 已经是分屏时只改两区比例，不再重走整套布局（字号、组件迁移、笔迹层等都不变）。
+        double ratio = Math.Clamp(_splitDragRatio, .05, .95);
+        if (RootShell.ActualWidth < 900)
+        {
+            DisplayGrid.RowDefinitions[0].Height = new GridLength(ratio, GridUnitType.Star);
+            DisplayGrid.RowDefinitions[1].Height = new GridLength(1 - ratio, GridUnitType.Star);
+        }
+        else
+        {
+            DisplayGrid.ColumnDefinitions[0].Width = new GridLength(ratio, GridUnitType.Star);
+            DisplayGrid.ColumnDefinitions[1].Width = new GridLength(1 - ratio, GridUnitType.Star);
+        }
     }
 
     /// <summary>松开分隔条：落在两端就切换单区并复位比例，否则留在分屏并保留拖出来的比例。</summary>
     private void CompleteSplitDrag()
     {
+        if (_splitDragFramePending) ApplySplitDragFrame(null, EventArgs.Empty);
         _splitDragging = false;
+        // 拖动时网格按整块显示区铺开，松手后按作业区的最终尺寸重新裁剪一次。
+        _renderedGridWidth = 0;
+        UpdateBoardBounds();
         string completed = WidgetLayout.CompleteSplit(_splitDragRatio);
         if (completed is "Board" or "Clock")
         {

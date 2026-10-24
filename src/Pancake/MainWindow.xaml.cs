@@ -718,6 +718,8 @@ public sealed partial class MainWindow : Window
         string gridAppearance = $"{GridAppearance.EffectiveStyle(_settings.GridStyle, _isEditing, _settings.ShowGridWhileEditing)}|{GridSize}|{_settings.GridColor}|{_settings.GridLineThickness}|{_settings.GridDotColor}|{_settings.GridDotDiameter}";
         (double gridLeft, double gridTop, double gridRight, double gridBottom) = GridRenderWindow(width, height);
         string gridWindow = $"{Math.Round(gridLeft / 4)}:{Math.Round(gridTop / 4)}:{Math.Round(gridRight / 4)}:{Math.Round(gridBottom / 4)}";
+        // 拖动分隔条时网格已按整块显示区预先铺好，逐帧重建会让拖动明显卡顿。
+        if (_splitDragging) return;
         if (Math.Abs(width - _renderedGridWidth) > 0.5 || Math.Abs(height - _renderedGridHeight) > 0.5
             || _renderedGridWindow != gridWindow || _renderedGridAppearance != gridAppearance)
         {
@@ -780,6 +782,21 @@ public sealed partial class MainWindow : Window
         string style = GridAppearance.EffectiveStyle(_settings.GridStyle, _isEditing, _settings.ShowGridWhileEditing);
         if (style == "None") return;
         (double left, double top, double right, double bottom) = GridRenderWindow(width, height);
+        DrawGrid(GridCanvas, style, left, top, right, bottom);
+    }
+
+    /// <summary>
+    /// 拖动分隔条前把网格铺到整块显示区那么大：作业区在拖动中最多长到这么大，
+    /// 此后逐帧调整尺寸都不必重建网格，松手后再按最终尺寸重新裁剪。
+    /// </summary>
+    private void RenderSplitDragGrid()
+    {
+        string style = GridAppearance.EffectiveStyle(_settings.GridStyle, _isEditing, _settings.ShowGridWhileEditing);
+        double width = BoardCanvas.Width > 0 ? BoardCanvas.Width : 1100, height = BoardCanvas.Height > 0 ? BoardCanvas.Height : 780;
+        (double left, double top, double right, double bottom) = GridRenderWindow(width, height);
+        right = Math.Max(right, left + Math.Ceiling(DisplayRoot.ActualWidth / GridSize) * GridSize);
+        bottom = Math.Max(bottom, top + Math.Ceiling(DisplayRoot.ActualHeight / GridSize) * GridSize);
+        if (_settings.InfiniteBoard) { right = Math.Min(width, right); bottom = Math.Min(height, bottom); }
         DrawGrid(GridCanvas, style, left, top, right, bottom);
     }
 
