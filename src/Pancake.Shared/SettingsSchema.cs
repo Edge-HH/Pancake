@@ -9,20 +9,54 @@ public sealed record SettingOption(string Value, string Label);
 
 /// <summary>
 /// 一项可同步的软件设置。Key 是 BoardSettingsState 上的属性名，嵌套设置用点号连接（例如 Autofill.Subject.Enabled）。
-/// Hidden 的设置照常同步，但网页表单不单独显示（组件位置由布局编辑器处理，颜色清除标记由取色控件处理）。
+/// Page 对应大屏设置页（见 <see cref="SettingsSchema.Pages"/>），网页按同样的分类、顺序和名称排列；Section 是页内小标题。
+/// Hidden 的设置照常同步，但网页表单不单独显示（组件位置由布局预览处理，颜色清除标记与不透明度由取色控件处理）。
+/// When / EnableWhen 是显示与可用条件，与大屏设置页的联动一致："Key" 为真、"Key=A|B" 取值之一、"Key^=前缀"、"Key$=后缀"，
+/// 前面加 "!" 取反，多个条件用 "&amp;" 连接。
+/// Variant 指定控件外观：Surface（磁贴、控制窗、组件卡这类面板背景）、Position（控制窗位置九宫格）、NumberBox。
 /// </summary>
-public sealed record SettingDescriptor(string Key, string Group, string Label, SettingKind Kind, JsonNode? Default,
+public sealed record SettingDescriptor(string Key, string Page, string Label, SettingKind Kind, JsonNode? Default,
     double? Min = null, double? Max = null, double? Step = null, IReadOnlyList<SettingOption>? Options = null,
-    string? Hint = null, bool Hidden = false, string? ClearedKey = null);
+    string? Hint = null, bool Hidden = false, string? ClearedKey = null, string? Section = null, string? When = null,
+    string? EnableWhen = null, string? Variant = null, string? OpacityKey = null, string? Unit = null);
+
+/// <summary>大屏设置页。Nav 是左侧导航的分组（null 表示一级页面），Preview 是右侧预览的种类，Note 是页底说明。</summary>
+public sealed record SettingPage(string Key, string? Nav, string Title, string Description, string Icon, string? Preview = null, string? Note = null);
 
 /// <summary>
 /// 班级设置清单：大屏、服务端和网页共用的唯一来源。服务端按它校验网页和设备上传的设置，
-/// 网页按它生成表单，桌面端按它挑选要同步的字段。新增软件设置时必须在这里登记，或者写进 DeviceLocalKeys。
+/// 网页按它生成与大屏相同分类的设置页，桌面端按它挑选要同步的字段。新增软件设置时必须在这里登记，或者写进 DeviceLocalKeys。
 /// </summary>
 public static class SettingsSchema
 {
-    public static readonly IReadOnlyList<string> Groups =
-        ["布局", "网格与排版", "磁贴文字", "磁贴背景", "共享背景", "时钟区背景", "作业板背景", "控制窗", "组件卡", "时钟", "主题与色系", "天气", "班务条", "噪音提醒", "输入与补全", "保存"];
+    /// <summary>与大屏设置窗口左侧导航一致；窗口、集控、锁定与关于只和本机有关，不在网页出现。</summary>
+    public static readonly IReadOnlyList<SettingPage> Pages =
+    [
+        new("Layout", null, "布局", "调整布局模式、无限作业板与网格。", "layout", "Layout",
+            "点击自动排列时按文字、图片和笔迹收紧磁贴；自动对齐会尽量统一相近尺寸并对齐行列。看板与图片导出共用这些设置，优先从左上角排列。"),
+        new("AppearanceTile", "外观", "磁贴", "调整磁贴标题和背景样式。", "board", "Tile",
+            "默认正文样式用于新建和尚未单独设置格式的正文；已有的局部字体、粗体、斜体、颜色与高光不会被覆盖。开启纯文本粘贴后，Ctrl+V 和右键粘贴都会移除来源格式。"),
+        new("AppearanceBackground", "外观", "背景板", "设置跨区、时钟与作业板背景。", "image", "Background",
+            "跨区背景仅在分屏生效，开启后区域底图由跨区背景统一管理，毛玻璃仍可分别调整。自由布局使用磁贴样式和主题底色。"),
+        new("AppearanceTheme", "外观", "主题", "调整界面主题和看板色系。", "palette", "Board"),
+        new("AppearanceGrid", "外观", "网格", "设置网格的显示样式，不改变吸附逻辑。", "grid", "Grid",
+            "此页只改变网格显示样貌；网格吸附在“布局”页的“吸附到网格”中设置。"),
+        new("AppearanceToolbar", "外观", "控制窗", "调整控制窗的显示、位置和外观。", "settings", "Toolbar",
+            "控制窗、画笔栏和浮岛共用这套边框；粗细为 0 时没有边框。颜色默认跟随主题线条色，设定后不再随深浅主题变化。"),
+        new("AppearanceComponents", "外观", "组件", "调整天气与噪音组件卡的背景和毛玻璃效果。", "components", "Components",
+            "天气和噪音组件卡共用这套背景，默认沿用主题底色。毛玻璃的模糊透过颜色层显示：颜色层完全不透明时只能看到底色，想让模糊透出来需要适当调高透明度。"),
+        new("AppearanceClock", "外观", "时钟", "调整时钟的字体、粗细与颜色。", "clock", "Clock",
+            "字体作用于时间、秒数和日期；粗细只作用于时间数字。黑色和白色会跟随深浅色模式自动反转（深色模式显示白色，浅色模式显示黑色），其他颜色固定不变。"),
+        new("ComponentsWeather", "组件", "天气", "选择天气地区并查看预警。", "weather", "Components", "使用小米天气 API，地区修改后大屏会自动刷新天气。"),
+        new("ComponentsNoise", "组件", "噪音检测", "设置检测间隔、吵闹阈值与提示音。", "mic", "Components",
+            "只计算实时音量，不录音、不保存音频。输入设备与麦克风校准和每块大屏的硬件有关，请在大屏上设置。"),
+        new("ComponentsBanner", "组件", "班务条", "选择大屏顶部班务条显示哪些公告。", "megaphone"),
+        new("AutofillSubject", "自动填充", "学科补全", "设置学科补全的匹配严格度。", "book", null,
+            "宽松：输入 1 个字符即提示，首字母允许跳字；正常：汉字 1 个或字母 2 个起按前缀匹配；严格：2 个字符起，只认完整前缀。学科列表和默认颜色保存在每块大屏上。"),
+        new("AutofillHomework", "自动填充", "作业补全", "记录常输入的作业名称，并按学科范围提示补全。", "edit", null,
+            "全局隔离把所有词记进同一个词库；分学科隔离把自动学习写入当前学科，全局词仍然始终可用。已收录与待收录的词库保存在每块大屏上。"),
+        new("Data", null, "数据", "管理自动保存。数据导出与自动备份目录和每块大屏有关，请在大屏上设置。", "db")
+    ];
 
     private static readonly SettingOption[] ToolbarPositions =
     [
@@ -39,103 +73,104 @@ public static class SettingsSchema
     };
     private static readonly SettingOption[] Levels = [new("Loose", "宽松"), new("Normal", "正常"), new("Strict", "严格")];
 
+    // 页面、顺序与名称照搬大屏设置页，网页逐页按这个顺序生成控件。
     public static readonly IReadOnlyList<SettingDescriptor> All =
     [
         // 布局
-        new("LayoutMode", "布局", "布局模式", SettingKind.Enum, "Split", Options: [new("Split", "分屏（时钟 + 作业）"), new("Board", "仅作业"), new("Clock", "仅时钟"), new("Free", "自由布局")]),
-        new("SplitRatio", "布局", "分屏时钟区占比", SettingKind.Number, 0.4, 0.1, 0.9, 0.01),
-        new("InfiniteBoard", "布局", "无限作业板（可平移与缩放）", SettingKind.Bool, false),
-        new("Widgets", "布局", "组件位置", SettingKind.Widgets, new JsonObject(), Hidden: true),
-        new("CustomizedDockedWidgets", "布局", "手动调整过的停靠组件", SettingKind.Internal, new JsonArray(), Hidden: true),
-        new("DockedWidgetLayoutVersion", "布局", "停靠布局版本", SettingKind.Internal, 0, Hidden: true),
+        new("LayoutMode", "Layout", "布局模式", SettingKind.Enum, "Split", Options: [new("Split", "分屏"), new("Board", "仅作业"), new("Clock", "仅时钟"), new("Free", "自由布局")]),
+        new("SplitRatio", "Layout", "时钟区宽度", SettingKind.Number, 0.4, 0.1, 0.9, 0.01, Hint: "也可以在预览里拖动分隔条。", When: "LayoutMode=Split"),
+        new("InfiniteBoard", "Layout", "无限作业板", SettingKind.Bool, false, Hint: "开启后可滚动、触摸平移、Ctrl + 滚轮缩放；编辑磁贴时可用滚动条平移。"),
+        new("GridSize", "Layout", "网格大小", SettingKind.Number, 48, 16, 160, 1, Unit: "px"),
+        new("GridSnappingEnabled", "Layout", "吸附到网格", SettingKind.Bool, true, Section: "自动布局"),
+        new("AutoLayoutGap", "Layout", "自动排版磁贴间隔", SettingKind.Number, 0, 0, 120, 1, Unit: "px", Section: "自动布局"),
+        new("AutoLayoutAlign", "Layout", "自动对齐", SettingKind.Bool, true, Section: "自动布局"),
+        new("AutoLayoutResize", "Layout", "自动调整磁贴大小", SettingKind.Bool, true, Section: "自动布局"),
+        new("Widgets", "Layout", "组件位置", SettingKind.Widgets, new JsonObject(), Hidden: true),
+        new("CustomizedDockedWidgets", "Layout", "手动调整过的停靠组件", SettingKind.Internal, new JsonArray(), Hidden: true),
+        new("DockedWidgetLayoutVersion", "Layout", "停靠布局版本", SettingKind.Internal, 0, Hidden: true),
 
-        // 网格与排版
-        new("GridSize", "网格与排版", "网格大小", SettingKind.Number, 48, 16, 160, 1),
-        new("GridSnappingEnabled", "网格与排版", "网格吸附", SettingKind.Bool, true),
-        new("GridStyle", "网格与排版", "网格样式", SettingKind.Enum, "Grid", Options: [new("Grid", "网格"), new("Dots", "点阵"), new("None", "不显示")]),
-        new("GridColor", "网格与排版", "网格线颜色", SettingKind.Color, "#6956565C"),
-        new("GridLineThickness", "网格与排版", "网格线粗细", SettingKind.Number, 1.6, 0.5, 5, 0.1),
-        new("GridDotColor", "网格与排版", "点阵颜色", SettingKind.Color, "#8F56565C"),
-        new("GridDotDiameter", "网格与排版", "点阵直径", SettingKind.Number, 3, 1, 12, 0.5),
-        new("ShowGridWhileEditing", "网格与排版", "编辑时显示网格", SettingKind.Bool, true),
-        new("AutoLayoutGap", "网格与排版", "自动排版磁贴间隔", SettingKind.Number, 0, 0, 120, 1),
-        new("AutoLayoutAlign", "网格与排版", "自动排版对齐网格", SettingKind.Bool, true),
-        new("AutoLayoutResize", "网格与排版", "自动排版调整大小", SettingKind.Bool, true),
+        // 外观 → 磁贴
+        new("TileTitleSize", "AppearanceTile", "标题大小", SettingKind.Number, 29, 16, 72, 1, Unit: "px"),
+        new("TileBodyFontSize", "AppearanceTile", "正文默认字号", SettingKind.Number, 20, 12, 72, 1, Unit: "px"),
+        new("TileBodyFontFamily", "AppearanceTile", "正文默认字体", SettingKind.Font, "HarmonyOS Sans SC"),
+        new("TileBodyBold", "AppearanceTile", "正文默认粗体", SettingKind.Bool, false),
+        new("TileBodyItalic", "AppearanceTile", "正文默认斜体", SettingKind.Bool, false),
+        new("PastePlainTextOnly", "AppearanceTile", "仅粘贴纯文本", SettingKind.Bool, false),
+        new("TileBackground", "AppearanceTile", "磁贴背景", SettingKind.Background, BackgroundDefault(), Section: "磁贴背景", Variant: "Surface"),
 
-        // 磁贴文字
-        new("TileTitleSize", "磁贴文字", "标题大小", SettingKind.Number, 29, 16, 72, 1),
-        new("TileBodyFontFamily", "磁贴文字", "正文默认字体", SettingKind.Font, "HarmonyOS Sans SC"),
-        new("TileBodyFontSize", "磁贴文字", "正文默认字号", SettingKind.Number, 20, 12, 72, 1),
-        new("TileBodyBold", "磁贴文字", "正文默认加粗", SettingKind.Bool, false),
-        new("TileBodyItalic", "磁贴文字", "正文默认斜体", SettingKind.Bool, false),
+        // 外观 → 背景板
+        new("SharedBackgroundEnabled", "AppearanceBackground", "使用跨区背景", SettingKind.Bool, false, Hint: "仅分屏时可用。", EnableWhen: "LayoutMode=Split"),
+        new("SharedBackground", "AppearanceBackground", "跨区背景", SettingKind.Background, BackgroundDefault(), EnableWhen: "LayoutMode=Split&SharedBackgroundEnabled"),
+        new("ClockBackground", "AppearanceBackground", "时钟区域背景", SettingKind.Background, BackgroundDefault(), Section: "时钟区域背景", EnableWhen: "LayoutMode=Split|Clock"),
+        new("BoardBackground", "AppearanceBackground", "作业板区域背景", SettingKind.Background, BackgroundDefault(), Section: "作业板区域背景", EnableWhen: "LayoutMode=Split|Board"),
 
-        // 背景
-        new("TileBackground", "磁贴背景", "磁贴背景", SettingKind.Background, BackgroundDefault()),
-        new("SharedBackgroundEnabled", "共享背景", "时钟区与作业板共用一张背景（仅分屏）", SettingKind.Bool, false),
-        new("SharedBackground", "共享背景", "共享背景", SettingKind.Background, BackgroundDefault()),
-        new("ClockBackground", "时钟区背景", "时钟区背景", SettingKind.Background, BackgroundDefault()),
-        new("BoardBackground", "作业板背景", "作业板背景", SettingKind.Background, BackgroundDefault()),
+        // 外观 → 主题
+        new("Theme", "AppearanceTheme", "主题", SettingKind.Enum, "Dark", Options: [new("Dark", "深色"), new("Light", "浅色"), new("Default", "跟随系统")], Hint: "深色更接近教室黑板，强光环境可切换浅色。"),
+        new("Palette", "AppearanceTheme", "色系", SettingKind.Enum, "Vivid", Options: [new("Vivid", "鲜艳"), new("Macaron", "马卡龙")], Hint: "磁贴主题色与高光色按色系一一对应切换。"),
 
-        // 控制窗
-        new("ToolbarPosition", "控制窗", "位置", SettingKind.Enum, "BottomCenter", Options: ToolbarPositions),
-        new("ToolbarIconOnly", "控制窗", "只显示图标", SettingKind.Bool, true),
-        new("ToolbarScale", "控制窗", "缩放", SettingKind.Number, 1, 0.6, 2, 0.05),
-        new("ToolbarRadius", "控制窗", "圆角", SettingKind.Number, 14, 0, 60, 1),
-        new("ToolbarBorderThickness", "控制窗", "边框粗细", SettingKind.Number, 1, 0, 20, 0.5),
-        new("ToolbarBorderColor", "控制窗", "边框颜色", SettingKind.Color, "", Hint: "留空跟随主题线条色"),
-        new("ToolbarHorizontalInset", "控制窗", "距左右边框", SettingKind.Number, 24, 0, 200, 1),
-        new("ToolbarVerticalInset", "控制窗", "距上下边框", SettingKind.Number, 24, 0, 200, 1),
-        new("ToolbarBackgroundColor", "控制窗", "背景颜色", SettingKind.Color, "", Hint: "留空跟随主题", ClearedKey: "ToolbarBackgroundColorCleared"),
-        new("ToolbarBackgroundColorCleared", "控制窗", "不使用背景颜色", SettingKind.Bool, false, Hidden: true),
-        new("ToolbarBackgroundOpacity", "控制窗", "背景不透明度", SettingKind.Number, 0.8, 0, 1, 0.01),
-        new("ToolbarGlass", "控制窗", "毛玻璃", SettingKind.Bool, false),
-        new("ToolbarBlur", "控制窗", "模糊程度", SettingKind.Number, 20, 0, 100, 1),
-        new("ToolbarAutoHide", "控制窗", "自动隐藏", SettingKind.Bool, false),
-        new("ToolbarAutoHideSeconds", "控制窗", "自动隐藏时间（秒）", SettingKind.Number, 5, 1, 600, 1),
-        new("ToolbarHideAnimation", "控制窗", "隐藏动画", SettingKind.Enum, "Fade", Options: [new("Fade", "渐入渐出"), new("Fly", "飞出")]),
+        // 外观 → 网格
+        new("GridStyle", "AppearanceGrid", "样式", SettingKind.Enum, "Grid", Options: [new("Grid", "网格"), new("Dots", "点阵"), new("None", "不显示")]),
+        new("GridColor", "AppearanceGrid", "网格颜色", SettingKind.Color, "#6956565C", When: "GridStyle=Grid"),
+        new("GridLineThickness", "AppearanceGrid", "网格粗细", SettingKind.Number, 1.6, 0.5, 5, 0.1, Unit: "px", When: "GridStyle=Grid"),
+        new("GridDotColor", "AppearanceGrid", "点阵颜色", SettingKind.Color, "#8F56565C", When: "GridStyle=Dots"),
+        new("GridDotDiameter", "AppearanceGrid", "点的直径", SettingKind.Number, 3, 1, 12, 0.5, Unit: "px", When: "GridStyle=Dots"),
+        new("ShowGridWhileEditing", "AppearanceGrid", "编辑时显示常规网格", SettingKind.Bool, true),
 
-        // 组件卡
-        new("WidgetBackgroundColor", "组件卡", "背景颜色", SettingKind.Color, "", Hint: "留空跟随主题", ClearedKey: "WidgetBackgroundColorCleared"),
-        new("WidgetBackgroundColorCleared", "组件卡", "不使用背景颜色", SettingKind.Bool, false, Hidden: true),
-        new("WidgetBackgroundOpacity", "组件卡", "背景不透明度", SettingKind.Number, 1, 0, 1, 0.01),
-        new("WidgetGlass", "组件卡", "毛玻璃", SettingKind.Bool, false),
-        new("WidgetBlur", "组件卡", "模糊程度", SettingKind.Number, 20, 0, 100, 1),
+        // 外观 → 控制窗
+        new("ToolbarPosition", "AppearanceToolbar", "位置", SettingKind.Enum, "BottomCenter", Options: ToolbarPositions, Variant: "Position"),
+        new("ToolbarBackgroundColor", "AppearanceToolbar", "背景颜色", SettingKind.Color, "", ClearedKey: "ToolbarBackgroundColorCleared", Variant: "Surface", OpacityKey: "ToolbarBackgroundOpacity"),
+        new("ToolbarBackgroundColorCleared", "AppearanceToolbar", "清除背景颜色", SettingKind.Bool, false, Hidden: true),
+        new("ToolbarBackgroundOpacity", "AppearanceToolbar", "背景颜色不透明度", SettingKind.Number, 0.8, 0, 1, 0.01, Hidden: true),
+        new("ToolbarAutoHide", "AppearanceToolbar", "自动隐藏", SettingKind.Bool, false, Hint: "仅在查看模式下无操作时隐藏；移动鼠标、触摸或按键后重新显示。飞出动画朝最近的窗口边框移动。"),
+        new("ToolbarAutoHideSeconds", "AppearanceToolbar", "自动隐藏时间（秒）", SettingKind.Number, 5, 1, 600, 1, EnableWhen: "ToolbarAutoHide", Variant: "NumberBox"),
+        new("ToolbarHideAnimation", "AppearanceToolbar", "隐藏动画", SettingKind.Enum, "Fade", Options: [new("Fade", "渐入渐出"), new("Fly", "飞出")], EnableWhen: "ToolbarAutoHide"),
+        new("ToolbarIconOnly", "AppearanceToolbar", "无字模式", SettingKind.Bool, true),
+        new("ToolbarScale", "AppearanceToolbar", "大小", SettingKind.Number, 1, 0.6, 2, 0.05, Unit: "×"),
+        new("ToolbarRadius", "AppearanceToolbar", "圆角", SettingKind.Number, 14, 0, 60, 1, Unit: "px"),
+        new("ToolbarBorderThickness", "AppearanceToolbar", "边框粗细", SettingKind.Number, 1, 0, 20, 0.5, Unit: "px"),
+        new("ToolbarBorderColor", "AppearanceToolbar", "边框颜色", SettingKind.Color, ""),
+        new("ToolbarHorizontalInset", "AppearanceToolbar", "距左右边框", SettingKind.Number, 24, 0, 200, 1, Unit: "px", When: "!ToolbarPosition$=Center"),
+        new("ToolbarVerticalInset", "AppearanceToolbar", "距上下边框", SettingKind.Number, 24, 0, 200, 1, Unit: "px", When: "!ToolbarPosition^=Center"),
+        new("ToolbarGlass", "AppearanceToolbar", "毛玻璃效果", SettingKind.Bool, false),
+        new("ToolbarBlur", "AppearanceToolbar", "模糊程度", SettingKind.Number, 20, 0, 100, 1, EnableWhen: "ToolbarGlass"),
 
-        // 时钟
-        new("ClockFontFamily", "时钟", "时钟字体", SettingKind.Font, "", Hint: "留空使用内置字体"),
-        new("ClockFontWeight", "时钟", "时钟粗细", SettingKind.Enum, "Normal", Options: [new("Light", "细体"), new("Normal", "常规"), new("Medium", "中等"), new("Bold", "粗体")]),
-        new("ClockColor", "时钟", "时钟颜色", SettingKind.Color, "", Hint: "留空或黑白时跟随深浅主题"),
+        // 外观 → 组件
+        new("WidgetBackgroundColor", "AppearanceComponents", "背景颜色", SettingKind.Color, "", ClearedKey: "WidgetBackgroundColorCleared", Variant: "Surface", OpacityKey: "WidgetBackgroundOpacity"),
+        new("WidgetBackgroundColorCleared", "AppearanceComponents", "清除背景颜色", SettingKind.Bool, false, Hidden: true),
+        new("WidgetBackgroundOpacity", "AppearanceComponents", "背景颜色不透明度", SettingKind.Number, 1, 0, 1, 0.01, Hidden: true),
+        new("WidgetGlass", "AppearanceComponents", "毛玻璃效果", SettingKind.Bool, false),
+        new("WidgetBlur", "AppearanceComponents", "模糊程度", SettingKind.Number, 20, 0, 100, 1, EnableWhen: "WidgetGlass"),
 
-        // 主题与色系
-        new("Theme", "主题与色系", "主题", SettingKind.Enum, "Dark", Options: [new("Dark", "深色"), new("Light", "浅色"), new("Default", "跟随系统")]),
-        new("Palette", "主题与色系", "色系", SettingKind.Enum, "Vivid", Options: [new("Vivid", "鲜明"), new("Macaron", "马卡龙")]),
+        // 外观 → 时钟
+        new("ClockFontFamily", "AppearanceClock", "时钟字体", SettingKind.Font, ""),
+        new("ClockFontWeight", "AppearanceClock", "时钟粗细", SettingKind.Enum, "Normal", Options: [new("Light", "细体"), new("Normal", "常规"), new("Medium", "中等"), new("Bold", "粗体")]),
+        new("ClockColor", "AppearanceClock", "时钟颜色", SettingKind.Color, ""),
 
-        // 天气
-        new("WeatherCityName", "天气", "城市", SettingKind.Text, "北京", Hidden: true),
-        new("WeatherCityCode", "天气", "城市编码", SettingKind.Text, "101010100", Hidden: true),
-        new("ShowWeatherAlerts", "天气", "显示天气预警", SettingKind.Bool, true),
+        // 组件 → 天气
+        new("WeatherCityName", "ComponentsWeather", "地区", SettingKind.Text, "北京", Hidden: true),
+        new("WeatherCityCode", "ComponentsWeather", "地区编码", SettingKind.Text, "101010100", Hidden: true),
+        new("ShowWeatherAlerts", "ComponentsWeather", "显示极端天气预警", SettingKind.Bool, true),
 
-        // 班务条
-        new("BoardBannerLevels", "班务条", "显示的公告", SettingKind.Enum, "All", Options: [new("All", "全部生效公告"), new("ImportantOnly", "仅重要、紧急与置顶")]),
+        // 组件 → 噪音检测
+        new("NoiseIntervalSeconds", "ComponentsNoise", "检测间隔", SettingKind.Number, 0.1, 0.1, 2, 0.1, Unit: "秒"),
+        new("NoiseThresholdDb", "ComponentsNoise", "吵闹阈值", SettingKind.Number, 60, 20, 120, 1, Unit: "dB"),
+        new("NoiseAlertEnabled", "ComponentsNoise", "吵闹时播放提示音", SettingKind.Bool, false),
+        new("NoiseAlertVolume", "ComponentsNoise", "提示音音量", SettingKind.Number, 1, 0, 1, 0.01, EnableWhen: "NoiseAlertEnabled"),
+        new("PauseNoiseWhenMinimized", "ComponentsNoise", "最小化时暂停监测", SettingKind.Bool, false),
 
-        // 噪音提醒
-        new("NoiseAlertEnabled", "噪音提醒", "超过阈值时提醒", SettingKind.Bool, false),
-        new("NoiseThresholdDb", "噪音提醒", "提醒阈值（dB）", SettingKind.Number, 60, 20, 120, 1),
-        new("NoiseIntervalSeconds", "噪音提醒", "刷新间隔（秒）", SettingKind.Number, 0.1, 0.1, 2, 0.1),
-        new("NoiseAlertVolume", "噪音提醒", "提醒音量", SettingKind.Number, 1, 0, 1, 0.01),
-        new("PauseNoiseWhenMinimized", "噪音提醒", "最小化时暂停检测", SettingKind.Bool, false),
+        // 组件 → 班务条
+        new("BoardBannerLevels", "ComponentsBanner", "显示的公告", SettingKind.Enum, "All", Options: [new("All", "全部生效公告"), new("ImportantOnly", "仅重要、紧急与置顶")]),
 
-        // 输入与补全
-        new("PastePlainTextOnly", "输入与补全", "粘贴时只保留文字", SettingKind.Bool, false),
-        new("Autofill.Subject.Enabled", "输入与补全", "学科补全", SettingKind.Bool, false),
-        new("Autofill.Subject.MatchLevel", "输入与补全", "学科匹配程度", SettingKind.Enum, "Normal", Options: Levels),
-        new("Autofill.Homework.Enabled", "输入与补全", "作业补全", SettingKind.Bool, false),
-        new("Autofill.Homework.AutoRecord", "输入与补全", "自动记录常用作业", SettingKind.Bool, true),
-        new("Autofill.Homework.RecordLevel", "输入与补全", "自动记录阈值", SettingKind.Enum, "Normal", Options: [new("Loose", "宽松（2 次）"), new("Normal", "正常（3 次）"), new("Strict", "严格（5 次）")]),
-        new("Autofill.Homework.Isolation", "输入与补全", "记录隔离", SettingKind.Enum, "Global", Options: [new("Global", "全局"), new("Subject", "分学科")]),
+        // 自动填充
+        new("Autofill.Subject.Enabled", "AutofillSubject", "学科补全", SettingKind.Bool, false, Hint: "在磁贴标题里输入中文、全拼或首字母会弹出候选，采纳后标题与磁贴主题色切换为该学科的默认颜色。"),
+        new("Autofill.Subject.MatchLevel", "AutofillSubject", "匹配程度", SettingKind.Enum, "Normal", Options: Levels),
+        new("Autofill.Homework.Enabled", "AutofillHomework", "作业补全", SettingKind.Bool, false),
+        new("Autofill.Homework.AutoRecord", "AutofillHomework", "自动记录常输入的作业名称", SettingKind.Bool, true),
+        new("Autofill.Homework.RecordLevel", "AutofillHomework", "自动记录阈值", SettingKind.Enum, "Normal", Options: [new("Loose", "宽松（2 次）"), new("Normal", "正常（3 次）"), new("Strict", "严格（5 次）")]),
+        new("Autofill.Homework.Isolation", "AutofillHomework", "记录隔离", SettingKind.Enum, "Global", Options: [new("Global", "全局"), new("Subject", "分学科")]),
 
-        // 保存
-        new("AutoSaveEnabled", "保存", "自动保存", SettingKind.Bool, true)
+        // 数据
+        new("AutoSaveEnabled", "Data", "自动保存", SettingKind.Bool, true)
     ];
 
     /// <summary>
@@ -313,7 +348,7 @@ public static class SettingsSchema
 
     // ------------------------------------------------------------------ 网页使用的描述
 
-    /// <summary>给网页的清单：分组、控件类型、范围与选项。字体列表由服务端按班级设备上报合并后另行提供。</summary>
+    /// <summary>给网页的清单：设置页、控件类型、范围、选项与联动条件。字体列表由服务端按班级设备上报合并后另行提供。</summary>
     public static JsonObject Describe()
     {
         JsonArray items = new();
@@ -321,17 +356,23 @@ public static class SettingsSchema
         {
             JsonObject item = new()
             {
-                ["key"] = d.Key, ["group"] = d.Group, ["label"] = d.Label, ["kind"] = d.Kind.ToString(),
+                ["key"] = d.Key, ["page"] = d.Page, ["label"] = d.Label, ["kind"] = d.Kind.ToString(),
                 ["default"] = d.Default?.DeepClone(), ["hidden"] = d.Hidden
             };
             if (d.Min is { } min) item["min"] = min;
             if (d.Max is { } max) item["max"] = max;
             if (d.Step is { } step) item["step"] = step;
-            if (d.Hint is { } hint) item["hint"] = hint;
-            if (d.ClearedKey is { } cleared) item["clearedKey"] = cleared;
+            foreach (var (name, text) in new[] { ("hint", d.Hint), ("clearedKey", d.ClearedKey), ("section", d.Section), ("when", d.When),
+                ("enableWhen", d.EnableWhen), ("variant", d.Variant), ("opacityKey", d.OpacityKey), ("unit", d.Unit) })
+                if (text is not null) item[name] = text;
             if (d.Options is { } options) item["options"] = new JsonArray(options.Select(o => (JsonNode?)new JsonObject { ["value"] = o.Value, ["label"] = o.Label }).ToArray());
             items.Add(item);
         }
-        return new JsonObject { ["groups"] = new JsonArray(Groups.Select(g => (JsonNode?)JsonValue.Create(g)).ToArray()), ["settings"] = items };
+        JsonArray pages = new(Pages.Select(p => (JsonNode?)new JsonObject
+        {
+            ["key"] = p.Key, ["nav"] = p.Nav, ["title"] = p.Title, ["description"] = p.Description,
+            ["icon"] = p.Icon, ["preview"] = p.Preview, ["note"] = p.Note
+        }).ToArray());
+        return new JsonObject { ["pages"] = pages, ["settings"] = items };
     }
 }

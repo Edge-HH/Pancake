@@ -33,6 +33,14 @@ public static class PancakeServer
         app.UseDefaultFiles();
         // 网页控制台随服务端一起升级，浏览器每次都校验静态文件，避免旧脚本配新接口。
         app.UseStaticFiles(new StaticFileOptions { OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "no-cache" });
+        // 大屏字体、图标与预览底图随程序一起复制到输出目录；文件很大且只随版本变化，允许浏览器缓存一周。
+        string boardAssets = Path.Combine(AppContext.BaseDirectory, "board-assets");
+        if (Directory.Exists(boardAssets))
+            app.UseStaticFiles(new StaticFileOptions
+            {
+                FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(boardAssets), RequestPath = "/board-assets",
+                OnPrepareResponse = ctx => ctx.Context.Response.Headers.CacheControl = "public, max-age=604800"
+            });
         app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 
         using (var scope = app.Services.CreateScope())

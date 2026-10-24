@@ -17,4 +17,9 @@
     </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.20" />
   </ItemGroup>
+  <!-- 网页设置预览与大屏使用同一套字体、图标和示例底图，直接取桌面端的资源，避免两份文件不同步。 -->
+  <ItemGroup>
+    <None Include="..\Pancake\Assets\Fonts\HarmonyOS_Sans_SC_*.ttf;..\Pancake\Assets\Fonts\FluentSystemIcons-Resizable.ttf;..\Pancake\Assets\Settings\tile-preview-background.png"
+          Link="board-assets\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

@@ -1213,7 +1213,7 @@ async function viewClass(classId, tab = 'projects') {
       <a class="btn" href="#/homework/${c.id}">${icon('book')}查看作业</a>
       <button class="btn primary" data-act="pair">${icon('device')}配对设备</button>`
   });
-  const tabs = [['projects', '项目', c.projectCount], ['layout', '布局'], ['people', '人员', c.teacherCount], ['duty', '值日'], ['notices', '公告'], ['devices', '设备', c.deviceCount], ['settings', '设置']];
+  const tabs = [['projects', '项目', c.projectCount], ['layout', '大屏设置'], ['people', '人员', c.teacherCount], ['duty', '值日'], ['notices', '公告'], ['devices', '设备', c.deviceCount], ['settings', '设置']];
   if (tab === 'teachers') tab = 'people';
   setPage(page, html`
     <div class="detail-head"><div class="grow">
@@ -1579,178 +1579,137 @@ async function classNotices(box, c) {
   });
 }
 
-// ---------- 布局与班级设置
+// ---------- 大屏设置
 /**
- * 班级设置页：上半部分是可拖动的布局编辑器（分屏比例、磁贴位置与大小、自由布局组件），
- * 下半部分按服务端清单（/api/settings-schema）生成全部设置表单。保存时只提交改动的键，
- * 服务端按键合并，大屏上同时修改的其他设置不会被覆盖。
+ * 班级的大屏设置：左侧导航与大屏设置窗口相同（布局 / 外观 / 组件 / 自动填充 / 数据），每页的设置项、顺序与名称
+ * 来自服务端清单（/api/settings-schema），右侧预览用 board.js 按大屏同样的结构绘制。布局页的预览是可拖动的整屏：
+ * 拖动分隔条调整分屏比例，拖动磁贴移动、拖右下角调整大小，自由布局下拖动组件。
+ * 保存时只提交改动的键，服务端按键合并，大屏上同时修改的其他设置不会被覆盖。
  */
-const DOCKED_WIDGET = /^(Split|ClockMode)/;
-const WIDGET_LABEL = { Clock: '时钟', Components: '组件卡', Weather: '天气', Noise: '噪音' };
+const BOARD_W = 1600, BOARD_H = 900;
+const TILE_MIN = { w: 280, h: 96 }, TILE_MAX = { w: 900, h: 680 };
+const SETTING_ICON = { layout: 'layout', board: 'book', image: 'image', palette: 'palette', grid: 'layout', settings: 'settings', components: 'device', clock: 'history',
+  weather: 'sun', mic: 'megaphone', megaphone: 'megaphone', book: 'student', edit: 'edit', db: 'db' };
 let weatherCities = null;
 const loadWeatherCities = async () => weatherCities ??= await fetch('weather-cities.json').then(r => r.json()).catch(() => []);
 
-function boardColors(doc) {
-  const theme = doc.Theme || 'Dark';
-  const dark = theme !== 'Light' && !(theme === 'Default' && !matchMedia('(prefers-color-scheme: dark)').matches);
-  return { dark, bg: dark ? '#0E0E12' : '#F4F4F7', surface: dark ? '#16161E' : '#FFFFFF', line: dark ? '#2A2A35' : '#D9D9E6', text: dark ? '#F0F0F5' : '#111111', muted: dark ? '#737386' : '#8A8A99' };
-}
-/** #AARRGGBB / #RRGGBB → CSS 颜色。 */
-function cssColor(hex, fallback) {
-  if (typeof hex !== 'string' || !/^#([0-9a-f]{6}|[0-9a-f]{8})$/i.test(hex)) return fallback;
-  if (hex.length === 7) return hex;
-  return `rgba(${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${parseInt(hex.slice(7, 9), 16)},${(parseInt(hex.slice(1, 3), 16) / 255).toFixed(3)})`;
-}
-const bgFill = (b, fallback) => b && b.Color && !b.ColorCleared ? cssColor(b.Color, fallback) : fallback;
-
-/**
- * 交互式布局示意图。坐标系：整屏 1600×900；作业板内的磁贴按大屏作业板坐标缩放显示。
- * state = { doc, tiles: [{index,name,color,x,y,w,h}], widgets: {key:{X,Y,Width,Height}} }，拖动时直接修改 state 并回调 onChange。
- */
-function mountLayoutEditor(host, state, onChange) {
-  const W = 1600, H = 900, pad = 24;
-  let drag = null;
-  const geom = () => {
-    const doc = state.doc, mode = doc.LayoutMode || 'Split';
-    const ratio = Math.min(.9, Math.max(.1, +doc.SplitRatio || .4));
-    const clockW = mode === 'Split' ? W * ratio : mode === 'Clock' ? W : 0;
-    const boardX = mode === 'Split' ? clockW : 0, boardW = mode === 'Clock' ? 0 : W - boardX;
-    const maxX = Math.max(1200, ...state.tiles.map(t => t.x + t.w)), maxY = Math.max(700, ...state.tiles.map(t => t.y + t.h));
-    const scale = boardW ? Math.min((boardW - pad * 2) / maxX, (H - pad * 2) / maxY, 1.2) : 1;
-    return { mode, ratio, clockW, boardX, boardW, scale };
-  };
-  const draw = () => {
-    const doc = state.doc, g = geom(), col = boardColors(doc);
-    const grid = Math.max(16, Math.min(160, +doc.GridSize || 48)) * g.scale;
-    const gridStyle = doc.GridStyle || 'Grid';
-    const gridColor = cssColor(doc.GridColor, col.line), dotColor = cssColor(doc.GridDotColor, col.line);
-    const pos = doc.ToolbarPosition || 'BottomCenter', tbScale = Math.min(2, Math.max(.6, +doc.ToolbarScale || 1));
-    const vertical = pos.startsWith('Center');
-    const tb = { w: (vertical ? 56 : 360) * tbScale, h: (vertical ? 300 : 56) * tbScale };
-    const ix = +doc.ToolbarHorizontalInset || 24, iy = +doc.ToolbarVerticalInset || 24;
-    const tx = pos.endsWith('Left') ? ix : pos.endsWith('Right') ? W - ix - tb.w : (W - tb.w) / 2;
-    const ty = pos.startsWith('Top') ? iy : vertical ? (H - tb.h) / 2 : H - iy - tb.h;
-    const titleSize = Math.max(10, (+doc.TileTitleSize || 29) * g.scale), bodySize = Math.max(8, (+doc.TileBodyFontSize || 20) * g.scale);
-    const tileFill = bgFill(doc.TileBackground, col.bg), clockFill = bgFill(doc.ClockBackground, col.surface), boardFill = bgFill(doc.BoardBackground, col.surface);
-    const font = esc(doc.TileBodyFontFamily || 'HarmonyOS Sans SC');
-    const free = g.mode === 'Free' ? Object.entries(state.widgets).filter(([k]) => !DOCKED_WIDGET.test(k)) : [];
-    host.innerHTML = `<svg class="layout-preview editable" viewBox="0 0 ${W} ${H}" role="img" aria-label="布局编辑器">
-      <rect width="${W}" height="${H}" fill="${col.bg}"/>
-      ${g.clockW ? `<rect width="${g.clockW}" height="${H}" fill="${clockFill}"/><text x="${g.clockW / 2}" y="${H / 2}" fill="${cssColor(doc.ClockColor, col.text)}" font-size="${Math.min(150, g.clockW / 4)}" font-weight="${{ Light: 300, Normal: 400, Medium: 500, Bold: 700 }[doc.ClockFontWeight] || 300}" text-anchor="middle" font-family="${esc(doc.ClockFontFamily || 'Segoe UI')}, sans-serif">08:30</text>
-        <text x="${g.clockW / 2}" y="${H / 2 + 60}" fill="${col.muted}" font-size="${Math.min(34, g.clockW / 14)}" text-anchor="middle">${esc(dateLabel(todayStr(), true))}</text>` : ''}
-      ${g.boardW ? `<rect x="${g.boardX}" width="${g.boardW}" height="${H}" fill="${boardFill}"/>
-        ${gridStyle !== 'None' && grid >= 6 ? `<pattern id="lpg" x="${g.boardX + pad}" y="${pad}" width="${grid}" height="${grid}" patternUnits="userSpaceOnUse">${gridStyle === 'Dots'
-          ? `<circle cx="0" cy="0" r="${Math.max(1, (+doc.GridDotDiameter || 3) * g.scale / 2)}" fill="${dotColor}"/>`
-          : `<path d="M ${grid} 0 L 0 0 0 ${grid}" fill="none" stroke="${gridColor}" stroke-width="${Math.max(.5, (+doc.GridLineThickness || 1.6) * g.scale)}"/>`}</pattern><rect x="${g.boardX}" width="${g.boardW}" height="${H}" fill="url(#lpg)"/>` : ''}
-        ${state.tiles.map((t, i) => { const x = g.boardX + pad + t.x * g.scale, y = pad + t.y * g.scale, w = t.w * g.scale, h = t.h * g.scale;
-          return `<g class="lp-tile" data-tile="${i}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="10" fill="${tileFill}" stroke="${t.color || '#818cf8'}" stroke-width="3"/>
-            <text x="${x + 14}" y="${y + 12 + titleSize}" fill="${col.text}" font-size="${titleSize}" font-weight="600" font-family="${font}">${esc(t.name).slice(0, 12)}</text>
-            ${[0, 1, 2].map(k => `<rect x="${x + 14}" y="${y + 26 + titleSize + k * bodySize * 1.6}" width="${Math.max(0, w * (k === 2 ? .45 : .75) - 14)}" height="${bodySize * .55}" rx="3" fill="${col.muted}" opacity=".45"/>`).join('')}
-            <rect class="lp-grip" data-grip="${i}" x="${x + w - 18}" y="${y + h - 18}" width="16" height="16" rx="3"/></g>`; }).join('')}
-        ${state.tiles.length ? '' : `<text x="${g.boardX + g.boardW / 2}" y="${H / 2}" fill="${col.muted}" font-size="34" text-anchor="middle">作业板（选择项目后可拖动磁贴）</text>`}` : ''}
-      ${free.map(([k, r]) => `<g class="lp-widget" data-widget="${esc(k)}"><rect x="${r.X}" y="${r.Y}" width="${Math.max(40, r.Width)}" height="${Math.max(30, r.Height)}" rx="12" fill="${col.surface}" stroke="var(--accent)" stroke-width="3" stroke-dasharray="10 6"/>
-        <text x="${r.X + 16}" y="${r.Y + 40}" fill="${col.text}" font-size="28">${esc(WIDGET_LABEL[k] || k)}</text></g>`).join('')}
-      ${g.mode === 'Split' ? `<rect class="lp-split" x="${g.clockW - 24}" y="0" width="48" height="${H}"/><rect x="${g.clockW - 3}" y="0" width="6" height="${H}" fill="var(--accent)" opacity=".6" pointer-events="none"/>` : ''}
-      <rect x="${tx}" y="${ty}" width="${tb.w}" height="${tb.h}" rx="${Math.min(+doc.ToolbarRadius || 14, 28) * tbScale}" fill="${doc.ToolbarBackgroundColor && !doc.ToolbarBackgroundColorCleared ? cssColor(doc.ToolbarBackgroundColor, col.surface) : col.surface}"
-        fill-opacity="${doc.ToolbarBackgroundColorCleared ? .15 : Math.max(.15, +(doc.ToolbarBackgroundOpacity ?? .8))}" stroke="${cssColor(doc.ToolbarBorderColor, col.line)}" stroke-width="${Math.min(20, +(doc.ToolbarBorderThickness ?? 1)) * 2}"/>
-    </svg>`;
-  };
-  const point = e => { const svg = $('svg', host), r = svg.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; };
-  const snap = v => { const gs = Math.max(16, Math.min(160, +state.doc.GridSize || 48)); return state.doc.GridSnappingEnabled === false ? Math.round(v) : Math.round(v / gs) * gs; };
-  host.addEventListener('pointerdown', e => {
-    const p = point(e), g = geom();
-    const grip = e.target.closest('[data-grip]'), tile = e.target.closest('[data-tile]'), widget = e.target.closest('[data-widget]'), split = e.target.closest('.lp-split');
-    if (grip) { const t = state.tiles[+grip.dataset.grip]; drag = { kind: 'resize', t, p, w: t.w, h: t.h, g }; }
-    else if (tile) { const t = state.tiles[+tile.dataset.tile]; drag = { kind: 'tile', t, p, x: t.x, y: t.y, g }; }
-    else if (widget) { const r = state.widgets[widget.dataset.widget]; drag = { kind: 'widget', r, p, x: r.X, y: r.Y }; }
-    else if (split) drag = { kind: 'split' };
-    if (drag) { host.setPointerCapture(e.pointerId); e.preventDefault(); }
+/** 设置清单里的显示条件："Key"、"!Key"、"Key=A|B"、"Key^=前缀"、"Key$=后缀"，用 & 连接。 */
+function settingCondition(expr, current) {
+  if (!expr) return true;
+  return expr.split('&').every(raw => {
+    const neg = raw.startsWith('!'), part = neg ? raw.slice(1) : raw;
+    const m = /^(.+?)(\^=|\$=|=)(.*)$/.exec(part);
+    let ok;
+    if (m) { const v = String(current(m[1]) ?? ''); ok = m[2] === '=' ? m[3].split('|').includes(v) : m[2] === '^=' ? v.startsWith(m[3]) : v.endsWith(m[3]); }
+    else ok = !!current(part);
+    return neg ? !ok : ok;
   });
-  host.addEventListener('pointermove', e => {
-    if (!drag) return;
-    const p = point(e);
-    if (drag.kind === 'split') state.doc.SplitRatio = Math.round(Math.min(.9, Math.max(.1, p.x / W)) * 100) / 100;
-    else if (drag.kind === 'tile') { drag.t.x = Math.max(0, snap(drag.x + (p.x - drag.p.x) / drag.g.scale)); drag.t.y = Math.max(0, snap(drag.y + (p.y - drag.p.y) / drag.g.scale)); drag.t.moved = true; }
-    else if (drag.kind === 'resize') { drag.t.w = Math.max(160, snap(drag.w + (p.x - drag.p.x) / drag.g.scale)); drag.t.h = Math.max(120, snap(drag.h + (p.y - drag.p.y) / drag.g.scale)); drag.t.moved = true; }
-    else if (drag.kind === 'widget') { drag.r.X = Math.round(Math.max(0, drag.x + p.x - drag.p.x)); drag.r.Y = Math.round(Math.max(0, drag.y + p.y - drag.p.y)); }
-    draw();
-  });
-  const end = () => { if (!drag) return; const kind = drag.kind; drag = null; onChange(kind); };
-  host.addEventListener('pointerup', end);
-  host.addEventListener('pointercancel', end);
-  draw();
-  return { draw };
 }
 
-/** 一项设置的表单控件；值取 current(key)。 */
-function settingControl(s, current, fonts, assetUrl) {
-  const v = current(s.key);
-  const k = esc(s.key);
-  const hint = s.hint ? html`<small>${s.hint}</small>` : '';
+const toggleHtml = (attrs, on) => html`<label class="toggle"><input type="checkbox" ${raw(attrs)} ${on ? 'checked' : ''}><span class="track"></span><span class="state">${on ? '开' : '关'}</span></label>`;
+const swatchHtml = (attrs, color, label) => html`<label class="btn sm swatch-btn"><i style="--sw:${color}"></i>${label}<input type="color" ${raw(attrs)} value="${/^#[0-9a-f]{6}$/i.test(color) ? color : '#808080'}"></label>`;
+const rgbOf = hex => typeof hex === 'string' && hex.length >= 7 ? '#' + hex.slice(-6) : '';
+/** 滑块旁的数值：0–1 的比例显示为百分比，其余按单位显示。 */
+function settingValueText(s, v) {
+  if (s.unit === '×') return (+v).toFixed(2) + '×';
+  if (!s.unit && s.min >= 0 && s.max <= 1) return Math.round(v * 100) + '%';
+  return `${+(+v).toFixed(2)}${s.unit ? ' ' + s.unit : ''}`;
+}
+
+/** 一项设置的控件；外观照大屏设置页：开关、滑块、下拉框、颜色按钮、九宫格与背景编辑器。 */
+function settingControl(s, ctx) {
+  const v = ctx.current(s.key), hint = s.hint ? html`<small>${s.hint}</small>` : '';
+  const item = (body, cls = '') => html`<div class="set-item ${cls}" data-item="${s.key}">${body}${hint}</div>`;
   switch (s.kind) {
-    case 'Bool': return html`<label class="check set-bool"><input type="checkbox" data-k="${s.key}" ${v ? 'checked' : ''}>${s.label}</label>`;
-    case 'Number': {
-      const pct = s.min >= 0 && s.max <= 1;
-      return html`<label class="field"><span>${s.label} · <b data-out="${s.key}">${pct ? Math.round(v * 100) + '%' : +(+v).toFixed(2)}</b></span>
-        <input type="range" data-k="${s.key}" min="${s.min}" max="${s.max}" step="${s.step || (pct ? .01 : 1)}" value="${v}">${hint}</label>`;
-    }
-    case 'Enum': return html`<label class="field"><span>${s.label}</span><select class="input" data-k="${s.key}">${s.options.map(o => html`<option value="${o.value}" ${o.value === v ? 'selected' : ''}>${o.label}</option>`)}</select>${hint}</label>`;
-    case 'Font': {
-      const list = [...new Set([...(s.default ? [s.default] : []), ...fonts, ...(v ? [v] : [])])];
-      return html`<label class="field"><span>${s.label}</span><select class="input" data-k="${s.key}">${s.default === '' ? html`<option value="" ${!v ? 'selected' : ''}>默认（内置字体）</option>` : ''}${list.map(f => html`<option value="${f}" ${f === v ? 'selected' : ''}>${f}</option>`)}</select>${hint}</label>`;
-    }
+    case 'Bool': return item(html`<div class="set-label">${s.label}</div>${toggleHtml(`data-k="${esc(s.key)}"`, v)}`);
+    case 'Number':
+      if (s.variant === 'NumberBox') return item(html`<div class="set-label">${s.label}</div>
+        <div class="set-number"><input type="number" data-k="${s.key}" min="${s.min}" max="${s.max}" step="${s.step || 1}" value="${v}"><button type="button" data-step="-1" data-for="${s.key}">−</button><button type="button" data-step="1" data-for="${s.key}">+</button></div>`);
+      return item(html`<div class="set-label">${s.label}<b data-out="${s.key}">${settingValueText(s, v)}</b></div>
+        <input type="range" data-k="${s.key}" min="${s.min}" max="${s.max}" step="${s.step || 1}" value="${v}">`);
+    case 'Enum':
+      if (s.variant === 'Position') {
+        const cell = { TopLeft: [1, 1, 'start', 'start'], TopCenter: [1, 2, 'center', 'start'], TopRight: [1, 3, 'end', 'start'], CenterLeft: [2, 1, 'start', 'center'], CenterRight: [2, 3, 'end', 'center'], BottomLeft: [3, 1, 'start', 'end'], BottomCenter: [3, 2, 'center', 'end'], BottomRight: [3, 3, 'end', 'end'] };
+        return item(html`<div class="set-label">${s.label}</div><div class="pos-picker">${s.options.map(o => { const [r, c, jx, jy] = cell[o.value];
+          return html`<label title="${o.label}" style="grid-row:${r};grid-column:${c};justify-content:${jx};align-items:${jy}"><input type="radio" name="pos-${s.key}" data-k="${s.key}" value="${o.value}" ${o.value === v ? 'checked' : ''} aria-label="${o.label}"><span></span></label>`; })}</div>`);
+      }
+      return item(html`<div class="set-label">${s.label}</div><select class="input" data-k="${s.key}">${s.options.map(o => html`<option value="${o.value}" ${o.value === v ? 'selected' : ''}>${o.label}</option>`)}</select>`);
+    case 'Font':
+      return item(html`<div class="set-label">${s.label}</div><input class="input" data-k="${s.key}" list="set-fonts" value="${v || ''}" placeholder="${s.default === '' ? '默认（内置 HarmonyOS Sans SC）' : s.default}" autocomplete="off">`);
     case 'Color': {
-      const value = typeof v === 'string' ? v : '';
-      const alpha = value.length === 9 ? parseInt(value.slice(1, 3), 16) : 255;
-      const rgb = value.length >= 7 ? '#' + value.slice(-6) : '#808080';
-      const cleared = s.clearedKey ? !!current(s.clearedKey) : false;
-      return html`<div class="field set-color" data-color="${s.key}"><span>${s.label}</span>
-        <div class="row wrap">
-          <input type="color" data-c="rgb" value="${rgb}" ${!value || cleared ? 'disabled' : ''} aria-label="${s.label}">
-          ${value.length === 9 || /Grid/.test(s.key) ? html`<label class="set-alpha" title="不透明度"><input type="range" data-c="alpha" min="0" max="255" value="${alpha}" ${!value || cleared ? 'disabled' : ''}><b>${Math.round(alpha / 2.55)}%</b></label>` : ''}
-          ${s.default === '' ? html`<label class="check"><input type="checkbox" data-c="auto" ${!value ? 'checked' : ''} ${cleared ? 'disabled' : ''}>跟随主题</label>` : ''}
-          ${s.clearedKey ? html`<label class="check"><input type="checkbox" data-c="cleared" ${cleared ? 'checked' : ''}>不使用背景色</label>` : ''}
-        </div>${hint}</div>`;
+      const t = Board.theme(ctx.doc());
+      if (s.variant === 'Surface') {
+        const cleared = !!ctx.current(s.clearedKey), opacity = +(ctx.current(s.opacityKey) ?? 1);
+        const shown = cleared ? 'transparent' : v ? rgbOf(v) : t.surface;
+        return item(html`<div class="set-label">${s.label}</div>
+          <div class="set-row" data-surface="${s.key}">${swatchHtml('data-sc="color"', shown, '背景颜色')}
+            <button type="button" class="btn sm" data-sc="clear" ${cleared ? 'disabled' : ''}>清除背景颜色</button>
+            <button type="button" class="btn sm" data-sc="reset">恢复主题背景色</button></div>
+          <div class="set-item ${cleared ? 'disabled' : ''}"><div class="set-label">背景颜色透明度（%）<b data-out="${s.opacityKey}">${Math.round((1 - opacity) * 100)}%</b></div>
+            <input type="range" min="0" max="100" step="1" value="${Math.round((1 - opacity) * 100)}" data-sc="transparency" data-for="${s.key}"></div>
+          <small>透明度只影响背景颜色：0% 不透明，100% 完全透明。清除颜色会保留已开启的毛玻璃效果和背景媒体。</small>`);
+      }
+      const themed = s.key === 'ClockColor' ? t.text : s.key === 'ToolbarBorderColor' ? t.line : '#808080';
+      const alpha = typeof v === 'string' && v.length === 9;
+      const reset = s.default === '' ? html`<button type="button" class="btn sm" data-cr="${s.key}">${s.key === 'ClockColor' ? '恢复主题颜色' : s.key === 'ToolbarBorderColor' ? '恢复主题边框色' : '恢复默认'}</button>` : '';
+      return item(html`<div class="set-label">${s.label}</div><div class="set-row">${swatchHtml(`data-k="${esc(s.key)}" data-part="rgb"`, rgbOf(v) || themed, s.label)}${reset}
+        ${alpha || /^#[0-9A-F]{8}$/i.test(s.default) ? html`<span class="set-row" style="gap:6px;font-size:12.5px;color:var(--text-2)">不透明度<input type="range" min="0" max="255" data-k="${s.key}" data-part="alpha" value="${alpha ? parseInt(v.slice(1, 3), 16) : 255}" style="width:120px"><b data-out="${s.key}">${Math.round((alpha ? parseInt(v.slice(1, 3), 16) : 255) / 2.55)}%</b></span>` : ''}</div>`);
     }
-    case 'Background': return backgroundControl(s, v || {}, assetUrl);
+    case 'Background': return backgroundControl(s, ctx);
     default: return '';
   }
 }
-function backgroundControl(s, b, assetUrl) {
-  const media = p => {
-    const m = ASSET_RE.exec(p || '');
-    if (!p) return html`<span class="faint">无</span>`;
-    if (!m) return html`<span class="badge" title="${p}">大屏本地文件</span>`;
-    const src = assetUrl(m[1].toLowerCase());
-    return IMAGE_EXT.test(m[2] || '') ? html`<img class="bg-thumb" src="${src}" alt="">` : html`<span class="badge">${icon('image', 'sm')}${(m[2] || '').slice(1).toUpperCase() || '文件'}</span>`;
+
+/** 背景编辑器，与大屏的 BackgroundEditor 相同：区域背景只有颜色按钮，面板背景（磁贴）带透明度与清除。 */
+function backgroundControl(s, ctx) {
+  const b = ctx.current(s.key) || {}, surface = s.variant === 'Surface', t = Board.theme(ctx.doc());
+  const doc = ctx.doc(), sharedUsed = (doc.LayoutMode || 'Split') === 'Split' && doc.SharedBackgroundEnabled;
+  const mediaLocked = (s.key === 'ClockBackground' || s.key === 'BoardBackground') && sharedUsed;
+  const chip = (p, i) => {
+    const m = ASSET_RE.exec(p || ''), src = m && ctx.assetUrl(m[1].toLowerCase());
+    const inner = !m ? html`<span title="${p}">大屏本地文件</span>` : IMAGE_EXT.test(m[2] || '') ? html`<img src="${src}" alt="">` : html`<video src="${src}" muted></video>`;
+    return html`<span class="media-chip">${inner}${i != null ? html`<button type="button" class="att-x" data-bg-act="del-item" data-i="${i}" title="移除">${icon('x', 'sm')}</button>` : ''}</span>`;
   };
   const list = b.Playlist || [];
-  return html`<div class="set-bg" data-bg="${s.key}">
-    <div class="grid-2" style="gap:12px">
-      <div class="field set-color"><span>背景颜色</span><div class="row wrap">
-        <input type="color" data-bf="Color" value="${(b.Color || '').length >= 7 ? '#' + b.Color.slice(-6) : '#202024'}" ${!b.Color || b.ColorCleared ? 'disabled' : ''}>
-        <label class="check"><input type="checkbox" data-bf="ColorAuto" ${!b.Color ? 'checked' : ''}>跟随主题</label>
-        <label class="check"><input type="checkbox" data-bf="ColorCleared" ${b.ColorCleared ? 'checked' : ''}>不使用颜色</label></div></div>
-      <label class="field"><span>颜色不透明度 · <b>${Math.round((b.ColorOpacity ?? .8) * 100)}%</b></span><input type="range" data-bf="ColorOpacity" min="0" max="1" step="0.01" value="${b.ColorOpacity ?? .8}"></label>
-      <div class="field"><span>图片或视频</span><div class="row wrap">${media(b.ImagePath)}
-        <button type="button" class="btn sm" data-bg-act="pick">${icon('upload')}选择文件</button>
-        ${b.ImagePath ? html`<button type="button" class="btn ghost sm danger" data-bg-act="clear">移除</button>` : ''}</div></div>
-      <label class="field"><span>图片模式</span><select class="input" data-bf="ImageMode">${[['Zoom', '缩放'], ['Stretch', '拉伸'], ['Fit', '适应']].map(([k, l]) => html`<option value="${k}" ${(b.ImageMode || 'Zoom') === k ? 'selected' : ''}>${l}</option>`)}</select></label>
-      <label class="check"><input type="checkbox" data-bf="Glass" ${b.Glass ? 'checked' : ''}>毛玻璃效果</label>
-      <label class="field"><span>模糊程度 · <b>${Math.round(b.Blur ?? 20)}</b></span><input type="range" data-bf="Blur" min="0" max="100" step="1" value="${b.Blur ?? 20}"></label>
+  const opacity = b.ColorOpacity ?? .8;
+  return html`<div class="set-block" data-item="${s.key}" data-bg="${s.key}">
+    ${surface ? html`<div class="set-row">${swatchHtml('data-bf="Color"', b.ColorCleared ? 'transparent' : rgbOf(b.Color) || t.surface, '背景颜色')}
+        <button type="button" class="btn sm" data-bg-act="clear-color" ${b.ColorCleared ? 'disabled' : ''}>清除背景颜色</button>
+        <button type="button" class="btn sm" data-bg-act="reset-color">恢复主题背景色</button></div>
+      <div class="set-item ${b.ColorCleared ? 'disabled' : ''}"><div class="set-label">背景颜色透明度（%）<b>${Math.round((1 - opacity) * 100)}%</b></div>
+        <input type="range" min="0" max="100" step="1" value="${Math.round((1 - opacity) * 100)}" data-bf="Transparency"></div>
+      <small>透明度只影响背景颜色：0% 不透明，100% 完全透明。清除颜色会保留已开启的毛玻璃效果和背景媒体。</small>` : ''}
+    <div class="set-block ${mediaLocked ? 'disabled' : ''}">
+      ${surface ? '' : html`<div class="set-row">${swatchHtml('data-bf="Color"', rgbOf(b.Color) || t.surface, '背景颜色')}<button type="button" class="btn sm" data-bg-act="reset-color">恢复主题背景色</button></div>`}
+      <div class="set-item"><div class="set-label">背景媒体</div>
+        <div class="set-row">${b.ImagePath && !b.PlaylistEnabled ? chip(b.ImagePath) : ''}<button type="button" class="btn sm" data-bg-act="pick">${icon('upload')}选择图片或视频</button></div></div>
+      <div class="set-item"><div class="set-label">播放队列模式</div>${toggleHtml('data-bf="PlaylistEnabled"', b.PlaylistEnabled)}</div>
+      ${b.PlaylistEnabled ? html`<div class="set-sub">
+        <div class="media-list">${list.map((p, i) => chip(p, i))}${list.length ? '' : html`<small>队列为空，请添加图片或视频。</small>`}</div>
+        <div><button type="button" class="btn sm" data-bg-act="add-items">${icon('plus')}添加多个媒体</button></div>
+        <div class="set-item"><div class="set-label">随机播放</div>${toggleHtml('data-bf="Shuffle"', b.Shuffle)}</div>
+        <div class="set-item"><div class="set-label">按固定时间切换</div>${toggleHtml('data-bf="SwitchOnTimer"', b.SwitchOnTimer !== false)}</div>
+        <div class="set-item ${b.SwitchOnTimer === false ? 'disabled' : ''}"><div class="set-label">切换间隔（秒）</div><div class="set-number"><input type="number" min="1" max="86400" data-bf="SwitchIntervalSeconds" value="${b.SwitchIntervalSeconds ?? 60}"></div></div>
+        <div class="set-item"><div class="set-label">视频播放完成时切换</div>${toggleHtml('data-bf="SwitchOnMediaEnded"', b.SwitchOnMediaEnded !== false)}</div>
+        <small>两种切换都开启时，先触发的条件生效。关闭播放完成切换后视频循环播放；两个开关都关闭时停留在当前媒体。</small></div>` : ''}
+      <div class="set-item"><div class="set-label">图片模式</div><select class="input" data-bf="ImageMode">${[['Zoom', '缩放'], ['Stretch', '拉伸'], ['Fit', '适应']].map(([k, l]) => html`<option value="${k}" ${(b.ImageMode || 'Zoom') === k ? 'selected' : ''}>${l}</option>`)}</select></div>
+      <div><button type="button" class="btn sm" data-bg-act="clear-media" ${b.ImagePath || list.length ? '' : 'disabled'}>清除背景媒体</button></div>
+      ${mediaLocked ? html`<small>已开启跨区背景，区域底图由跨区背景统一管理。</small>` : ''}
     </div>
-    <div class="set-playlist">
-      <label class="check"><input type="checkbox" data-bf="PlaylistEnabled" ${b.PlaylistEnabled ? 'checked' : ''}>播放队列（轮播多张图片或视频）</label>
-      <div class="row wrap">${list.map((p, i) => html`<span class="attachment with-thumb">${media(p)}<button type="button" class="att-x" data-bg-act="del-item" data-i="${i}" title="移除">${icon('x', 'sm')}</button></span>`)}
-        <button type="button" class="btn ghost sm" data-bg-act="add-items">${icon('plus')}添加到队列</button></div>
-      <div class="row wrap" style="gap:14px">
-        <label class="check"><input type="checkbox" data-bf="Shuffle" ${b.Shuffle ? 'checked' : ''}>随机播放</label>
-        <label class="check"><input type="checkbox" data-bf="SwitchOnTimer" ${b.SwitchOnTimer !== false ? 'checked' : ''}>按固定时间切换</label>
-        <label class="field" style="width:150px"><span>切换间隔（秒）</span><input class="input" type="number" min="1" max="86400" data-bf="SwitchIntervalSeconds" value="${b.SwitchIntervalSeconds ?? 60}"></label>
-        <label class="check"><input type="checkbox" data-bf="SwitchOnMediaEnded" ${b.SwitchOnMediaEnded !== false ? 'checked' : ''}>视频播放完成时切换</label>
-      </div>
-    </div>
+    <div class="set-item"><div class="set-label">毛玻璃效果</div>${toggleHtml('data-bf="Glass"', b.Glass)}</div>
+    <div class="set-item ${b.Glass ? '' : 'disabled'}"><div class="set-label">模糊程度<b>${Math.round(b.Blur ?? 20)}</b></div><input type="range" min="0" max="100" step="1" data-bf="Blur" value="${b.Blur ?? 20}"></div>
   </div>`;
+}
+
+/** 项目里的科目转为预览磁贴：位置、大小、主题色、正文富文本与图片和大屏一致。 */
+function boardTiles(detail, assetUrl) {
+  let doc = {}; try { doc = JSON.parse(detail.payloadJson || '{}'); } catch { }
+  const rawSubjects = pick(doc, 'Subjects') || [];
+  return parseProject(detail.payloadJson, detail.runs).filter(s => s.rect.w > 0).map(s => ({
+    index: s.index, name: s.name, accent: s.color || '#818CF8', explicit: !!pick(rawSubjects[s.index], 'IsAccentExplicit'),
+    x: s.rect.x, y: s.rect.y, w: s.rect.w, h: s.rect.h,
+    entries: s.entries.map(e => ({ runs: e.runs, images: e.atts.map(a => assetImage(a, assetUrl)).filter(Boolean) }))
+  }));
 }
 
 async function classLayout(box, c) {
@@ -1761,117 +1720,236 @@ async function classLayout(box, c) {
   const assetUrl = consoleAsset(c.id);
   let saved = {}; try { saved = JSON.parse(layout.payloadJson || '{}'); } catch { }
   const byKey = Object.fromEntries(schema.settings.map(s => [s.key, s]));
+  const pages = [...schema.pages, { key: 'Sync', nav: null, title: '同步与历史', description: '设置大屏与网页之间的同步方式，查看和恢复历史版本。', icon: 'sync' }];
   const draft = {};
   const clone = v => v === undefined ? undefined : JSON.parse(JSON.stringify(v));
   const current = k => k in draft ? draft[k] : saved[k] !== undefined ? saved[k] : byKey[k]?.default;
   const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
   const setValue = (k, v) => { const base = saved[k] !== undefined ? saved[k] : byKey[k]?.default; if (same(v, base)) delete draft[k]; else draft[k] = v; };
-  const merged = () => { const d = { ...saved }; for (const s of schema.settings) d[s.key] = current(s.key); return d; };
+  const doc = () => { const d = { ...saved }; for (const s of schema.settings) d[s.key] = current(s.key); return d; };
+  const ctx = { current, doc, assetUrl };
+  let page = pages.some(p => p.key === store.get('settingsPage')) ? store.get('settingsPage') : 'Layout';
 
-  // 磁贴：取一个项目的科目位置；拖动后保存到该项目。
+  // 布局预览的磁贴取自一个项目；拖动后保存到该项目。
   const live = projects.filter(p => !p.deleted).sort((a, b) => (b.date || '').localeCompare(a.date || '') || parseTime(b.updatedAt) - parseTime(a.updatedAt));
-  let tileProject = live[0] || null, tileDetail = null;
-  const editor = { doc: merged(), tiles: [], widgets: clone(current('Widgets')) || {} };
+  let tileProject = live[0] || null, tileDetail = null, tiles = [];
   async function loadTiles() {
-    editor.tiles = [];
+    tiles = [];
     if (!tileProject) return;
     tileDetail = await api(`/api/classes/${c.id}/projects/${tileProject.id}`);
-    editor.tiles = parseProject(tileDetail.payloadJson, tileDetail.runs).filter(s => s.rect.w > 0).map(s => ({ index: s.index, name: s.name, color: s.color, x: s.rect.x, y: s.rect.y, w: s.rect.w, h: s.rect.h }));
+    tiles = boardTiles(tileDetail, assetUrl);
   }
   await loadTiles();
 
-  const policies = [['Shared', '双向同步', '大屏上调整的设置会上传，网页修改会下发到所有大屏。不同设置可以同时修改。'], ['Managed', '网页统一下发', '只能在网页修改；大屏上的改动会被还原。'], ['Off', '不同步', '每块大屏各自保存设置。']];
-  const groups = schema.groups.filter(g => schema.settings.some(s => s.group === g && (!s.hidden || g === '天气')));
-  box.innerHTML = show(html`<div class="layout-page">
-    <section class="card layout-main">
-      <div class="card-head"><h3 class="grow">布局编辑</h3>
-        <select class="input sm" id="lp-project" style="width:auto;max-width:220px" aria-label="磁贴取自项目">${live.length ? live.slice(0, 40).map(p => html`<option value="${p.id}">${p.name}</option>`) : html`<option value="">暂无项目</option>`}</select>
-        <button class="btn sm" data-act="save-tiles" id="lp-save-tiles" disabled>${icon('send')}保存磁贴位置</button></div>
-      <div class="card-body"><div id="lp"></div>
-        <p class="faint" style="font-size:12.5px;margin-top:10px">拖动分隔线调整分屏比例，拖动磁贴移动、拖动右下角调整大小（按网格吸附）；自由布局下可以拖动组件。示意图只表现大致效果，以大屏为准。
-          <span>${layout.revision ? `修订 ${layout.revision} · ${layout.updatedBy || ''} · ${relTime(layout.updatedAt)}` : '大屏尚未上传设置'}</span></p></div>
-    </section>
-    <div class="stack">
-      <section class="card">
-        <div class="card-head"><h3 class="grow">同步策略</h3></div>
-        <div class="card-body stack">${policies.map(([k, l, d]) => html`<label class="policy ${layout.policy === k ? 'active' : ''}"><input type="radio" name="policy" value="${k}" ${layout.policy === k ? 'checked' : ''} ${canPolicy ? '' : 'disabled'}><span><b>${l}</b><small>${d}</small></span></label>`)}
-          ${canPolicy ? '' : html`<small class="faint">同步策略由管理员或班主任设置。</small>`}</div>
-      </section>
-      <section class="card">
-        <div class="card-head"><h3 class="grow">历史与复制</h3><button class="btn sm" data-act="copy-layout" ${layout.revision ? '' : 'disabled'}>${icon('copy')}复制到其他班级</button></div>
-        ${history.length ? html`<div class="list-rows">${history.slice(0, 8).map((h, i) => html`<div class="list-row"><span class="grow"><span class="title" style="display:block">修订 ${h.revision}${i === 0 ? html` <span class="badge ok">当前</span>` : ''}</span><span class="meta">${h.author} · ${relTime(h.createdAt)}</span></span>
-          ${i === 0 ? '' : html`<button class="btn ghost sm" data-act="restore-layout" data-rev="${h.revision}">${icon('restore')}恢复</button>`}</div>`)}</div>`
-          : html`<div class="card-body faint" style="font-size:13px">大屏连接集控后会自动上传当前设置；也可以直接在这里修改后下发。</div>`}
-      </section>
+  const navIcon = p => icon(SETTING_ICON[p.icon] || p.icon || 'settings');
+  box.innerHTML = show(html`<div class="set-shell" id="ss">
+      <nav class="card set-nav" id="sn" aria-label="设置分类"></nav>
+      <div class="set-page" id="sp"></div>
+      <aside class="set-preview" id="pv"><div class="set-preview-frame"><div id="pv-stage"></div></div><div id="pv-bar"></div></aside>
     </div>
-  </div>
-  <div class="set-groups" id="sg">${groups.map((g, gi) => html`<details class="card set-group" data-group="${g}" ${gi < 3 ? 'open' : ''}>
-    <summary><span class="grow">${g}</span><span class="badge warn" data-dirty="${g}" hidden>未保存</span></summary>
-    <div class="card-body set-grid">${g === '天气' ? html`<label class="field"><span>天气地区</span><input class="input" list="wc" id="weather-city" value="${current('WeatherCityName')}" placeholder="搜索城市" autocomplete="off"><datalist id="wc"></datalist><small>从列表中选择后生效</small></label>` : ''}
-      ${schema.settings.filter(s => s.group === g && !s.hidden).map(s => settingControl(s, current, fonts, assetUrl))}</div>
-  </details>`)}</div>
-  <div class="savebar" id="savebar" hidden><span class="grow" id="sb-text"></span><button class="btn" data-act="discard-settings">撤销修改</button><button class="btn primary" data-act="save-settings">${icon('send')}保存并下发</button></div>`);
+    <datalist id="set-fonts">${[...new Set(['HarmonyOS Sans SC', ...fonts])].map(f => html`<option value="${f}">`)}</datalist>
+    <div class="savebar" id="savebar" hidden><span class="grow" id="sb-text"></span><button class="btn" data-act="discard-settings">撤销修改</button><button class="btn primary" data-act="save-settings">${icon('send')}保存并下发</button></div>`);
+  const nav = $('#sn'), sp = $('#sp'), stage = $('#pv-stage');
 
-  const layoutEditor = mountLayoutEditor($('#lp'), editor, kind => {
-    if (kind === 'split') setValue('SplitRatio', editor.doc.SplitRatio);
-    if (kind === 'widget') setValue('Widgets', clone(editor.widgets));
-    if (kind === 'split') { const r = $('[data-k=SplitRatio]'); if (r) { r.value = editor.doc.SplitRatio; $('[data-out=SplitRatio]').textContent = Math.round(editor.doc.SplitRatio * 100) + '%'; } }
-    $('#lp-save-tiles').disabled = !editor.tiles.some(t => t.moved);
-    refresh();
-  });
-  function refresh() {
-    editor.doc = merged();
-    layoutEditor.draw();
-    const keys = Object.keys(draft);
-    for (const g of groups) { const el = $(`[data-dirty="${CSS.escape(g)}"]`); if (el) el.hidden = !keys.some(k => byKey[k]?.group === g); }
-    $('#savebar').hidden = keys.length === 0;
-    $('#sb-text').textContent = `有 ${keys.length} 项设置未保存：${keys.map(k => byKey[k]?.label || k).slice(0, 6).join('、')}${keys.length > 6 ? ' 等' : ''}`;
+  function renderNav() {
+    const dirtyPages = new Set(Object.keys(draft).map(k => byKey[k]?.page));
+    let lastNav = null, out = '';
+    for (const p of pages) {
+      if (p.key === 'Sync') out += '<hr>';
+      if (p.nav && p.nav !== lastNav) out += `<div class="set-nav-group">${esc(p.nav)}</div>`;
+      lastNav = p.nav;
+      out += show(html`<a href="#" data-page="${p.key}" class="${p.nav ? 'sub' : ''} ${p.key === page ? 'active' : ''}">${navIcon(p)}<span>${p.title}</span>${dirtyPages.has(p.key) ? html`<span class="dirty" title="有未保存的修改"></span>` : ''}</a>`);
+    }
+    nav.innerHTML = out;
   }
-  const rerenderGroup = g => {
-    const body = $(`[data-group="${CSS.escape(g)}"] .set-grid`);
-    if (body) body.innerHTML = show(schema.settings.filter(s => s.group === g && !s.hidden).map(s => settingControl(s, current, fonts, assetUrl)));
+
+  const policies = [['Shared', '双向同步', '大屏上调整的设置会上传，网页修改会下发到所有大屏。不同设置可以同时修改。'], ['Managed', '网页统一下发', '只能在网页修改；大屏上的改动会被还原。'], ['Off', '不同步', '每块大屏各自保存设置。']];
+  function renderPage() {
+    const p = pages.find(x => x.key === page);
+    const head = html`<div class="set-page-head"><h2>${p.title}</h2><p>${p.description}</p></div>`;
+    if (page === 'Sync') {
+      sp.innerHTML = show(html`${head}
+        <section class="card set-card"><div class="set-section" style="margin:0">同步策略</div>
+          ${policies.map(([k, l, d]) => html`<label class="policy ${layout.policy === k ? 'active' : ''}"><input type="radio" name="policy" value="${k}" ${layout.policy === k ? 'checked' : ''} ${canPolicy ? '' : 'disabled'}><span><b>${l}</b><small>${d}</small></span></label>`)}
+          ${canPolicy ? '' : html`<small class="faint">同步策略由管理员或班主任设置。</small>`}</section>
+        <section class="card"><div class="card-head"><h3 class="grow">历史版本</h3><button class="btn sm" data-act="copy-layout" ${layout.revision ? '' : 'disabled'}>${icon('copy')}复制到其他班级</button></div>
+          ${history.length ? html`<div class="list-rows">${history.slice(0, 12).map((h, i) => html`<div class="list-row"><span class="grow"><span class="title" style="display:block">修订 ${h.revision}${i === 0 ? html` <span class="badge ok">当前</span>` : ''}</span><span class="meta">${h.author} · ${relTime(h.createdAt)}</span></span>
+            ${i === 0 ? '' : html`<button class="btn ghost sm" data-act="restore-layout" data-rev="${h.revision}">${icon('restore')}恢复</button>`}</div>`)}</div>`
+            : html`<div class="card-body faint" style="font-size:13px">大屏连接集控后会自动上传当前设置；也可以直接在这里修改后下发。</div>`}</section>`);
+      $$('input[name=policy]', sp).forEach(r => r.onchange = async () => {
+        try { await api(`/api/classes/${c.id}/layout/policy`, { method: 'PUT', body: { policy: r.value } }); toast('同步策略已更新'); route(); } catch (err) { fail(err); }
+      });
+      return;
+    }
+    const items = schema.settings.filter(s => s.page === page && !s.hidden);
+    // 同一小标题下的设置放进同一张卡片；没有小标题的放在页首卡片。
+    const cards = [];
+    for (const s of items) { const sec = s.section || ''; if (!cards.length || cards.at(-1).section !== sec) cards.push({ section: sec, items: [] }); cards.at(-1).items.push(s); }
+    const extra = page === 'ComponentsWeather' ? html`<div class="set-item"><div class="set-label">地区</div><input class="input" list="wc" id="weather-city" value="${current('WeatherCityName')}" placeholder="搜索城市" autocomplete="off"><datalist id="wc"></datalist><small>从列表中选择后生效。</small></div>` : '';
+    sp.innerHTML = show(html`${head}
+      ${cards.map((card, i) => html`${card.section ? html`<div class="set-section">${card.section}</div>` : ''}<section class="card set-card">${i === 0 ? extra : ''}${card.items.map(s => settingControl(s, ctx))}</section>`)}
+      ${p.note ? html`<div class="set-note">${p.note}</div>` : ''}`);
+    applyConditions();
+  }
+  /** 按清单里的 When / EnableWhen 显示或停用设置项，与大屏设置页的联动一致。 */
+  function applyConditions() {
+    for (const el of $$('[data-item]', sp)) {
+      const s = byKey[el.dataset.item]; if (!s) continue;
+      el.hidden = !settingCondition(s.when, current);
+      el.classList.toggle('disabled', !settingCondition(s.enableWhen, current));
+    }
+  }
+  const rerenderItem = key => {
+    const el = $(`[data-item="${CSS.escape(key)}"]`, sp); if (!el) return;
+    const tmp = document.createElement('div'); tmp.innerHTML = show(settingControl(byKey[key], ctx));
+    el.replaceWith(tmp.firstElementChild); applyConditions();
   };
 
-  const sg = $('#sg');
-  sg.addEventListener('input', e => {
+  // ---------- 预览
+  let previewQueued = false, clockTimer = 0;
+  const previewKind = () => pages.find(x => x.key === page)?.preview;
+  function schedulePreview() { if (previewQueued) return; previewQueued = true; requestAnimationFrame(() => { previewQueued = false; renderPreview(); }); }
+  function renderPreview() {
+    const kind = previewKind(), d = doc(), t = Board.theme(d);
+    $('#ss').classList.toggle('no-preview', !kind);
+    stage.classList.toggle('pk-interactive', kind === 'Layout');
+    if (!kind) { stage.innerHTML = ''; $('#pv-bar').innerHTML = ''; return; }
+    const full = kind === 'Layout' || kind === 'Background' || kind === 'Board';
+    const html_ = full
+      ? Board.screen(d, t, BOARD_W, BOARD_H, { tiles, interactive: kind === 'Layout', assetUrl, placeholder: tiles.length ? '' : `<div class="pk-center" style="color:${t.text};opacity:.5;font-size:28px">${tileProject ? '这个项目还没有摆放磁贴' : '暂无项目'}</div>` })
+      : Board.sample(kind, d, t, { assetUrl });
+    Board.mount(stage, html_, d);
+    if (kind === 'Layout') for (const el of $$('.pk-tile', stage)) if (tiles[+el.dataset.tile]?.moved) el.classList.add('moved');
+  }
+  function renderPreviewBar() {
+    const kind = previewKind();
+    const bar = $('#pv-bar');
+    if (kind === 'Layout' || kind === 'Background' || kind === 'Board') {
+      bar.innerHTML = show(html`<div class="set-preview-bar"><span class="grow">磁贴取自</span>
+          <select class="input sm" id="lp-project" style="width:auto;max-width:220px" aria-label="磁贴取自项目">${live.length ? live.slice(0, 40).map(p => html`<option value="${p.id}" ${p.id === tileProject?.id ? 'selected' : ''}>${p.name}</option>`) : html`<option value="">暂无项目</option>`}</select>
+          ${kind === 'Layout' ? html`<button class="btn sm" data-act="save-tiles" id="lp-save-tiles" ${tiles.some(x => x.moved) ? '' : 'disabled'}>${icon('send')}保存磁贴位置</button>` : ''}</div>
+        <small class="faint">${kind === 'Layout' ? '拖动分隔条调整分屏比例，拖动磁贴移动、拖右下角调整大小；自由布局下可以拖动时钟与组件。' : '按大屏整屏比例显示。'}
+          ${layout.revision ? `修订 ${layout.revision} · ${layout.updatedBy || ''} · ${relTime(layout.updatedAt)}` : '大屏尚未上传设置'}</small>`);
+      $('#lp-project').onchange = async e => {
+        if (tiles.some(x => x.moved) && !await confirmDialog({ title: '放弃磁贴改动', message: '当前项目的磁贴位置还没有保存，确定切换吗？', confirm: '切换' })) { e.target.value = tileProject.id; return; }
+        tileProject = live.find(p => p.id === e.target.value) || null;
+        await loadTiles(); renderPreviewBar(); schedulePreview();
+      };
+    } else bar.innerHTML = show(html`<small class="faint">预览使用与大屏相同的字体、图标和尺寸，随设置即时变化。</small>`);
+  }
+  function showPage(key) {
+    page = key; store.set('settingsPage', key);
+    renderNav(); renderPage(); renderPreviewBar(); renderPreview();
+  }
+  // 预览里的时钟与大屏一样走秒。
+  clockTimer = setInterval(() => {
+    const now = new Date(), p2 = n => String(n).padStart(2, '0');
+    for (const el of $$('.pk-time-main', stage)) el.textContent = `${p2(now.getHours())}:${p2(now.getMinutes())}`;
+    for (const el of $$('.pk-time-sec', stage)) el.textContent = p2(now.getSeconds());
+  }, 1000);
+  onDispose(() => clearInterval(clockTimer));
+  Board.fontsReady.then(() => schedulePreview());
+
+  function refresh() {
+    const keys = Object.keys(draft);
+    renderNav();
+    $('#savebar').hidden = keys.length === 0;
+    $('#sb-text').textContent = `有 ${keys.length} 项设置未保存：${keys.map(k => byKey[k]?.label || k).slice(0, 6).join('、')}${keys.length > 6 ? ' 等' : ''}`;
+    applyConditions();
+    schedulePreview();
+  }
+
+  // ---------- 布局页的拖动
+  let drag = null;
+  const scenePoint = e => { const scene = $('.pk-scene', stage), r = scene.getBoundingClientRect(), s = stage._pkScale || 1; return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s }; };
+  const snap = v => { const d = doc(), g = Math.max(16, Math.min(160, +d.GridSize || 48)); return d.GridSnappingEnabled === false ? Math.round(v) : Math.round(v / g) * g; };
+  stage.addEventListener('pointerdown', e => {
+    if (previewKind() !== 'Layout') return;
+    const p = scenePoint(e), grip = e.target.closest('[data-grip]'), tileEl = e.target.closest('[data-tile]'), widget = e.target.closest('[data-widget]'), split = e.target.closest('[data-split]');
+    if (tileEl) { const t = tiles[+tileEl.dataset.tile]; drag = { kind: grip ? 'resize' : 'tile', t, el: tileEl, p, x: t.x, y: t.y, w: t.w, h: t.h }; }
+    else if (widget) { const widgets = clone(current('Widgets')) || {}; drag = { kind: 'widget', key: widget.dataset.widget, widgets, el: widget, p, x: widgets[widget.dataset.widget].X, y: widgets[widget.dataset.widget].Y }; }
+    else if (split) drag = { kind: 'split' };
+    if (drag) { stage.setPointerCapture(e.pointerId); e.preventDefault(); }
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const p = scenePoint(e);
+    if (drag.kind === 'split') { draft.SplitRatio = Math.round(Math.min(.9, Math.max(.1, p.x / BOARD_W)) * 100) / 100; schedulePreview(); return; }
+    const dx = p.x - drag.p.x, dy = p.y - drag.p.y;
+    if (drag.kind === 'tile') { drag.t.x = Math.max(0, snap(drag.x + dx)); drag.t.y = Math.max(0, snap(drag.y + dy)); Object.assign(drag.el.style, { left: drag.t.x + 'px', top: drag.t.y + 'px' }); }
+    else if (drag.kind === 'resize') {
+      drag.t.w = Math.min(TILE_MAX.w, Math.max(TILE_MIN.w, snap(drag.w + dx))); drag.t.h = Math.min(TILE_MAX.h, Math.max(TILE_MIN.h, snap(drag.h + dy)));
+      Object.assign(drag.el.style, { width: drag.t.w + 'px', height: drag.t.h + 'px' });
+    } else if (drag.kind === 'widget') {
+      const r = drag.widgets[drag.key]; r.X = Math.round(Math.max(0, Math.min(BOARD_W - r.Width, drag.x + dx))); r.Y = Math.round(Math.max(0, Math.min(BOARD_H - r.Height, drag.y + dy)));
+      Object.assign(drag.el.style, { left: r.X + 'px', top: r.Y + 'px' });
+    }
+    if (drag.t && (drag.t.x !== drag.x || drag.t.y !== drag.y || drag.t.w !== drag.w || drag.t.h !== drag.h)) { drag.t.moved = true; drag.el.classList.add('moved'); }
+  });
+  const endDrag = () => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    if (d.kind === 'split') { const v = draft.SplitRatio; delete draft.SplitRatio; setValue('SplitRatio', v); const r = $('[data-k=SplitRatio]', sp); if (r) { r.value = v; $('[data-out=SplitRatio]', sp).textContent = settingValueText(byKey.SplitRatio, v); } }
+    if (d.kind === 'widget') setValue('Widgets', d.widgets);
+    const save = $('#lp-save-tiles'); if (save) save.disabled = !tiles.some(t => t.moved);
+    refresh();
+  };
+  stage.addEventListener('pointerup', endDrag);
+  stage.addEventListener('pointercancel', endDrag);
+
+  // ---------- 设置项的输入
+  nav.addEventListener('click', e => { const a = e.target.closest('[data-page]'); if (!a) return; e.preventDefault(); showPage(a.dataset.page); });
+  sp.addEventListener('input', e => {
     const el = e.target;
-    if (el.dataset.k) {
+    if (el.dataset.k && el.type !== 'radio') {
       const s = byKey[el.dataset.k];
-      const v = s.kind === 'Bool' ? el.checked : s.kind === 'Number' ? +el.value : el.value;
-      setValue(s.key, v);
-      const out = $(`[data-out="${CSS.escape(s.key)}"]`);
-      if (out) out.textContent = s.min >= 0 && s.max <= 1 ? Math.round(v * 100) + '%' : +(+v).toFixed(2);
-    } else if (el.closest('[data-color]')) {
-      const box = el.closest('[data-color]'), s = byKey[box.dataset.color];
-      const auto = $('[data-c=auto]', box)?.checked, cleared = $('[data-c=cleared]', box)?.checked;
-      if (s.clearedKey) setValue(s.clearedKey, !!cleared);
-      if (auto) setValue(s.key, '');
-      else {
-        const rgb = $('[data-c=rgb]', box).value.slice(1).toUpperCase(), alphaEl = $('[data-c=alpha]', box);
-        setValue(s.key, alphaEl ? '#' + (+alphaEl.value).toString(16).padStart(2, '0').toUpperCase() + rgb : '#' + rgb);
-        if (alphaEl) alphaEl.nextElementSibling.textContent = Math.round(alphaEl.value / 2.55) + '%';
+      if (s.kind === 'Bool') { setValue(s.key, el.checked); el.nextElementSibling.nextElementSibling.textContent = el.checked ? '开' : '关'; }
+      else if (s.kind === 'Number') {
+        if (el.type === 'number' && (el.value === '' || !Number.isFinite(+el.value))) return;
+        const v = Math.min(s.max, Math.max(s.min, +el.value)); setValue(s.key, v);
+        const out = $(`[data-out="${CSS.escape(s.key)}"]`, sp); if (out) out.textContent = settingValueText(s, v);
       }
-      if (e.type === 'change' || el.type === 'checkbox') rerenderGroup(s.group);
-    } else if (el.closest('[data-bg]') && el.dataset.bf) {
+      else if (s.kind === 'Color') {
+        const item = el.closest('[data-item]'), rgb = $('[data-part=rgb]', item).value.slice(1).toUpperCase(), alphaEl = $('[data-part=alpha]', item);
+        let v = alphaEl ? '#' + (+alphaEl.value).toString(16).padStart(2, '0').toUpperCase() + rgb : '#' + rgb;
+        // 时钟颜色选纯黑或纯白时视为跟随主题，与大屏一致。
+        if (s.key === 'ClockColor' && (rgb === '000000' || rgb === 'FFFFFF')) v = '';
+        setValue(s.key, v);
+        if (alphaEl) $(`[data-out="${CSS.escape(s.key)}"]`, item).textContent = Math.round(alphaEl.value / 2.55) + '%';
+        $('.swatch-btn i', item).style.setProperty('--sw', '#' + rgb);
+      }
+      else if (s.kind === 'Enum') setValue(s.key, el.value);
+      else if (s.kind === 'Font') return;
+      if (s.kind === 'Bool' || s.kind === 'Enum') for (const k of ['ClockBackground', 'BoardBackground']) if (s.key === 'SharedBackgroundEnabled' || s.key === 'LayoutMode') rerenderItem(k);
+    } else if (el.dataset.sc) {
+      const box = el.closest('[data-surface]') || el, key = box.dataset.surface || el.dataset.for, s = byKey[key];
+      if (el.dataset.sc === 'color') { setValue(s.clearedKey, false); setValue(key, el.value.toUpperCase()); rerenderItem(key); }
+      if (el.dataset.sc === 'transparency') { const v = Math.round(1000 - +el.value * 10) / 1000; setValue(s.opacityKey, v); $(`[data-out="${CSS.escape(s.opacityKey)}"]`, sp).textContent = el.value + '%'; }
+    } else if (el.dataset.bf) {
       const key = el.closest('[data-bg]').dataset.bg, b = { ...(clone(current(key)) || {}) }, f = el.dataset.bf;
-      if (f === 'ColorAuto') b.Color = el.checked ? '' : (b.Color || '#202024');
-      else if (f === 'Color') b.Color = el.value.toUpperCase();
+      if (f === 'Color') { b.Color = el.value.toUpperCase(); b.ColorCleared = false; }
+      else if (f === 'Transparency') { b.ColorOpacity = Math.round(1000 - +el.value * 10) / 1000; el.previousElementSibling.querySelector('b').textContent = el.value + '%'; }
       else if (el.type === 'checkbox') b[f] = el.checked;
-      else if (el.type === 'range' || el.type === 'number') b[f] = +el.value;
+      else if (el.type === 'range' || el.type === 'number') { if (!Number.isFinite(+el.value) || el.value === '') return; b[f] = f === 'SwitchIntervalSeconds' ? Math.min(86400, Math.max(1, +el.value)) : +el.value; if (el.type === 'range') el.previousElementSibling.querySelector('b').textContent = Math.round(+el.value); }
       else b[f] = el.value;
       setValue(key, b);
-      if (el.type === 'checkbox') rerenderGroup(byKey[key].group);
-      else if (el.type === 'range') el.previousElementSibling.querySelector('b').textContent = f === 'ColorOpacity' ? Math.round(+el.value * 100) + '%' : Math.round(+el.value);
-    }
+      if (el.type === 'checkbox' || f === 'Color') rerenderItem(key);
+    } else return;
     refresh();
   });
-  sg.addEventListener('change', async e => {
-    if (e.target.id !== 'weather-city') return;
-    const city = (await loadWeatherCities()).find(x => x.Name === e.target.value.trim());
-    if (!city) return toast('请从列表中选择地区', 'error');
-    setValue('WeatherCityName', city.Name); setValue('WeatherCityCode', city.Code); refresh();
+  sp.addEventListener('change', async e => {
+    const el = e.target;
+    if (el.id === 'weather-city') {
+      const city = (await loadWeatherCities()).find(x => x.Name === el.value.trim());
+      if (!city) return toast('请从列表中选择地区', 'error');
+      setValue('WeatherCityName', city.Name); setValue('WeatherCityCode', city.Code); return refresh();
+    }
+    if (!el.dataset.k) return;
+    const s = byKey[el.dataset.k];
+    if (s.kind === 'Font') { setValue(s.key, el.value.trim()); refresh(); }
+    if (el.type === 'radio') { setValue(s.key, el.value); applyConditions(); refresh(); }
   });
-  sg.addEventListener('focusin', async e => {
+  sp.addEventListener('focusin', async e => {
     if (e.target.id !== 'weather-city' || $('#wc').childElementCount) return;
     $('#wc').innerHTML = (await loadWeatherCities()).map(x => `<option value="${esc(x.Name)}">`).join('');
   });
@@ -1891,39 +1969,48 @@ async function classLayout(box, c) {
     };
     input.click();
   });
-  sg.addEventListener('click', async e => {
+  sp.addEventListener('click', async e => {
+    const step = e.target.closest('[data-step]');
+    if (step) {
+      const s = byKey[step.dataset.for], input = $(`input[data-k="${CSS.escape(s.key)}"]`, sp);
+      const v = Math.min(s.max, Math.max(s.min, (+input.value || 0) + (+step.dataset.step) * (s.step || 1)));
+      input.value = v; setValue(s.key, v); return refresh();
+    }
+    const cr = e.target.closest('[data-cr]');
+    if (cr) { setValue(cr.dataset.cr, ''); rerenderItem(cr.dataset.cr); return refresh(); }
+    const sc = e.target.closest('button[data-sc]');
+    if (sc) {
+      const key = sc.closest('[data-surface]').dataset.surface, s = byKey[key];
+      if (sc.dataset.sc === 'clear') { setValue(key, ''); setValue(s.clearedKey, true); }
+      if (sc.dataset.sc === 'reset') { setValue(key, ''); setValue(s.clearedKey, false); }
+      rerenderItem(key); return refresh();
+    }
     const btn = e.target.closest('[data-bg-act]'); if (!btn) return;
     const key = btn.closest('[data-bg]').dataset.bg, b = { ...(clone(current(key)) || {}) };
     const act = btn.dataset.bgAct;
-    if (act === 'pick') { const [ref] = await uploadMedia(false); if (!ref) return; b.ImagePath = ref; }
-    if (act === 'clear') b.ImagePath = '';
+    if (act === 'pick') { const [ref] = await uploadMedia(false); if (!ref) return; b.ImagePath = ref; b.PlaylistEnabled = false; }
+    if (act === 'clear-media') { b.ImagePath = ''; b.Playlist = []; }
+    if (act === 'clear-color') { b.Color = ''; b.ColorCleared = true; }
+    if (act === 'reset-color') { b.Color = ''; b.ColorCleared = false; }
     if (act === 'add-items') { const refs = await uploadMedia(true); if (!refs.length) return; b.Playlist = [...(b.Playlist || []), ...refs]; b.PlaylistEnabled = true; }
-    if (act === 'del-item') { b.Playlist = (b.Playlist || []).filter((_, i) => i !== +btn.dataset.i); }
-    setValue(key, b); rerenderGroup(byKey[key].group); refresh();
-  });
-  $('#lp-project')?.addEventListener('change', async e => {
-    if (editor.tiles.some(t => t.moved) && !await confirmDialog({ title: '放弃磁贴改动', message: '当前项目的磁贴位置还没有保存，确定切换吗？', confirm: '切换' })) { e.target.value = tileProject.id; return; }
-    tileProject = live.find(p => p.id === e.target.value) || null;
-    await loadTiles(); $('#lp-save-tiles').disabled = true; refresh();
+    if (act === 'del-item') b.Playlist = (b.Playlist || []).filter((_, i) => i !== +btn.dataset.i);
+    setValue(key, b); rerenderItem(key); refresh();
   });
 
-  $$('input[name=policy]').forEach(r => r.onchange = async () => {
-    try { await api(`/api/classes/${c.id}/layout/policy`, { method: 'PUT', body: { policy: r.value } }); toast('同步策略已更新'); route(); } catch (err) { fail(err); }
-  });
   // 其他大屏或网页修改了设置：没有未保存的修改时直接刷新，否则提醒。
   let remoteTimer;
   onDispose(liveSocket(`/ws/classes/${c.id}?access_token=${encodeURIComponent(state.token)}`, ev => {
     if (ev.type !== 'layout') return;
     clearTimeout(remoteTimer);
     remoteTimer = setTimeout(() => {
-      if (!Object.keys(draft).length && !editor.tiles.some(t => t.moved)) route();
+      if (!Object.keys(draft).length && !tiles.some(t => t.moved)) route();
       else toast('班级设置刚在其他地方被修改，保存时会自动合并不冲突的部分', 'error');
     }, 500);
   }));
   onDispose(() => clearTimeout(remoteTimer));
 
   Object.assign(viewActions, {
-    'discard-settings': () => { for (const k of Object.keys(draft)) delete draft[k]; editor.widgets = clone(current('Widgets')) || {}; groups.forEach(rerenderGroup); refresh(); },
+    'discard-settings': () => { for (const k of Object.keys(draft)) delete draft[k]; renderPage(); refresh(); },
     'save-settings': async el => {
       if (layout.policy === 'Off' && !await confirmDialog({ title: '布局同步已关闭', message: '本班当前设置为“不同步”，保存的设置不会下发到大屏。仍要保存吗？', confirm: '保存', danger: false })) return;
       el.disabled = true;
@@ -1939,7 +2026,7 @@ async function classLayout(box, c) {
     'save-tiles': async el => {
       if (!tileDetail) return;
       el.disabled = true;
-      const moved = new Map(editor.tiles.filter(t => t.moved).map(t => [t.index, t]));
+      const moved = new Map(tiles.filter(t => t.moved).map(t => [t.index, t]));
       const body = {
         expectedRevision: tileDetail.revision,
         subjects: parseProject(tileDetail.payloadJson, tileDetail.runs).map(s => {
@@ -1951,8 +2038,8 @@ async function classLayout(box, c) {
           };
         })
       };
-      try { await api(`/api/classes/${c.id}/projects/${tileProject.id}/content`, { method: 'PUT', body }); toast('磁贴位置已保存，大屏正在同步'); await loadTiles(); refresh(); }
-      catch (err) { el.disabled = false; if (err.status === 409) { toast('这个项目刚被修改，已重新载入', 'error'); await loadTiles(); refresh(); } else fail(err); }
+      try { await api(`/api/classes/${c.id}/projects/${tileProject.id}/content`, { method: 'PUT', body }); toast('磁贴位置已保存，大屏正在同步'); await loadTiles(); renderPreviewBar(); schedulePreview(); }
+      catch (err) { el.disabled = false; if (err.status === 409) { toast('这个项目刚被修改，已重新载入', 'error'); await loadTiles(); renderPreviewBar(); schedulePreview(); } else fail(err); }
     },
     'restore-layout': async el => {
       if (!await confirmDialog({ title: '恢复设置', message: `把班级设置恢复为修订 ${el.dataset.rev}？会生成新的修订并下发到大屏。`, confirm: '恢复', danger: false })) return;
@@ -1965,6 +2052,7 @@ async function classLayout(box, c) {
       toast(`已复制到 ${r.copied} 个班级`);
     }
   });
+  showPage(page);
   refresh();
 }
 
