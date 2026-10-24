@@ -1,7 +1,6 @@
 using Pancake.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -14,10 +13,11 @@ namespace Pancake.Controls;
 /// <summary>
 /// 图片框编辑控件：选中后显示八点边框和图标工具栏。
 /// 普通模式拖中央移动、拖边角等比缩放；裁切模式复用同一套拖拽框调整取景区域。
+/// 位置由所在的 <see cref="AttachmentArea"/> 参与布局，移动和缩放都限制在这条作业的图片区内。
 /// </summary>
 public sealed class AttachmentImageControl : Grid
 {
-    // 尺寸只保留防止除零的下限，缩放不设上限，调节范围交给用户。
+    // 尺寸只保留防止除零的下限，缩放上限只受作业区宽度约束，调节范围交给用户。
     private const double MinimumWidth = 24;
     private const double MinimumHeight = 24;
 
@@ -31,15 +31,17 @@ public sealed class AttachmentImageControl : Grid
     private readonly Border _selectionBorder;
     private readonly StackPanel _toolbar;
     private readonly CompositeTransform _imageTransform = new();
-    private readonly TranslateTransform _frameTransform = new();
-    private readonly List<(Thumb Thumb, ResizeHandle Handle)> _resizeHandles = [];
+    private readonly List<Border> _resizeHandles = [];
     private bool _isEditing;
     private bool _isSelected;
     private bool _isCropping;
     private bool _isInteracting;
     private uint? _pointerId;
     private Point _lastPointerPosition;
-    private ResizeHandle _activeResizeHandle;
+    private ResizeHandle? _activeResizeHandle;
+    // 拖动和缩放都从按下时的状态加总位移推算，避免增量累加在夹紧边界处漂移。
+    private Point _dragStartPointer;
+    private Rect _dragStartFrame;
     private double _imageAspect;
     private readonly TaskCompletionSource<bool> _imageReady = new();
     public Task<bool> ImageReady => _imageReady.Task;
@@ -51,23 +53,22 @@ public sealed class AttachmentImageControl : Grid
         _contentChanged = contentChanged;
         _interactionChanged = interactionChanged;
 
-        Width = Math.Max(MinimumWidth, attachment.FrameWidth);
-        double initialHeight = attachment.AspectRatio > 0 ? Width / attachment.AspectRatio : 240;
-        Height = initialHeight + 40;
+        double initialWidth = Math.Max(MinimumWidth, attachment.FrameWidth);
+        double initialHeight = attachment.AspectRatio > 0 ? initialWidth / attachment.AspectRatio : 240;
         HorizontalAlignment = HorizontalAlignment.Left;
-        RenderTransform = _frameTransform;
+        VerticalAlignment = VerticalAlignment.Top;
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         _imageFrame = new Grid
         {
-            Width = Width,
+            Width = initialWidth,
             Height = initialHeight,
             Background = BoardTheme.SurfaceBrush,
             Clip = new RectangleGeometry(),
             ManipulationMode = ManipulationModes.None
         };
-        _overlay = new Grid();
+        _overlay = new Grid { HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Top };
         _overlay.Children.Add(_imageFrame);
         Children.Add(_overlay);
         _imageFrame.SizeChanged += (_, e) => ((RectangleGeometry)_imageFrame.Clip).Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height);
@@ -104,7 +105,7 @@ public sealed class AttachmentImageControl : Grid
         {
             Orientation = Orientation.Horizontal,
             Spacing = 2,
-            HorizontalAlignment = HorizontalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Left,
             Margin = new Thickness(0, 5, 0, 2),
             Visibility = Visibility.Collapsed
         };
@@ -125,11 +126,24 @@ public sealed class AttachmentImageControl : Grid
         Loaded += async (_, _) => await LoadImageAsync();
     }
 
+    public double FrameWidth => _imageFrame.Width;
+    public double FrameHeight => _imageFrame.Height;
+    public double PositionX => _attachment.PositionX;
+    public double PositionY => _attachment.PositionY;
+
     public void SetEditing(bool editing)
     {
         _isEditing = editing;
         _imageFrame.IsHitTestVisible = editing;
         if (!editing) { _isSelected = false; _isCropping = false; }
+        UpdateSelectionVisuals();
+    }
+
+    public void Deselect()
+    {
+        if (!_isSelected || _isInteracting) return;
+        _isSelected = false;
+        _isCropping = false;
         UpdateSelectionVisuals();
     }
 
@@ -148,9 +162,8 @@ public sealed class AttachmentImageControl : Grid
                 if (_attachment.AspectRatio <= 0)
                 {
                     _attachment.AspectRatio = _imageAspect;
-                    _imageFrame.Width = Width;
-                    _imageFrame.Height = Width / _attachment.AspectRatio;
-                    Height = _imageFrame.Height + 40;
+                    _imageFrame.Height = _imageFrame.Width / _attachment.AspectRatio;
+                    Area?.InvalidateMeasure();
                     _contentChanged();
                 }
             }
@@ -172,7 +185,7 @@ public sealed class AttachmentImageControl : Grid
 
     private void AddResizeHandle(HorizontalAlignment horizontal, VerticalAlignment vertical, ResizeHandle handleType)
     {
-        Thumb thumb = new()
+        Border handle = new()
         {
             Width = handleType is ResizeHandle.Left or ResizeHandle.Right ? 16 : 20,
             Height = handleType is ResizeHandle.Top or ResizeHandle.Bottom ? 16 : 20,
@@ -184,96 +197,123 @@ public sealed class AttachmentImageControl : Grid
             Tag = handleType,
             Visibility = Visibility.Collapsed
         };
-        thumb.DragStarted += ResizeStarted;
-        thumb.DragDelta += ResizeDelta;
-        thumb.DragCompleted += (_, _) => EndInteraction();
-        _resizeHandles.Add((thumb, handleType));
-        _overlay.Children.Add(thumb);
+        handle.PointerPressed += ResizeStarted;
+        handle.PointerMoved += ResizeDelta;
+        handle.PointerReleased += ResizeCompleted;
+        handle.PointerCanceled += ResizeCompleted;
+        handle.PointerCaptureLost += ResizeCompleted;
+        _resizeHandles.Add(handle);
+        _overlay.Children.Add(handle);
     }
 
-    private void ResizeStarted(object sender, DragStartedEventArgs e)
+    private void ResizeStarted(object sender, PointerRoutedEventArgs e)
     {
         if (!_isSelected) return;
-        _activeResizeHandle = (ResizeHandle)((Thumb)sender).Tag;
+        var point = e.GetCurrentPoint(PointerReference());
+        if (!point.Properties.IsLeftButtonPressed) return;
+        Border handle = (Border)sender;
+        _activeResizeHandle = (ResizeHandle)handle.Tag;
+        _pointerId = e.Pointer.PointerId;
+        _dragStartPointer = point.Position;
+        _dragStartFrame = CurrentFrameRect();
+        handle.CapturePointer(e.Pointer);
         BeginInteraction();
+        e.Handled = true;
     }
 
-    // DragDelta 的位移是相对上一次事件的增量，必须在当前尺寸上累加，不能当成从起点算起的总量。
-    private void ResizeDelta(object sender, DragDeltaEventArgs e)
+    private void ResizeCompleted(object sender, PointerRoutedEventArgs e)
     {
-        if (!_isSelected) return;
-        double dx = e.HorizontalChange;
-        double dy = e.VerticalChange;
-        bool corner = _activeResizeHandle is ResizeHandle.TopLeft or ResizeHandle.TopRight or ResizeHandle.BottomLeft or ResizeHandle.BottomRight;
-        double newWidth = _imageFrame.Width;
-        double newHeight = _imageFrame.Height;
-        double oldFrameWidth = _imageFrame.Width;
-        double oldFrameHeight = _imageFrame.Height;
-        (double oldContentWidth, double oldContentHeight) = _isCropping ? GetVisualContentSize() : (0, 0);
+        if (_pointerId != e.Pointer.PointerId || _activeResizeHandle is null) return;
+        ((Border)sender).ReleasePointerCapture(e.Pointer);
+        _pointerId = null;
+        _activeResizeHandle = null;
+        EndInteraction();
+        e.Handled = true;
+    }
+
+    // 按住的边跟手、对边固定；宽度不超出作业区左右边界，顶边不越过图片区上沿，向下不设限（下面的作业会让开）。
+    private void ResizeDelta(object sender, PointerRoutedEventArgs e)
+    {
+        if (_pointerId != e.Pointer.PointerId || _activeResizeHandle is not ResizeHandle handle) return;
+        e.Handled = true;
+        Point position = e.GetCurrentPoint(PointerReference()).Position;
+        double dx = position.X - _dragStartPointer.X;
+        double dy = position.Y - _dragStartPointer.Y;
+        Rect start = _dragStartFrame;
+        bool left = handle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft;
+        bool right = handle is ResizeHandle.Right or ResizeHandle.TopRight or ResizeHandle.BottomRight;
+        bool top = handle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight;
+        bool bottom = handle is ResizeHandle.Bottom or ResizeHandle.BottomLeft or ResizeHandle.BottomRight;
+        double areaWidth = Area?.AvailableWidth ?? double.PositiveInfinity;
+        double maxWidth = Math.Max(MinimumWidth, left ? start.X + start.Width : areaWidth - start.X);
+        double maxHeight = Math.Max(MinimumHeight, top ? start.Y + start.Height + SlotTop() : double.PositiveInfinity);
+        double newWidth = start.Width;
+        double newHeight = start.Height;
 
         if (_isCropping)
         {
-            if (_activeResizeHandle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft) newWidth = Math.Max(MinimumWidth, newWidth - dx);
-            if (_activeResizeHandle is ResizeHandle.Right or ResizeHandle.TopRight or ResizeHandle.BottomRight) newWidth = Math.Max(MinimumWidth, newWidth + dx);
-            if (_activeResizeHandle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight) newHeight = Math.Max(MinimumHeight, newHeight - dy);
-            if (_activeResizeHandle is ResizeHandle.Bottom or ResizeHandle.BottomLeft or ResizeHandle.BottomRight) newHeight = Math.Max(MinimumHeight, newHeight + dy);
-        }
-        else if (corner)
-        {
-            double signedWidthDelta = _activeResizeHandle is ResizeHandle.TopLeft or ResizeHandle.BottomLeft ? -dx : dx;
-            double signedHeightDelta = _activeResizeHandle is ResizeHandle.TopLeft or ResizeHandle.TopRight ? -dy : dy;
-            double aspect = GetAspectRatio();
-            double widthFromX = _imageFrame.Width + signedWidthDelta;
-            double widthFromY = _imageFrame.Width + signedHeightDelta * aspect;
-            newWidth = Math.Max(MinUniformWidth(aspect), Math.Abs(signedWidthDelta) > Math.Abs(signedHeightDelta * aspect) ? widthFromX : widthFromY);
-            newHeight = newWidth / aspect;
-        }
-        else if (_activeResizeHandle is ResizeHandle.Left or ResizeHandle.Right)
-        {
-            double aspect = GetAspectRatio();
-            double signedWidthDelta = _activeResizeHandle == ResizeHandle.Left ? -dx : dx;
-            newWidth = Math.Max(MinUniformWidth(aspect), newWidth + signedWidthDelta);
-            newHeight = newWidth / aspect;
+            if (left) newWidth = start.Width - dx;
+            if (right) newWidth = start.Width + dx;
+            if (top) newHeight = start.Height - dy;
+            if (bottom) newHeight = start.Height + dy;
+            newWidth = Math.Clamp(newWidth, MinimumWidth, maxWidth);
+            newHeight = Math.Clamp(newHeight, MinimumHeight, maxHeight);
         }
         else
         {
             double aspect = GetAspectRatio();
-            double signedHeightDelta = _activeResizeHandle == ResizeHandle.Top ? -dy : dy;
-            newHeight = Math.Max(MinUniformHeight(aspect), newHeight + signedHeightDelta);
-            newWidth = newHeight * aspect;
+            double widthFromX = start.Width + (left ? -dx : dx);
+            double widthFromY = (start.Height + (top ? -dy : dy)) * aspect;
+            if ((left || right) && (top || bottom))
+                newWidth = Math.Abs(widthFromX - start.Width) >= Math.Abs(widthFromY - start.Width) ? widthFromX : widthFromY;
+            else
+                newWidth = left || right ? widthFromX : widthFromY;
+            newWidth = Math.Max(MinUniformWidth(aspect), Math.Min(newWidth, Math.Min(maxWidth, maxHeight * aspect)));
+            newHeight = newWidth / aspect;
         }
 
-        Width = newWidth;
-        Height = newHeight + 40;
+        double oldFrameWidth = _imageFrame.Width;
+        double oldFrameHeight = _imageFrame.Height;
+        (double oldContentWidth, double oldContentHeight) = _isCropping ? GetVisualContentSize() : (0, 0);
         _imageFrame.Width = newWidth;
         _imageFrame.Height = newHeight;
         _attachment.FrameWidth = newWidth;
         _attachment.ViewportHeight = newHeight;
-        if (_activeResizeHandle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft)
-            _attachment.PositionX += oldFrameWidth - newWidth;
-        if (_activeResizeHandle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight)
-            _attachment.PositionY += oldFrameHeight - newHeight;
+        _attachment.PositionX = left ? start.X + start.Width - newWidth : start.X;
+        _attachment.PositionY = top ? start.Y + start.Height - newHeight : start.Y;
         if (_isCropping)
         {
             // 取景框比例随裁切结果更新并持久化，避免退出裁切或重启后按原图比例弹回。
             _attachment.AspectRatio = newWidth / newHeight;
             // 补偿取景框尺寸变化造成的画面滑动，让静止一侧的画面保持不动。
             (double contentWidth, double contentHeight) = GetVisualContentSize();
-            if (_activeResizeHandle is ResizeHandle.Left or ResizeHandle.TopLeft or ResizeHandle.BottomLeft)
+            if (left)
                 _attachment.OffsetX += (newWidth - oldFrameWidth) / 2 + (oldContentWidth - contentWidth) / 2;
-            else if (_activeResizeHandle is ResizeHandle.Right or ResizeHandle.TopRight or ResizeHandle.BottomRight)
+            else if (right)
                 _attachment.OffsetX += (oldFrameWidth - newWidth) / 2 + (contentWidth - oldContentWidth) / 2;
-            if (_activeResizeHandle is ResizeHandle.Top or ResizeHandle.TopLeft or ResizeHandle.TopRight)
+            if (top)
                 _attachment.OffsetY += (newHeight - oldFrameHeight) / 2 + (oldContentHeight - contentHeight) / 2;
-            else if (_activeResizeHandle is ResizeHandle.Bottom or ResizeHandle.BottomLeft or ResizeHandle.BottomRight)
+            else if (bottom)
                 _attachment.OffsetY += (oldFrameHeight - newHeight) / 2 + (contentHeight - oldContentHeight) / 2;
             ClampCropOffsets();
         }
         ApplyTransforms();
+        Area?.InvalidateMeasure();
     }
 
-    // 控件整体随拖拽平移，取自身坐标系会把位移抵消掉；换算到父级坐标才是指针的真实移动。
+    private AttachmentArea? Area => Parent as AttachmentArea;
+
+    // 控件整体随拖拽平移，取自身坐标系会把位移抵消掉；换算到图片区坐标才是指针的真实移动。
     private UIElement PointerReference() => Parent as UIElement ?? this;
+
+    private double SlotTop() => Area?.SlotTop(this) ?? 0;
+
+    // 保存的偏移可能在磁贴变窄后超出区域，以当前实际显示的位置作为拖动起点，避免一开始拖不动。
+    private Rect CurrentFrameRect() => new(
+        AttachmentArea.ClampX(_attachment.PositionX, _imageFrame.Width, Area?.AvailableWidth ?? double.PositiveInfinity),
+        Math.Max(-SlotTop(), _attachment.PositionY),
+        _imageFrame.Width,
+        _imageFrame.Height);
 
     private void ImageFrame_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
@@ -282,8 +322,13 @@ public sealed class AttachmentImageControl : Grid
         if (!point.Properties.IsLeftButtonPressed) return;
         _isSelected = true;
         UpdateSelectionVisuals();
+        Area?.SelectOnly(this);
+        // 上一次松开若落在窗口外没送达，按下新的一次时直接接管，不让残留状态卡住拖动。
+        _activeResizeHandle = null;
         _pointerId = e.Pointer.PointerId;
         _lastPointerPosition = point.Position;
+        _dragStartPointer = point.Position;
+        _dragStartFrame = CurrentFrameRect();
         _imageFrame.CapturePointer(e.Pointer);
         BeginInteraction();
         e.Handled = true;
@@ -291,16 +336,30 @@ public sealed class AttachmentImageControl : Grid
 
     private void ImageFrame_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (_pointerId != e.Pointer.PointerId) return;
+        if (_pointerId != e.Pointer.PointerId || _activeResizeHandle is not null) return;
         Point position = e.GetCurrentPoint(PointerReference()).Position;
-        MoveBy(position.X - _lastPointerPosition.X, position.Y - _lastPointerPosition.Y);
+        if (_isCropping)
+        {
+            _attachment.OffsetX += position.X - _lastPointerPosition.X;
+            _attachment.OffsetY += position.Y - _lastPointerPosition.Y;
+            ClampCropOffsets();
+        }
+        else
+        {
+            // 左右限制在作业区内，向上不越过图片区上沿，向下自由移动并把下面的作业顶开。
+            double areaWidth = Area?.AvailableWidth ?? double.PositiveInfinity;
+            _attachment.PositionX = AttachmentArea.ClampX(_dragStartFrame.X + position.X - _dragStartPointer.X, _imageFrame.Width, areaWidth);
+            _attachment.PositionY = Math.Max(-SlotTop(), _dragStartFrame.Y + position.Y - _dragStartPointer.Y);
+            Area?.InvalidateMeasure();
+        }
+        ApplyTransforms();
         _lastPointerPosition = position;
         e.Handled = true;
     }
 
     private void ImageFrame_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
-        if (_pointerId != e.Pointer.PointerId) return;
+        if (_pointerId != e.Pointer.PointerId || _activeResizeHandle is not null) return;
         _imageFrame.ReleasePointerCapture(e.Pointer);
         _pointerId = null;
         EndInteraction();
@@ -309,25 +368,9 @@ public sealed class AttachmentImageControl : Grid
 
     private void ImageFrame_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
     {
-        if (_pointerId != e.Pointer.PointerId) return;
+        if (_pointerId != e.Pointer.PointerId || _activeResizeHandle is not null) return;
         _pointerId = null;
         EndInteraction();
-    }
-
-    private void MoveBy(double x, double y)
-    {
-        if (_isCropping)
-        {
-            _attachment.OffsetX += x;
-            _attachment.OffsetY += y;
-            ClampCropOffsets();
-        }
-        else
-        {
-            _attachment.PositionX += x;
-            _attachment.PositionY += y;
-        }
-        ApplyTransforms();
     }
 
     private void ToggleCropMode() { _isCropping = !_isCropping; UpdateSelectionVisuals(); }
@@ -337,12 +380,11 @@ public sealed class AttachmentImageControl : Grid
         _attachment.Rotation = (_attachment.Rotation + degrees + 360) % 360;
         double ratio = GetAspectRatio();
         _attachment.AspectRatio = 1 / ratio;
-        _imageFrame.Width = Width;
-        _imageFrame.Height = Width / GetAspectRatio();
-        Height = _imageFrame.Height + 40;
+        _imageFrame.Height = _imageFrame.Width / GetAspectRatio();
         _attachment.ViewportHeight = _imageFrame.Height;
         ClampCropOffsets();
         ApplyTransforms();
+        Area?.InvalidateMeasure();
         _contentChanged();
     }
 
@@ -354,6 +396,7 @@ public sealed class AttachmentImageControl : Grid
         _attachment.PositionX = 0;
         _attachment.PositionY = 0;
         ApplyTransforms();
+        Area?.InvalidateMeasure();
         _contentChanged();
     }
 
@@ -362,8 +405,8 @@ public sealed class AttachmentImageControl : Grid
         bool visible = _isSelected && _isEditing;
         _selectionBorder.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         _toolbar.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        foreach (var item in _resizeHandles)
-            item.Thumb.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        foreach (Border handle in _resizeHandles)
+            handle.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         _selectionBorder.BorderBrush = new SolidColorBrush(_isCropping
             ? Windows.UI.Color.FromArgb(255, 250, 204, 21)
             : Windows.UI.Color.FromArgb(255, 96, 165, 250));
@@ -373,7 +416,6 @@ public sealed class AttachmentImageControl : Grid
 
     // 等比缩放下取宽高的共同下限，避免一边贴近最小值时另一边缩到不可见。
     private static double MinUniformWidth(double aspect) => Math.Max(MinimumWidth, MinimumHeight * aspect);
-    private static double MinUniformHeight(double aspect) => Math.Max(MinimumHeight, MinimumWidth / aspect);
 
     private void ClampCropOffsets()
     {
@@ -403,8 +445,6 @@ public sealed class AttachmentImageControl : Grid
 
     private void ApplyTransforms()
     {
-        _frameTransform.X = _attachment.PositionX;
-        _frameTransform.Y = _attachment.PositionY;
         _imageTransform.ScaleX = _attachment.Scale;
         _imageTransform.ScaleY = _attachment.Scale;
         _imageTransform.TranslateX = _attachment.OffsetX;

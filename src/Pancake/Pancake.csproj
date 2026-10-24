@@ -44,6 +44,7 @@
   <ItemGroup Condition="'$(EnableUiVerification)' == 'true'">
     <Compile Include="../../tests/UiVerification.cs" Link="UiVerification.cs" />
     <Compile Include="../../tests/GridCoverageVerification.cs" Link="GridCoverageVerification.cs" />
+    <Compile Include="../../tests/ImageDragVerification.cs" Link="ImageDragVerification.cs" />
     <Compile Include="../../tests/MediaUiVerification.cs" Link="MediaUiVerification.cs" />
     <Compile Include="../../tests/MediaPerformanceVerification.cs" Link="MediaPerformanceVerification.cs" />
   </ItemGroup>

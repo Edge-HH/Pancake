@@ -84,6 +84,13 @@ public partial class App : Application
             _window.Activate();
             return;
         }
+        if (commandLine.Contains("--verify-image-drag", StringComparison.OrdinalIgnoreCase))
+        {
+            _window = new MainWindow(false, "verification");
+            _window.ScheduleImageDragVerification();
+            _window.Activate();
+            return;
+        }
         if (commandLine.Contains("--verify-ui", StringComparison.OrdinalIgnoreCase))
         {
             _window = new MainWindow(false, "verification");

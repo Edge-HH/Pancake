@@ -67,12 +67,16 @@ public sealed class ExportTileVisual : Grid
             ScrollViewer.SetHorizontalScrollBarVisibility(editor, ScrollBarVisibility.Disabled);
             Grid.SetColumn(editor, 1); row.Children.Add(editor); content.Children.Add(row);
             _editors.Add((editor, homework));
+            AttachmentArea? images = null;
             foreach (AttachmentItem attachment in homework.Attachments)
             {
                 if (attachment.Kind != "图片") continue;
-                AttachmentImageControl image = new(attachment, () => { }, () => { }, _ => { }) { Margin = new Thickness(29, -4, 4, 4) };
-                image.SetEditing(false); _images.Add(image); content.Children.Add(image);
+                AttachmentImageControl image = new(attachment, () => { }, () => { }, _ => { });
+                image.SetEditing(false); _images.Add(image);
+                images ??= new AttachmentArea { Margin = new Thickness(29, -4, 4, 4) };
+                images.Children.Add(image);
             }
+            if (images is not null) content.Children.Add(images);
         }
         _layout.Children.Add(_ink);
         Loaded += (_, _) => _loaded.TrySetResult();

@@ -430,19 +430,20 @@ public sealed class SubjectTileControl : Grid
             }
 
             _entriesPanel.Children.Add(row);
+            // 每条作业的图片放进自己的图片区，移动和缩放都不越出这条作业，区域变高时下一条作业自动下移。
+            AttachmentArea? images = null;
             foreach (AttachmentItem attachment in homework.Attachments.Where(item => item.Kind == "图片" && !string.IsNullOrWhiteSpace(item.Path)))
             {
                 AttachmentImageControl image = new(
                     attachment,
                     () => DeleteAttachment(homework, attachment),
                     _contentChanged,
-                    _interactionChanged)
-                {
-                    Margin = new Thickness(29, -4, 4, 4)
-                };
+                    _interactionChanged);
                 image.SetEditing(_isEditing);
-                _entriesPanel.Children.Add(image);
+                images ??= new AttachmentArea { Margin = new Thickness(29, -4, 4, 4) };
+                images.Children.Add(image);
             }
+            if (images is not null) _entriesPanel.Children.Add(images);
             index++;
         }
     }
