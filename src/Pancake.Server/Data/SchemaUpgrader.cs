@@ -86,9 +86,11 @@ public static class SchemaUpgrader
     private static void AddColumn(PancakeDbContext db, string table, string column, string definition)
     {
         bool exists = db.Database.SqlQuery<string>($"SELECT name AS Value FROM pragma_table_info({table})").AsEnumerable().Contains(column);
-        // 表名、列名和定义都来自上面的常量，DDL 无法参数化。
+        // 表名、列名和定义都来自上面的常量，DDL 无法参数化。ExecuteSqlRaw 会把花括号当作参数占位符，
+        // 默认值里的 '{}' 必须转义。
 #pragma warning disable EF1002
-        if (!exists) db.Database.ExecuteSqlRaw($"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {definition};");
+        string sql = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {definition};".Replace("{", "{{").Replace("}", "}}");
+        if (!exists) db.Database.ExecuteSqlRaw(sql);
 #pragma warning restore EF1002
     }
 }

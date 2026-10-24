@@ -109,9 +109,32 @@ void Check(bool value, string message) { if (!value) throw new Exception("FAIL: 
     Check(doc["Theme"]!.GetValue<string>() == "Light" && doc["Subjects"]![0]!["X"]!.GetValue<double>() == 10 && doc["Subjects"]![0]!["Entries"]!.AsArray().Count == 0 && doc["Subjects"]![0]!["InkStrokes"]!.AsArray().Count == 0, "模板应保留位置并清空内容与笔迹");
 }
 
-// ---------------------------------------------------------------- 集成
+// ---------------------------------------------------------------- 旧库升级
 string root = Path.Combine(Path.GetTempPath(), "Pancake-server-tests-" + Guid.NewGuid().ToString("N"));
 Directory.CreateDirectory(root);
+{
+    // 新库由 EnsureCreated 建好全部列，不会走补列语句；这里删掉新列模拟已部署的旧库，再启动一次。
+    string upgradeDb = $"Data Source={Path.Combine(root, "upgrade.db")};Pooling=False";
+    string[] upgradeArgs = ["--Urls=http://127.0.0.1:0", $"--ConnectionStrings:Pancake={upgradeDb}", $"--Pancake:AssetsPath={Path.Combine(root, "upgrade-assets")}", "--Logging:LogLevel:Default=Warning"];
+    await PancakeServer.Build(upgradeArgs).DisposeAsync();
+    using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(upgradeDb))
+    {
+        connection.Open();
+        using var drop = connection.CreateCommand();
+        drop.CommandText = """ALTER TABLE "Layouts" DROP COLUMN "KeyRevisionsJson"; ALTER TABLE "Devices" DROP COLUMN "FontsJson";""";
+        drop.ExecuteNonQuery();
+    }
+    await PancakeServer.Build(upgradeArgs).DisposeAsync();
+    using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(upgradeDb))
+    {
+        connection.Open();
+        using var query = connection.CreateCommand();
+        query.CommandText = """SELECT dflt_value FROM pragma_table_info('Layouts') WHERE name = 'KeyRevisionsJson'""";
+        Check(query.ExecuteScalar() as string == "'{}'", "旧库升级时补齐带花括号默认值的新列");
+    }
+}
+
+// ---------------------------------------------------------------- 集成
 var app = PancakeServer.Build([
     "--Urls=http://127.0.0.1:0",
     $"--ConnectionStrings:Pancake=Data Source={Path.Combine(root, "test.db")};Pooling=False",
