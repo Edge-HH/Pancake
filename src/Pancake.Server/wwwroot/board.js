@@ -106,7 +106,7 @@ const Board = (() => {
   const richHtml = (runs, doc, t) => rtNormalize(runs).map(r => `<span style="${esc(runStyle(r, doc, t))}">${esc(r.text).replace(/\n/g, '<br>')}</span>`).join('');
 
   /**
-   * subject = { name, accent, explicit, w, h, entries: [{ runs, images: [src] }] }。
+   * subject = { name, accent, explicit, w, h, entries: [{ runs, images: [src] }] }；ctx.cls 为额外的 class（选中、锁定）。
    * 结构与真实磁贴相同：3px 主题色边框、3px 圆角、面板背景、左上 14/10 内边距、右下 72 号 16% 水印、
    * 半粗体主题色标题、“1.” 序号 + 正文默认字体字号的富文本。
    */
@@ -117,7 +117,7 @@ const Board = (() => {
     const rows = subject.entries.map((e, i) => `<div class="pk-row"><span class="pk-num">${i + 1}.</span><div class="pk-body" style="${body}">${richHtml(e.runs, doc, t)}</div></div>
       ${e.images?.length ? `<div class="pk-images">${e.images.map(src => `<img src="${esc(src)}" alt="" draggable="false">`).join('')}</div>` : ''}`).join('');
     const pos = ctx.x != null ? `left:${ctx.x}px;top:${ctx.y}px;` : '';
-    return `<div class="pk-tile" ${ctx.attrs || ''} style="${pos}width:${subject.w}px;height:${subject.h}px;--acc:${esc(acc)}">
+    return `<div class="pk-tile ${esc(ctx.cls || '')}" ${ctx.attrs || ''} style="${pos}width:${subject.w}px;height:${subject.h}px;--acc:${esc(acc)}">
       ${background(doc.TileBackground, t, { ...ctx, surface: true, cover: false })}
       <div class="pk-tile-content">
         <div class="pk-wm">${esc(subject.name)}</div>
@@ -221,7 +221,7 @@ const Board = (() => {
     const clockW = mode === 'Split' ? Math.round(W * ratio) : mode === 'Clock' ? W : 0;
     const boardX = mode === 'Split' ? clockW : 0, boardW = mode === 'Clock' ? 0 : W - boardX;
     const tiles = opts.tiles || [];
-    const tileHtml = tiles.map((s, i) => tile(s, doc, t, { ...ctx, x: s.x, y: s.y, grip: opts.interactive, attrs: `data-tile="${i}"` })).join('');
+    const tileHtml = tiles.map((s, i) => tile(s, doc, t, { ...ctx, x: s.x, y: s.y, grip: opts.interactive && !s.locked, cls: s.cls, attrs: `data-tile="${i}"` })).join('');
     const region = (x, w, inner, bg) => `<div class="pk-region" style="left:${x}px;width:${w}px">${bg}${inner}</div>`;
     let body = '';
     if (mode === 'Free') {

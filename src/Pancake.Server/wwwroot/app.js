@@ -123,7 +123,20 @@ async function download(path) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-function clearSession() { state.token = ''; state.me = null; myAssignments = null; store.del('token'); }
+function clearSession() { state.token = ''; state.me = null; state.classes = null; myAssignments = null; store.del('token'); }
+/** 可管理的班级列表（侧栏班级切换器用），新建、改名、删除班级后置空重新拉取。 */
+async function classList() { if (!state.classes) state.classes = await api('/api/classes').catch(() => []); return state.classes; }
+/** 当前班级：上次打开的，否则最近有更新的。 */
+function lastClassId() {
+  const list = state.classes || [], last = store.get('lastClass');
+  if (list.some(c => c.id === last)) return last;
+  return [...list].sort((a, b) => (parseTime(b.lastUpdatedAt) || 0) - (parseTime(a.lastUpdatedAt) || 0))[0]?.id || null;
+}
+function toClass(classId, rest) {
+  const id = classId || lastClassId();
+  if (!id) return navigate('classes');
+  history.replaceState(null, '', `#/classes/${id}/${rest}`); currentHash = location.hash; route();
+}
 const isAdmin = () => state.me?.role === 'Administrator';
 async function ensureMe() {
   if (!state.token) return false;
@@ -145,13 +158,51 @@ function liveSocket(path, onEvent, onStatus = () => { }) {
 }
 
 // ============================================================ 界面组件
-function toast(message, type = 'ok') {
+/** 提示条；opts.action 给出按钮文字（如“撤销”），点击后调用 opts.onAction 并关闭。 */
+function toast(message, type = 'ok', opts = {}) {
   const el = document.createElement('div');
   el.className = 'toast ' + type;
-  el.innerHTML = show(html`${icon(type === 'error' ? 'alert' : 'check')}<span>${message}</span>`);
+  el.innerHTML = show(html`${icon(type === 'error' ? 'alert' : 'check')}<span class="grow">${message}</span>${opts.action ? html`<button type="button" class="toast-act">${opts.action}</button>` : ''}`);
   $('#toasts').appendChild(el);
-  setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, type === 'error' ? 4500 : 2600);
+  const hide = () => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 300); };
+  if (opts.action) $('.toast-act', el).onclick = () => { el.remove(); Promise.resolve(opts.onAction?.()).catch(fail); };
+  setTimeout(hide, opts.action ? 7000 : type === 'error' ? 4500 : 2600);
 }
+
+/** 下拉菜单：items = [{ label, icon, run, danger, checked }]，null 为分隔线。点外面或按 Esc 关闭。 */
+function openMenu(anchor, items) {
+  const el = popover(anchor, items.map((it, i) => it ? html`<button type="button" role="menuitem" class="${it.danger ? 'danger' : ''}" data-i="${i}">${it.checked != null ? icon('check', 'sm' + (it.checked ? '' : ' off')) : it.icon ? icon(it.icon, 'sm') : ''}<span>${it.label}</span></button>` : html`<hr>`));
+  el.setAttribute('role', 'menu');
+  el.onclick = e => { const b = e.target.closest('[data-i]'); if (!b) return; closeMenu(); Promise.resolve(items[+b.dataset.i].run()).catch(fail); };
+  return el;
+}
+/** 贴着 anchor 弹出的浮层（菜单、项目选择器共用），同一时间只有一个。 */
+function popover(anchor, content, cls = '', align = 'right') {
+  closeMenu();
+  const el = document.createElement('div');
+  el.className = 'menu ' + cls;
+  el.innerHTML = show(content);
+  document.body.appendChild(el);
+  const r = anchor.getBoundingClientRect();
+  el.style.top = Math.max(8, Math.min(innerHeight - el.offsetHeight - 8, r.bottom + 6)) + 'px';
+  el.style.left = Math.max(8, Math.min(innerWidth - el.offsetWidth - 8, align === 'left' ? r.left : r.right - el.offsetWidth)) + 'px';
+  setTimeout(() => {
+    const away = e => { if (!el.contains(e.target)) closeMenu(); };
+    const esc = e => { if (e.key === 'Escape') closeMenu(); };
+    document.addEventListener('pointerdown', away); document.addEventListener('keydown', esc);
+    el._off = () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc); };
+  });
+  return el;
+}
+function closeMenu() { const m = $('.menu'); if (m) { m._off?.(); m.remove(); } }
+
+// ---------- 离开保护：有未保存修改的页面注册 guard，返回提示文字表示需要确认。
+let leaveGuard = null;
+const setLeaveGuard = fn => { leaveGuard = fn; };
+window.addEventListener('beforeunload', e => { if (leaveGuard?.()) { e.preventDefault(); e.returnValue = ''; } });
+/** 页面内切换（pushState）时同步记下当前地址，离开保护据此判断是否真的换了页面。 */
+let currentHash = null;
+function setHash(path, replace = false) { history[replace ? 'replaceState' : 'pushState'](null, '', '#/' + path); currentHash = location.hash; }
 const fail = err => toast(err?.message || String(err), 'error');
 
 /**
@@ -216,25 +267,38 @@ const routes = [
   [/^c\/([^/]+)(?:\/([\w-]+))?$/, viewPublic, { public: true }],
   [/^overview$/, viewOverview],
   [/^classes$/, viewClasses],
-  [/^classes\/([\w-]+)(?:\/(\w+))?$/, viewClass],
-  [/^homework(?:\/([\w-]+))?(?:\/([\w-]+))?$/, viewHomework],
+  [/^classes\/([\w-]+)(?:\/(\w+))?(?:\/([\w-]+))?$/, viewClass],
+  // 旧地址：作业与公告已并入班级。
+  [/^homework(?:\/([\w-]+))?(?:\/([\w-]+))?$/, (c, p) => toClass(c, p ? 'homework/' + p : 'homework')],
+  [/^announcements$/, () => toClass(null, 'notices')],
   [/^users$/, viewUsers, { admin: true }],
   [/^audit$/, viewAudit, { admin: true }],
-  [/^announcements$/, viewAnnouncements],
   [/^settings$/, viewSettings]
 ];
 let routeToken = 0;
+/** 当前视图的局部刷新：重新拉数据后原地替换内容，不重建页面框架。 */
+let reloadView = () => route();
 async function route() {
+  if (leaveGuard && currentHash != null && location.hash !== currentHash) {
+    const msg = leaveGuard(), target = location.hash;
+    if (msg) {
+      history.replaceState(null, '', currentHash);
+      if (!await confirmDialog({ title: '放弃未保存的修改', message: msg, confirm: '放弃并离开' })) return;
+      history.replaceState(null, '', target);
+    }
+  }
+  leaveGuard = null; currentHash = location.hash;
   const token = ++routeToken;
   document.body.classList.add('routing');
-  disposers.forEach(fn => { try { fn(); } catch { } }); disposers = []; viewActions = {};
-  $('.drawer')?.remove(); $('.scrim')?.remove();
+  disposers.forEach(fn => { try { fn(); } catch { } }); disposers = []; viewActions = {}; reloadView = () => route();
+  $('.drawer')?.remove(); $('.scrim')?.remove(); closeMenu();
   const [path, qs] = decodeURIComponent(location.hash.replace(/^#\/?/, '')).split('?');
   const query = new URLSearchParams(qs || '');
   for (const [re, fn, opt = {}] of routes) {
     const m = path.match(re); if (!m) continue;
     if (!opt.public && !await ensureMe()) return navigate('login?next=' + encodeURIComponent(path));
     if (opt.admin && !isAdmin()) return navigate('overview');
+    if (!opt.public) await classList();
     if (token !== routeToken) return;
     try { await fn(...m.slice(1), query); } catch (err) { if (err.status !== 401) renderError(err); }
     finally { if (token === routeToken) document.body.classList.remove('routing'); }
@@ -251,20 +315,29 @@ function renderError(err) {
 }
 
 // ============================================================ 应用框架
-function shell({ nav, title, crumbs, actions = '' }) {
-  const me = state.me;
+/** 班级内的分区：侧栏按“日常 / 管理”两组排列。 */
+const CLASS_SECTIONS = [
+  ['日常', [['homework', 'book', '作业'], ['notices', 'megaphone', '公告'], ['duty', 'broom', '值日']]],
+  ['管理', [['people', 'users', '人员'], ['devices', 'device', '设备'], ['layout', 'layout', '大屏设置'], ['settings', 'settings', '班级设置']]]
+];
+const SECTION_LABEL = Object.fromEntries(CLASS_SECTIONS.flatMap(([, items]) => items.map(([k, , l]) => [k, l])));
+
+/** nav：全局页面的键；classId + section：班级内的分区。 */
+function shell({ nav, title, crumbs, actions = '', classId = null, section = null }) {
+  const me = state.me, classes = state.classes || [];
+  const cid = classId || lastClassId();
   const link = (key, href, ic, label, extra = '') => html`<a href="#/${href}" class="${nav === key ? 'active' : ''}">${icon(ic)}<span>${label}</span>${extra}</a>`;
   $('#app').innerHTML = show(html`<div class="shell">
     <aside class="sidebar">
       <a class="brand" href="#/overview">${logo()}<div><b>Pancake 集控</b><small>班级作业同步中心</small></div></a>
       <nav class="nav">
+        ${cid ? html`<label class="class-switch" title="切换班级">${icon('class', 'sm')}<select id="class-switch" aria-label="当前班级">${classes.map(c => html`<option value="${c.id}" ${c.id === cid ? 'selected' : ''}>${c.name}</option>`)}</select></label>
+          ${CLASS_SECTIONS.map(([group, items]) => html`<div class="nav-label">${group}</div>${items.map(([k, ic, label]) => html`<a href="#/classes/${cid}/${k}" class="${section === k ? 'active' : ''}">${icon(ic)}<span>${label}</span></a>`)}`)}` : ''}
+        <div class="nav-label">${cid ? '全局' : '导航'}</div>
         ${link('overview', 'overview', 'home', '概览')}
-        ${link('classes', 'classes', 'class', '班级')}
-        ${link('homework', 'homework', 'book', '作业')}
-        ${link('announcements', 'announcements', 'megaphone', '公告')}
-        ${isAdmin() ? html`<div class="nav-label">管理</div>${link('users', 'users', 'users', '账号')}${link('audit', 'audit', 'log', '操作日志')}` : ''}
-        <div class="nav-label">系统</div>
-        ${link('settings', 'settings', 'settings', '设置')}
+        ${link('classes', 'classes', 'class', isAdmin() ? '全部班级' : '我的班级')}
+        ${isAdmin() ? html`${link('users', 'users', 'users', '账号')}${link('audit', 'audit', 'log', '操作日志')}` : ''}
+        ${link('settings', 'settings', 'settings', '个人设置')}
       </nav>
       <div class="sidebar-foot">
         <div class="user-card">${avatar(me.displayName)}<div class="grow"><b>${me.displayName}</b><span>${roleLabel(me.role)} · ${me.userName}</span></div></div>
@@ -283,6 +356,8 @@ function shell({ nav, title, crumbs, actions = '' }) {
       <main class="page" id="page"></main>
     </div>
   </div>`);
+  const sw = $('#class-switch');
+  if (sw) sw.onchange = () => navigate(`classes/${sw.value}/${section || 'homework'}`);
   return $('#page');
 }
 const setPage = (el, content) => { el.innerHTML = show(content); };
@@ -559,13 +634,28 @@ function bindRichEditors(container, { getRuns, setRuns, defaults }) {
     $('[data-rt=size]', b).value = first.fontSize || defaults.fontSize;
     for (const k of ['bold', 'italic', 'underline']) $(`[data-rt=${k}]`, b).classList.toggle('on', sel.length > 0 && sel.every(r => r[k]));
   };
+  /** 选中了文字就作用于选区，否则作用于光标所在的整条作业。 */
+  const range = () => {
+    if (!active || !container.contains(active)) return null;
+    if (saved && saved.end > saved.start) return { ...saved, whole: false };
+    const len = rtPlain(getRuns(active)).length;
+    return len ? { start: 0, end: len, whole: true } : null;
+  };
   const apply = patch => {
-    if (!active || !container.contains(active) || !saved || saved.end <= saved.start) return toast('请先选中要设置格式的文字', 'error');
-    const runs = rtApply(getRuns(active), saved.start, saved.end, patch);
+    const r = range();
+    if (!r) return toast('先点一下要设置格式的作业', 'error');
+    const runs = rtApply(getRuns(active), r.start, r.end, patch);
     setRuns(active, runs);
     active.innerHTML = rtHtml(runs, true);
-    active.focus(); rtSetSelection(active, saved.start, saved.end);
+    active.focus();
+    if (r.whole) rtSetSelection(active, saved?.start ?? r.end, saved?.start ?? r.end); else rtSetSelection(active, r.start, r.end);
     refreshBar();
+  };
+  const toggle = k => {
+    const r = range();
+    const sel = r ? rtSlice(getRuns(active), r.start, r.end) : [];
+    const on = !(sel.length && sel.every(x => x[k]));
+    apply(() => ({ [k]: on }));
   };
   document.addEventListener('selectionchange', () => {
     const el = getSelection().anchorNode?.parentElement?.closest?.('.rich') || document.activeElement?.closest?.('.rich');
@@ -584,7 +674,10 @@ function bindRichEditors(container, { getRuns, setRuns, defaults }) {
     document.execCommand('insertText', false, (e.clipboardData?.getData('text/plain') || '').replace(/\r\n?/g, '\n'));
   }, { signal });
   container.addEventListener('keydown', e => {
-    const el = e.target.closest?.('.rich'); if (!el || e.key !== 'Enter') return;
+    const el = e.target.closest?.('.rich'); if (!el) return;
+    const fmt = (e.ctrlKey || e.metaKey) && !e.altKey && { b: 'bold', i: 'italic', u: 'underline' }[e.key.toLowerCase()];
+    if (fmt) { e.preventDefault(); active = el; saved = rtSelection(el) || saved; toggle(fmt); return; }
+    if (e.key !== 'Enter') return;
     e.preventDefault();
     document.execCommand('insertLineBreak');
   }, { signal });
@@ -593,11 +686,8 @@ function bindRichEditors(container, { getRuns, setRuns, defaults }) {
   container.addEventListener('click', e => {
     const b = e.target.closest('.rt-toolbar button[data-rt]'); if (!b) return;
     const k = b.dataset.rt;
-    if (k === 'bold' || k === 'italic' || k === 'underline') {
-      const sel = active && saved ? rtSlice(getRuns(active), saved.start, saved.end) : [];
-      const on = !(sel.length && sel.every(r => r[k]));
-      apply(() => ({ [k]: on }));
-    } else if (k === 'color') apply(() => ({ color: b.dataset.v || null }));
+    if (k === 'bold' || k === 'italic' || k === 'underline') toggle(k);
+    else if (k === 'color') apply(() => ({ color: b.dataset.v || null }));
     else if (k === 'highlight') apply(() => ({ highlight: b.dataset.v || null }));
   }, { signal });
   container.addEventListener('change', e => {
@@ -618,29 +708,22 @@ async function richDefaults(classId) {
   return { fontFamily: doc.TileBodyFontFamily || 'HarmonyOS Sans SC', fontSize: Math.round(+doc.TileBodyFontSize || 20), fonts: fonts || [] };
 }
 
-// ============================================================ 作业浏览器（公开页和控制台共用）
+// ============================================================ 作业浏览器（公开页，只读）
 /**
  * @param src.list()            -> Promise<Project[]>
  * @param src.detail(id)        -> Promise<ProjectDetail>
  * @param src.link(id)          -> hash 路径
- * @param src.manage            是否显示管理操作
- * @param src.classId           管理操作所需
  * @param src.ws                实时通知路径
  */
 function mountBrowser(root, src, selectedId) {
-  let projects = [], current = null, filter = '', showDeleted = false, editing = false, savedAt = 0;
+  let projects = [], current = null, filter = '';
   const byId = id => projects.find(p => p.id === id);
 
   root.innerHTML = show(html`<div class="browser">
     <aside class="card browser-side">
       <div class="filters">
         <label class="input-icon">${icon('search', 'sm')}<input class="input" id="pf" placeholder="搜索项目或日期" autocomplete="off"></label>
-        <div class="row">
-          <span class="badge" id="live" title="实时同步状态"><span class="dot"></span><span>连接中</span></span>
-          <span class="spacer"></span>
-          ${src.manage ? html`<label class="check" style="font-size:12.5px;padding:0"><input type="checkbox" id="pd">显示已删除</label>` : ''}
-        </div>
-        ${src.manage ? html`<button class="btn primary sm" data-act="p-new">${icon('plus')}新建项目</button>` : ''}
+        <div class="row"><span class="badge" id="live" title="实时同步状态"><span class="dot"></span><span>连接中</span></span></div>
       </div>
       <div class="project-list" id="pl">${loading()}</div>
     </aside>
@@ -655,32 +738,21 @@ function mountBrowser(root, src, selectedId) {
 
   function renderList() {
     const q = filter.trim().toLowerCase();
-    const items = projects.filter(p => (showDeleted || !p.deleted) && (!q || p.name.toLowerCase().includes(q) || (p.date || '').includes(q) || dateLabel(p.date).includes(q)));
+    const items = projects.filter(p => !p.deleted && (!q || p.name.toLowerCase().includes(q) || (p.date || '').includes(q) || dateLabel(p.date).includes(q)));
     const box = $('#pl', root);
-    if (!items.length) { box.innerHTML = show(empty('book', projects.length ? '没有匹配的项目' : '暂无项目', projects.length ? '换个关键词试试。' : src.manage ? '点击“新建项目”布置作业，或等待班级大屏同步。' : '设备同步后项目会出现在这里。')); return; }
-    const groups = new Map();
-    [...items].sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.name.localeCompare(b.name, 'zh')).forEach(p => {
-      const k = p.date || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p);
-    });
-    box.innerHTML = show([...groups].map(([date, ps]) => html`
-      <div class="date-group">${icon('calendar', 'sm')}${dateLabel(date)}</div>
-      ${ps.map(p => html`<a class="project-item ${current?.id === p.id ? 'active' : ''} ${p.deleted ? 'deleted' : ''}" href="#/${src.link(p.id)}">
-        <span class="name">${p.name}${p.deleted ? html`<span class="badge danger" style="height:18px;font-size:11px;text-decoration:none">已删除</span>` : ''}</span>
-        <span class="meta">更新于 ${relTime(p.updatedAt)}${src.manage ? ' · 修订 ' + p.revision : ''}</span>
-      </a>`)}`));
+    if (!items.length) { box.innerHTML = show(empty('book', projects.length ? '没有匹配的项目' : '暂无项目', projects.length ? '换个关键词试试。' : '设备同步后项目会出现在这里。')); return; }
+    box.innerHTML = show(projectGroups(items, p => html`<a class="project-item ${current?.id === p.id ? 'active' : ''}" href="#/${src.link(p.id)}">
+        <span class="name">${p.name}</span><span class="meta">更新于 ${relTime(p.updatedAt)}</span></a>`));
   }
-
-  function resetDocHandlers(doc) { doc.oninput = doc.onchange = doc.onclick = null; unbindRichEditors(doc); editing = false; }
 
   async function renderDoc(id) {
     const doc = $('#doc', root);
-    resetDocHandlers(doc);
     const p = byId(id);
-    if (!p) { doc.innerHTML = show(empty('book', '选择一个项目', src.manage ? '从左侧选择要查看的项目，或新建一个项目布置作业。' : '从左侧列表选择要查看的作业项目。')); return; }
+    if (!p) { doc.innerHTML = show(empty('book', '选择一个项目', '从左侧列表选择要查看的作业项目。')); return; }
     current = p; renderList();
     let detail;
     try { detail = await src.detail(id); } catch (err) { doc.innerHTML = show(empty('alert', '加载失败', err.message)); return; }
-    if (current?.id !== id || editing) return;
+    if (current?.id !== id) return;
     const subjects = subjectsOf(detail.payloadJson, detail.runs);
     const total = subjects.reduce((n, s) => n + s.entries.length, 0);
     const text = homeworkText({ name: detail.name, date: detail.date }, subjects);
@@ -691,243 +763,64 @@ function mountBrowser(root, src, selectedId) {
           <div class="meta">
             <span>${icon('calendar', 'sm')}${dateLabel(detail.date, true)}</span>
             <span>${icon('book', 'sm')}${total} 项作业</span>
-            <span title="${fullTime(detail.updatedAt)}">${icon('refresh', 'sm')}更新于 ${relTime(detail.updatedAt)}${detail.updatedBy ? ' · ' + detail.updatedBy : ''}</span>
-            ${detail.deleted ? html`<span class="badge danger">已删除</span>` : ''}
+            <span title="${fullTime(detail.updatedAt)}">${icon('refresh', 'sm')}更新于 ${relTime(detail.updatedAt)}</span>
           </div>
         </div>
         <div class="row wrap no-print">
-          ${src.manage && !detail.deleted ? html`<button class="btn sm primary" data-act="p-content">${icon('edit')}编辑作业</button>` : ''}
           <button class="btn sm" data-act="copy" data-text="${text}" data-label="作业文本已复制">${icon('copy')}复制文本</button>
           <button class="btn sm" data-act="print">${icon('print')}打印</button>
-          ${src.manage ? html`
-            <button class="btn sm" data-act="p-history">${icon('history')}历史</button>
-            <button class="btn sm" data-act="p-edit">${icon('calendar')}名称与日期</button>
-            ${detail.deleted
-              ? html`<button class="btn sm primary" data-act="p-restore">${icon('restore')}恢复</button>`
-              : html`<button class="btn sm danger icon-only" data-act="p-delete" title="删除项目">${icon('trash')}</button>`}` : ''}
         </div>
       </div>
       ${renderSubjects(subjects, src.asset)}`);
-  }
-
-  /** 网页编辑作业：科目名、颜色、作业文字和图片；没分配的科目只读。保存后服务端合并，磁贴位置与笔迹不变。 */
-  async function openEditor(id) {
-    const doc = $('#doc', root);
-    const [detail, allowed, defaults] = await Promise.all([src.detail(id), editableSubjects(src.classId), richDefaults(src.classId)]);
-    resetDocHandlers(doc);
-    editing = true;
-    const can = name => !allowed || allowed.has(name.trim().toLowerCase());
-    const draft = parseProject(detail.payloadJson, detail.runs).map(s => ({
-      index: s.index, name: s.name, color: (s.color || '#818cf8').toLowerCase(), origColor: (s.color || '').toLowerCase(), locked: !can(s.name), removed: false,
-      entries: s.entries.map(e => ({ index: e.index, runs: e.runs, hand: e.hand, atts: e.atts.map(a => ({ index: a.index, name: a.name, path: a.path, kind: a.kind })) }))
-    }));
-    let uploading = 0;
-    const subjectAt = el => draft[+el.closest('[data-si]').dataset.si];
-    const entryAt = el => subjectAt(el).entries[+el.closest('[data-ei]').dataset.ei];
-
-    const render = () => {
-      doc.innerHTML = show(html`
-        <div class="doc-head">
-          <div class="grow"><h2>编辑作业</h2>
-            <div class="meta"><span>${icon('book', 'sm')}${detail.name}</span><span>${icon('calendar', 'sm')}${dateLabel(detail.date, true)}</span>
-              ${allowed ? html`<span class="badge warn">${icon('lock', 'sm')}你负责：${allowed.names.join('、')}</span>` : ''}</div>
-          </div>
-          <div class="row wrap"><button class="btn sm" data-ed="cancel">取消</button><button class="btn sm primary" data-ed="save">${icon('send')}保存并同步到大屏</button></div>
-        </div>
-        <div class="rt-dock">${richToolbar(defaults.fonts, defaults)}</div>
-        <div class="editor" style="--rt-font:${JSON.stringify(defaults.fontFamily).replace(/"/g, "'")};--rt-size:${(defaults.fontSize * .8).toFixed(1)}px">
-          ${draft.map((s, si) => s.removed ? '' : html`
-          <section class="edit-subject ${s.locked ? 'locked' : ''}" style="--subject:${s.color}" data-si="${si}">
-            <div class="edit-subject-head">
-              <input type="color" value="${s.color.slice(0, 7)}" data-f="color" ${s.locked ? 'disabled' : ''} title="科目颜色" aria-label="科目颜色">
-              <input class="input" value="${s.name}" data-f="name" maxlength="40" ${s.locked ? 'disabled' : ''} placeholder="科目名称" aria-label="科目名称">
-              ${s.locked ? html`<span class="badge" title="由其他老师负责">${icon('lock', 'sm')}只读</span>` : html`<button type="button" class="btn ghost sm icon-only danger" data-ed="del-subject" title="删除科目">${icon('trash')}</button>`}
-            </div>
-            <div class="edit-entries">
-              ${s.entries.map((e, ei) => html`<div class="edit-entry" data-ei="${ei}">
-                <span class="num">${ei + 1}</span>
-                <div class="grow" style="display:grid;gap:6px">
-                  <div class="input rich" contenteditable="${s.locked ? 'false' : 'true'}" role="textbox" aria-multiline="true" data-placeholder="作业内容" ${s.locked ? 'aria-disabled="true"' : ''}>${raw(rtHtml(e.runs, true))}</div>
-                  ${e.hand ? html`<small class="faint">${icon('pen', 'sm')}含手写笔迹，网页上看不到；修改文字不会影响笔迹。</small>` : ''}
-                  ${e.atts.length ? html`<div class="attachments">${e.atts.map((a, ai) => {
-                    const img = assetImage(a, src.asset);
-                    return html`<span class="attachment ${img ? 'with-thumb' : ''}">${img ? html`<img src="${img}" alt="">` : icon('clip', 'sm')}<span>${a.name}</span>${s.locked ? '' : html`<button type="button" class="att-x" data-ed="del-att" data-ai="${ai}" title="移除">${icon('x', 'sm')}</button>`}</span>`;
-                  })}</div>` : ''}
-                </div>
-                ${s.locked ? '' : html`<div class="edit-entry-actions">
-                  <button type="button" class="btn ghost sm icon-only" data-ed="add-image" title="添加图片">${icon('image')}</button>
-                  <button type="button" class="btn ghost sm icon-only danger" data-ed="del-entry" title="删除这一条">${icon('x')}</button></div>`}
-              </div>`)}
-              ${s.locked ? (s.entries.length ? '' : html`<p class="faint" style="font-size:12.5px;margin:0">暂无作业</p>`) : html`<button type="button" class="btn ghost sm" data-ed="add-entry">${icon('plus')}添加一条</button>`}
-            </div>
-          </section>`)}
-          <button type="button" class="btn add-subject" data-ed="add-subject">${icon('plus')}添加科目</button>
-          <p class="faint" style="font-size:12.5px;grid-column:1/-1">保存后连接的班级大屏会实时更新。修改过的文字会以纯文本显示，没改动的作业保留原来的字体和颜色。</p>
-        </div>`);
-    };
-
-    const pickImages = async entry => {
-      const input = document.createElement('input');
-      input.type = 'file'; input.accept = 'image/*'; input.multiple = true;
-      input.onchange = async () => {
-        for (const file of input.files) {
-          if (file.size > 50 * 1024 * 1024) { toast(`“${file.name}”超过 50 MB`, 'error'); continue; }
-          uploading++;
-          try {
-            const r = await fetch(`/api/classes/${src.classId}/assets?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { authorization: 'Bearer ' + state.token }, body: file });
-            if (!r.ok) throw new Error((await r.text().catch(() => '')).replace(/^"|"$/g, '') || '上传失败');
-            const j = await r.json();
-            entry.atts.push({ index: null, name: file.name, path: j.reference, kind: '图片' });
-          } catch (err) { toast(`图片上传失败：${err.message}`, 'error'); }
-          finally { uploading--; }
-        }
-        render();
-      };
-      input.click();
-    };
-
-    doc.oninput = e => {
-      const f = e.target.dataset.f; if (!f) return;
-      if (f === 'name') subjectAt(e.target).name = e.target.value;
-      if (f === 'color') { const s = subjectAt(e.target); s.color = e.target.value.toLowerCase(); e.target.closest('.edit-subject').style.setProperty('--subject', s.color); }
-    };
-    doc.onclick = async e => {
-      const b = e.target.closest('[data-ed]'); if (!b) return;
-      const act = b.dataset.ed;
-      if (act === 'cancel') { await renderDoc(id); return; }
-      if (act === 'add-subject') { draft.push({ index: null, name: '', color: '#818cf8', origColor: '', locked: false, removed: false, entries: [{ index: null, runs: [], atts: [] }] }); render(); $$('.edit-subject:last-of-type input[data-f=name]', doc).pop()?.focus(); return; }
-      if (act === 'del-subject') { const s = subjectAt(b); if (s.entries.some(x => rtPlain(x.runs) || x.atts.length || x.hand) && !await confirmDialog({ title: '删除科目', message: `删除“${s.name || '新科目'}”及其全部作业？保存后大屏上的这个磁贴也会删除。`, confirm: '删除' })) return; s.removed = true; render(); return; }
-      if (act === 'add-entry') { const s = subjectAt(b); s.entries.push({ index: null, runs: [], atts: [] }); render(); $$(`[data-si="${draft.indexOf(s)}"] .rich`, doc).pop()?.focus(); return; }
-      if (act === 'del-entry') { const s = subjectAt(b); s.entries.splice(+b.closest('[data-ei]').dataset.ei, 1); render(); return; }
-      if (act === 'del-att') { entryAt(b).atts.splice(+b.dataset.ai, 1); render(); return; }
-      if (act === 'add-image') { await pickImages(entryAt(b)); return; }
-      if (act === 'save') {
-        if (uploading) return toast('图片还在上传，请稍候', 'error');
-        const live = draft.filter(x => !x.removed);
-        if (live.some(x => !x.name.trim())) return toast('科目名称不能为空', 'error');
-        const body = {
-          expectedRevision: detail.revision,
-          subjects: live.map(x => ({
-            index: x.index, name: x.name.trim(), accentHex: x.color !== x.origColor && !(x.index != null && !x.origColor && x.color === '#818cf8') ? x.color : null,
-            entries: x.entries.filter(en => en.index != null || rtPlain(en.runs).trim() || en.atts.length).map(en => ({
-              index: en.index, content: rtPlain(en.runs), runs: en.runs, attachments: en.atts.map(a => a.index != null ? { index: a.index } : { asset: a.path, name: a.name })
-            }))
-          }))
-        };
-        b.disabled = true;
-        try {
-          await api(`/api/classes/${src.classId}/projects/${id}/content`, { method: 'PUT', body });
-          toast('作业已保存，大屏正在同步');
-          savedAt = Date.now();
-          editing = false;
-          await load();
-        } catch (err) {
-          b.disabled = false;
-          if (err.status === 409 && await confirmDialog({ title: '作业刚被修改', message: '班级大屏或其他老师刚刚修改了这个项目。重新载入最新内容后再编辑？（当前未保存的修改会丢失，可以先复制下来）', confirm: '重新载入', danger: false })) await openEditor(id);
-          else fail(err);
-        }
-      }
-    };
-    // 编辑框与片段数据一一对应：同一条作业重绘后仍写回同一个 entry 对象。
-    bindRichEditors(doc, { getRuns: el => entryAt(el).runs, setRuns: (el, runs) => { entryAt(el).runs = runs; }, defaults });
-    render();
-    $('.rich[contenteditable=true]', doc)?.focus();
   }
 
   async function load(keepSelection = true) {
     projects = await src.list();
     renderList();
     let id = keepSelection && current ? current.id : selectedId;
-    if (!byId(id) || (byId(id).deleted && !src.manage)) {
-      // 默认打开今天的项目；没有就打开最近一个过去的日期。
-      const live = projects.filter(p => !p.deleted);
-      const t = todayStr();
-      const pickP = live.find(p => p.date === t)
-        || [...live].filter(p => p.date && p.date < t).sort((a, b) => b.date.localeCompare(a.date))[0]
-        || [...live].sort((a, b) => parseTime(b.updatedAt) - parseTime(a.updatedAt))[0];
-      id = pickP?.id;
-      if (id && !selectedId) history.replaceState(null, '', '#/' + src.link(id));
+    if (!byId(id) || byId(id).deleted) {
+      id = defaultProject(projects)?.id;
+      if (id && !selectedId) setHash(src.link(id), true);
     }
-    if (!editing) await renderDoc(id);
+    await renderDoc(id);
   }
 
   // 切换项目只刷新右侧内容，不重建整个页面和实时连接。
-  $('#pl', root).addEventListener('click', async e => {
+  $('#pl', root).addEventListener('click', e => {
     const a = e.target.closest('a.project-item'); if (!a || e.ctrlKey || e.metaKey || e.shiftKey) return;
     e.preventDefault();
-    if (editing && !await confirmDialog({ title: '放弃编辑', message: '当前的修改还没有保存，确定离开吗？', confirm: '离开' })) return;
-    editing = false;
-    history.pushState(null, '', a.getAttribute('href'));
+    setHash(a.getAttribute('href').slice(2));
     renderDoc(a.getAttribute('href').split('/').pop());
     if (innerWidth <= 860) $('#doc', root).scrollIntoView({ behavior: 'smooth' });
   });
   $('#pf', root).addEventListener('input', e => { filter = e.target.value; renderList(); });
-  $('#pd', root)?.addEventListener('change', e => { showDeleted = e.target.checked; renderList(); });
-
-  if (src.manage) Object.assign(viewActions, {
-    'p-content': () => openEditor(current.id),
-    'p-new': async () => {
-      const t = todayStr(), [, m, d] = t.split('-').map(Number);
-      const live = projects.filter(p => !p.deleted).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-      const created = await modal({
-        title: '新建作业项目', submit: '创建并编辑',
-        body: html`<label class="field"><span>项目名称</span><input class="input" name="name" value="${m}月${d}日" maxlength="80"></label>
-          <label class="field"><span>作业日期</span><input class="input" type="date" name="date" value="${t}"></label>
-          <label class="field"><span>科目布局</span><select class="input" name="tpl">
-            <option value="latest">沿用最近的项目</option>${live.slice(0, 30).map(p => html`<option value="${p.id}">沿用“${p.name}”</option>`)}<option value="none">空白项目</option></select>
-            <small>沿用时保留科目、颜色和磁贴位置，只清空作业内容和笔迹。</small></label>`,
-        onSubmit: f => {
-          const name = f.elements.name.value.trim(); if (!name) throw new Error('请输入项目名称');
-          const tpl = f.tpl.value;
-          return api(`/api/classes/${src.classId}/projects`, { method: 'POST', body: { name, date: f.date.value || null, templateProjectId: /^[0-9a-f-]{36}$/.test(tpl) ? tpl : null, useLatestTemplate: tpl === 'latest' } });
-        }
-      });
-      if (!created) return;
-      toast('项目已创建');
-      projects = await src.list(); current = byId(created.id); renderList();
-      history.pushState(null, '', '#/' + src.link(created.id));
-      await openEditor(created.id);
-    },
-    'p-history': () => openHistory(src.classId, current, () => load(), src.asset),
-    'p-edit': async () => {
-      const r = await modal({
-        title: '名称与日期', submit: '保存',
-        body: html`<label class="field"><span>项目名称</span><input class="input" name="name" value="${current.name}" maxlength="80" required></label>
-          <label class="field"><span>作业日期</span><input class="input" type="date" name="date" value="${current.date || ''}"><small>清空则取消日期；设备下次同步时会更新。</small></label>`,
-        onSubmit: f => {
-          const name = f.elements.name.value.trim(); if (!name) throw new Error('项目名称不能为空');
-          const date = f.date.value;
-          return api(`/api/classes/${src.classId}/projects/${current.id}`, { method: 'PATCH', body: date ? { name, date } : { name, clearDate: true } });
-        }
-      });
-      if (r) { toast('项目信息已更新'); await load(); }
-    },
-    'p-delete': async () => {
-      if (!await confirmDialog({ title: '删除项目', message: `确定删除“${current.name}”吗？已配对设备同步后也会删除该项目。可以在“显示已删除”中恢复。`, confirm: '删除' })) return;
-      await api(`/api/classes/${src.classId}/projects/${current.id}`, { method: 'DELETE' });
-      toast('项目已删除'); await load();
-    },
-    'p-restore': async () => {
-      await api(`/api/classes/${src.classId}/projects/${current.id}/restore`, { method: 'POST', body: {} });
-      toast('项目已恢复'); await load();
-    }
-  });
 
   let refreshTimer;
-  if (src.ws) onDispose(liveSocket(src.ws, ev => {
+  onDispose(liveSocket(src.ws, ev => {
     src.onEvent?.(ev);
     if (ev.type && !['updated', 'deleted'].includes(ev.type)) return;
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(async () => {
-      const wasCurrent = current && ev.projectId === current.id;
-      await load().catch(() => { });
-      if (wasCurrent && Date.now() - savedAt > 4000) toast(editing ? '这个项目刚被大屏修改，保存时会提示冲突' : '当前项目已同步最新修改', editing ? 'error' : 'ok');
-    }, 400);
+    refreshTimer = setTimeout(() => load().catch(() => { }), 400);
   }, setLive));
-  else setLive(false);
   onDispose(() => clearTimeout(refreshTimer));
 
   return load(false);
+}
+
+/** 按日期分组（新的在前）列出项目，item(p) 画每一项。 */
+function projectGroups(items, item) {
+  const groups = new Map();
+  [...items].sort((a, b) => (b.date || '').localeCompare(a.date || '') || a.name.localeCompare(b.name, 'zh')).forEach(p => {
+    const k = p.date || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(p);
+  });
+  return [...groups].map(([date, ps]) => html`<div class="date-group">${icon('calendar', 'sm')}${dateLabel(date)}</div>${ps.map(item)}`);
+}
+/** 默认打开今天的项目；没有就打开最近一个过去的日期，再没有就打开最近更新的。 */
+function defaultProject(projects) {
+  const live = projects.filter(p => !p.deleted), t = todayStr();
+  return live.find(p => p.date === t)
+    || [...live].filter(p => p.date && p.date < t).sort((a, b) => b.date.localeCompare(a.date))[0]
+    || [...live].sort((a, b) => parseTime(b.updatedAt) - parseTime(a.updatedAt))[0];
 }
 
 // ---------- 历史版本抽屉
@@ -936,7 +829,9 @@ async function openHistory(classId, project, onRestored, assetUrl) {
   const scrim = document.createElement('div'); scrim.className = 'scrim';
   const drawer = document.createElement('aside'); drawer.className = 'drawer';
   document.body.append(scrim, drawer);
-  const close = () => { drawer.remove(); scrim.remove(); };
+  const esc = e => { if (e.key === 'Escape' && !$('dialog[open]')) close(); };
+  const close = () => { drawer.remove(); scrim.remove(); document.removeEventListener('keydown', esc); };
+  document.addEventListener('keydown', esc);
   scrim.onclick = close;
   drawer.innerHTML = show(html`<div class="drawer-head">${icon('history')}<h3 class="grow">历史版本 · ${project.name}</h3><button class="btn ghost sm icon-only" id="hx">${icon('x')}</button></div><div class="drawer-body">${loading()}</div>`);
   $('#hx', drawer).onclick = close;
@@ -1028,9 +923,11 @@ async function viewLogin(query) {
     const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = '正在登录…';
     try {
       const r = await api('/api/auth/login', { method: 'POST', auth: false, body: { userName: f.user.value.trim(), password: f.pass.value } });
-      state.token = r.accessToken; store.set('token', r.accessToken); state.me = null;
+      state.token = r.accessToken; store.set('token', r.accessToken); state.me = null; state.classes = null;
       await ensureMe();
-      navigate(query.get('next') || 'overview');
+      // 只负责一个班的老师直接进这个班的作业。
+      const next = query.get('next'), cls = next || isAdmin() ? [] : await classList();
+      navigate(next || (cls.length === 1 ? `classes/${cls[0].id}/homework` : 'overview'));
     } catch (err) {
       $('#le').textContent = err.status === 401 ? '账号或密码不正确，或账号已停用' : err.message;
       btn.disabled = false; btn.textContent = '登录';
@@ -1119,7 +1016,7 @@ async function viewOverview() {
             <span class="grow"><span class="title" style="display:block">${t.className}${t.online ? html` <span class="dot live" title="大屏在线" style="display:inline-block;vertical-align:middle;margin-left:4px"></span>` : ''}</span>
               <span class="meta">${t.projectId ? `${t.projectName} · ${t.filled}/${t.subjects} 个科目已布置` : '今天还没有作业项目'}</span>
               ${t.projectId ? progress(t.filled, t.subjects) : ''}</span>
-            ${t.projectId ? html`<a class="btn sm" href="#/homework/${t.classId}/${t.projectId}">${icon('edit')}查看</a>` : html`<a class="btn sm primary" href="#/homework/${t.classId}?new=1">${icon('plus')}布置</a>`}
+            ${t.projectId ? html`<a class="btn sm" href="#/classes/${t.classId}/homework/${t.projectId}">${icon('edit')}查看</a>` : html`<a class="btn sm primary" href="#/classes/${t.classId}/homework?new=1">${icon('plus')}布置</a>`}
           </div>`)}</div>
       </section>
       ${mine.length ? html`<section class="card">
@@ -1136,7 +1033,7 @@ async function viewOverview() {
     <section class="card" style="margin-top:18px">
       <div class="card-head"><h3 class="grow">最近更新</h3><a class="btn ghost sm" href="#/homework">全部作业${icon('right')}</a></div>
       <div class="list-rows">${o.recent.length ? o.recent.map(p => html`
-        <a class="list-row" href="#/homework/${p.classId}/${p.id}">
+        <a class="list-row" href="#/classes/${p.classId}/homework/${p.id}">
           <span class="grow"><span class="title" style="display:block">${p.name}${p.deleted ? html` <span class="badge danger">已删除</span>` : ''}</span><span class="meta">${p.className} · ${dateLabel(p.date)}${p.updatedBy ? ' · ' + p.updatedBy : ''}</span></span>
           <span class="meta nowrap" title="${fullTime(p.updatedAt)}">${relTime(p.updatedAt)}</span>
         </a>`) : empty('book', '暂无项目', '设备同步或在网页上新建项目后会出现在这里。')}</div>
@@ -1184,7 +1081,7 @@ async function createClassFlow() {
 
 async function viewClasses(query) {
   const page = shell({ nav: 'classes', title: '班级', actions: isAdmin() ? html`<button class="btn primary" data-act="new-class">${icon('plus')}新建班级</button>` : '' });
-  viewActions['new-class'] = async () => { const c = await createClassFlow(); if (c) navigate('classes/' + c.id); };
+  viewActions['new-class'] = async () => { const c = await createClassFlow(); if (c) { state.classes = null; navigate('classes/' + c.id + '/devices'); } };
   setPage(page, loading());
   const classes = await api('/api/classes');
   if (!classes.length) {
@@ -1204,63 +1101,34 @@ async function viewClasses(query) {
   if (query.get('new') && isAdmin()) viewActions['new-class']();
 }
 
-async function viewClass(classId, tab = 'projects') {
-  const c = await api(`/api/classes/${classId}`);
+async function viewClass(classId, section = 'homework', sub, query) {
+  if (sub instanceof URLSearchParams) { query = sub; sub = undefined; }
+  if (section instanceof URLSearchParams) { query = section; section = 'homework'; }
+  if (section === 'projects') section = 'homework';
+  if (section === 'teachers') section = 'people';
+  if (!SECTION_LABEL[section]) section = 'homework';
+  let c;
+  try { c = await api(`/api/classes/${classId}`); }
+  catch (err) {
+    if (err.status !== 404 && err.status !== 403) throw err;
+    store.del('lastClass'); state.classes = null;
+    const page = shell({ nav: 'classes', title: '班级不存在' });
+    return setPage(page, html`<div class="card">${empty('alert', '班级不存在', '该班级可能已被删除，或你没有访问权限。', html`<a class="btn" href="#/classes">返回班级列表</a>`)}</div>`);
+  }
+  store.set('lastClass', c.id);
   const publicUrl = `${location.origin}${location.pathname}#/c/${c.publicCode}`;
   const page = shell({
-    nav: 'classes', title: c.name, crumbs: html`<a href="#/classes">班级</a>${icon('right', 'sm')}<span>${c.name}</span>`,
-    actions: html`
-      <a class="btn" href="#/homework/${c.id}">${icon('book')}查看作业</a>
-      <button class="btn primary" data-act="pair">${icon('device')}配对设备</button>`
+    classId: c.id, section, title: SECTION_LABEL[section], crumbs: html`<span>${c.name}</span>`,
+    actions: html`<span class="code-chip" title="公开短码：学生和家长凭它只读查看作业">${c.publicCode}<button class="btn ghost sm icon-only" data-act="copy" data-text="${publicUrl}" data-label="公开链接已复制" title="复制公开链接">${icon('link', 'sm')}</button></span>
+      ${c.online ? html`<span class="badge ok" title="实时连接数"><span class="dot live"></span>${c.online} 在线</span>` : ''}`
   });
-  const tabs = [['projects', '项目', c.projectCount], ['layout', '大屏设置'], ['people', '人员', c.teacherCount], ['duty', '值日'], ['notices', '公告'], ['devices', '设备', c.deviceCount], ['settings', '设置']];
-  if (tab === 'teachers') tab = 'people';
-  setPage(page, html`
-    <div class="detail-head"><div class="grow">
-      <div class="meta">
-        <span class="code-chip" title="公开短码">${c.publicCode}<button class="btn ghost sm icon-only" data-act="copy" data-text="${publicUrl}" data-label="公开链接已复制" title="复制公开链接">${icon('link', 'sm')}</button></span>
-        <span>创建于 ${fullTime(c.createdAt).slice(0, 10)}</span>
-        <span>${c.lastUpdatedAt ? '最近同步 ' + relTime(c.lastUpdatedAt) : '尚无同步'}</span>
-        ${c.online ? html`<span class="badge ok"><span class="dot live"></span>${c.online} 个实时连接</span>` : ''}
-      </div>
-    </div></div>
-    <nav class="tabs">${tabs.map(([k, label, n]) => html`<a href="#/classes/${c.id}/${k}" class="${tab === k ? 'active' : ''}">${label}${n != null ? html`<span class="badge">${n}</span>` : ''}</a>`)}</nav>
-    <div id="tab">${loading()}</div>`);
+  if (section === 'homework') page.classList.add('wide');
+  setPage(page, html`<div id="tab">${loading()}</div>`);
   viewActions.pair = () => pairingDialog(c.id, c.name);
   const box = $('#tab');
-  const views = { projects: classProjects, layout: classLayout, people: classPeople, duty: classDuty, notices: classNotices, devices: classDevices };
-  if (views[tab]) await views[tab](box, c);
-  else classSettings(box, c, publicUrl);
-}
-
-async function classProjects(box, c) {
-  const projects = await api(`/api/classes/${c.id}/projects`);
-  let showDeleted = false;
-  const render = () => {
-    const rows = projects.filter(p => showDeleted || !p.deleted).sort((a, b) => (b.date || '').localeCompare(a.date || '') || parseTime(b.updatedAt) - parseTime(a.updatedAt));
-    box.innerHTML = show(html`
-      <div class="toolbar"><label class="check"><input type="checkbox" id="sd" ${showDeleted ? 'checked' : ''}>显示已删除（${projects.filter(p => p.deleted).length}）</label><span class="spacer"></span>
-        <button class="btn sm" data-act="export">${icon('download')}导出 JSON</button></div>
-      <div class="card">${rows.length ? html`<div class="table-wrap"><table class="table">
-        <thead><tr><th>项目</th><th>日期</th><th class="hide-sm">最后修改</th><th class="hide-sm">修订</th><th></th></tr></thead>
-        <tbody>${rows.map(p => html`<tr class="${p.deleted ? 'dim' : ''}">
-          <td><a href="#/homework/${c.id}/${p.id}"><b>${p.name}</b></a> ${p.deleted ? html`<span class="badge danger">已删除</span>` : ''}</td>
-          <td class="nowrap">${dateLabel(p.date)}</td>
-          <td class="hide-sm"><span title="${fullTime(p.updatedAt)}">${relTime(p.updatedAt)}</span><div class="faint" style="font-size:12px">${p.updatedBy || ''}</div></td>
-          <td class="hide-sm mono">${p.revision}</td>
-          <td class="actions">
-            <button class="btn ghost sm" data-act="history" data-id="${p.id}">${icon('history')}历史</button>
-            ${p.deleted ? html`<button class="btn sm" data-act="restore" data-id="${p.id}">${icon('restore')}恢复</button>` : html`<a class="btn sm" href="#/homework/${c.id}/${p.id}">${icon('eye')}查看</a>`}
-          </td></tr>`)}</tbody></table></div>`
-        : empty('book', '暂无项目', '配对设备后，班级大屏上的项目会自动同步到这里。', html`<button class="btn primary" data-act="pair">${icon('device')}配对设备</button>`)}</div>`);
-    $('#sd').onchange = e => { showDeleted = e.target.checked; render(); };
-  };
-  Object.assign(viewActions, {
-    history: el => openHistory(c.id, projects.find(p => p.id === el.dataset.id), () => route(), consoleAsset(c.id)),
-    restore: async el => { await api(`/api/classes/${c.id}/projects/${el.dataset.id}/restore`, { method: 'POST', body: {} }); toast('项目已恢复'); route(); },
-    export: () => download(`/api/classes/${c.id}/export`)
-  });
-  render();
+  const views = { homework: (b, cl) => classHomework(b, cl, sub, query), layout: classLayout, people: classPeople, duty: classDuty, notices: classNotices, devices: classDevices, settings: (b, cl) => classSettings(b, cl, publicUrl) };
+  reloadView = () => views[section](box, c);
+  await views[section](box, c);
 }
 
 async function classDevices(box, c) {
@@ -1274,21 +1142,32 @@ async function classDevices(box, c) {
   };
   const health = d => d.revoked ? '' : d.lastError ? html`<div class="faint" style="font-size:12px;color:var(--danger)">${icon('alert', 'sm')} ${d.lastError}</div>`
     : d.pendingChanges ? html`<div class="faint" style="font-size:12px">${d.pendingChanges} 项待上传</div>` : '';
-  box.innerHTML = show(html`<div class="card">${devices.length ? html`<div class="table-wrap"><table class="table">
+  box.innerHTML = show(html`<div class="toolbar"><span class="muted grow">${devices.filter(d => !d.revoked).length} 台设备 · 点设备名称可以直接改名</span><button class="btn primary" data-act="pair">${icon('device')}配对设备</button></div>
+    <div class="card">${devices.length ? html`<div class="table-wrap"><table class="table">
     <thead><tr><th>设备</th><th>状态</th><th>最近同步</th><th class="hide-sm">版本 · 当前项目</th><th></th></tr></thead>
     <tbody>${devices.map(d => html`<tr class="${d.revoked ? 'dim' : ''}">
-      <td><div class="who">${icon('device')}<div><b>${d.deviceName || '未命名设备'}</b><span>配对于 ${fullTime(d.createdAt).slice(0, 10)}</span></div></div></td>
+      <td><div class="who">${icon('device')}<div>${d.revoked ? html`<b>${d.deviceName || '未命名设备'}</b>` : html`<input class="inline-edit" data-rename="${d.id}" value="${d.deviceName || ''}" placeholder="未命名设备" maxlength="60" aria-label="设备名称">`}<span>配对于 ${fullTime(d.createdAt).slice(0, 10)}</span></div></div></td>
       <td>${status(d)}${health(d)}</td>
       <td title="${fullTime(d.lastSyncAt || d.lastSeenAt)}">${relTime(d.lastSyncAt || d.lastSeenAt)}</td>
       <td class="hide-sm">${d.appVersion || html`<span class="faint">未上报</span>`}${d.activeProject ? html`<div class="faint" style="font-size:12px">${d.activeProject}</div>` : ''}</td>
       <td class="actions">${d.revoked ? '' : html`
         <button class="btn ghost sm" data-act="dev-sync" data-id="${d.id}" ${d.online ? '' : 'disabled title="设备离线"'}>${icon('sync')}同步</button>
         <button class="btn ghost sm" data-act="dev-msg" data-id="${d.id}" ${d.online ? '' : 'disabled title="设备离线"'}>${icon('send')}消息</button>
-        <button class="btn ghost sm icon-only" data-act="rename-device" data-id="${d.id}" title="重命名">${icon('edit')}</button>
         <button class="btn sm danger" data-act="revoke" data-id="${d.id}">吊销</button>`}</td></tr>`)}</tbody></table></div>`
     : empty('device', '还没有配对设备', '生成配对码，在班级大屏的 Pancake 设置 → 集控中输入即可连接。', html`<button class="btn primary" data-act="pair">${icon('device')}配对设备</button>`)}</div>
     <p class="faint" style="margin-top:12px;font-size:12.5px">在线设备可以远程触发同步或在大屏上弹出一条消息。吊销后该设备无法再读取或上传项目，需要重新配对。</p>`);
   const find = id => devices.find(d => d.id === id);
+  // 就地改名：回车或离开输入框时保存，Esc 还原。
+  for (const input of $$('[data-rename]', box)) {
+    const d = find(input.dataset.rename);
+    input.onkeydown = e => { if (e.key === 'Enter') input.blur(); if (e.key === 'Escape') { input.value = d.deviceName || ''; input.blur(); } };
+    input.onchange = async () => {
+      const name = input.value.trim();
+      if (name === (d.deviceName || '')) return;
+      try { await api(`/api/classes/${c.id}/devices/${d.id}`, { method: 'PATCH', body: { name } }); d.deviceName = name; toast('设备已重命名'); }
+      catch (err) { input.value = d.deviceName || ''; fail(err); }
+    };
+  }
   Object.assign(viewActions, {
     'dev-sync': async el => {
       const r = await api(`/api/classes/${c.id}/devices/${el.dataset.id}/command`, { method: 'POST', body: { command: 'sync' } });
@@ -1303,18 +1182,10 @@ async function classDevices(box, c) {
       });
       if (r) toast(r.delivered ? '消息已送达' : '设备离线，未送达', r.delivered ? 'ok' : 'error');
     },
-    'rename-device': async el => {
-      const d = find(el.dataset.id);
-      const ok = await modal({
-        title: '重命名设备', submit: '保存', body: html`<label class="field"><span>设备名称</span><input class="input" name="name" value="${d.deviceName}" maxlength="60"></label>`,
-        onSubmit: f => api(`/api/classes/${c.id}/devices/${d.id}`, { method: 'PATCH', body: { name: f.elements.name.value.trim() } })
-      });
-      if (ok) { toast('设备已重命名'); route(); }
-    },
     revoke: async el => {
       const d = find(el.dataset.id);
-      if (!await confirmDialog({ title: '吊销设备', message: `吊销“${d.deviceName}”后，它将无法继续同步本班项目。确定吗？`, confirm: '吊销' })) return;
-      await api(`/api/classes/${c.id}/devices/${d.id}`, { method: 'DELETE' }); toast('设备已吊销'); route();
+      if (!await confirmDialog({ title: '吊销设备', message: `吊销“${d.deviceName}”后，它将无法继续同步本班项目，需要重新配对。确定吗？`, confirm: '吊销' })) return;
+      await api(`/api/classes/${c.id}/devices/${d.id}`, { method: 'DELETE' }); toast('设备已吊销'); reloadView();
     }
   });
 }
@@ -1325,17 +1196,35 @@ async function classPeople(box, c) {
   const canStaff = isAdmin() || duty === 'HeadTeacher';
   const canRoster = canStaff || !staff.some(t => t.duty === 'HeadTeacher');
   const others = isAdmin() ? (await api('/api/admin/users')).filter(u => u.role === 'Teacher' && !staff.some(t => t.id === u.id)) : [];
-  let q = '';
-  const groups = [...new Set(students.map(x => x.group).filter(Boolean))];
-  const renderStudents = () => {
-    const rows = students.filter(x => !q || x.name.includes(q) || x.number.includes(q) || x.group.includes(q));
-    $('#sb').innerHTML = show(rows.length ? rows.map(x => html`<tr class="${x.active ? '' : 'dim'}">
+  let q = '', editing = null;
+  const groups = () => [...new Set(students.map(x => x.group).filter(Boolean))];
+  const viewRow = x => html`<tr class="${x.active ? '' : 'dim'}">
       <td class="mono">${x.number || html`<span class="faint">—</span>`}</td>
       <td><b>${x.name}</b>${x.note ? html`<div class="faint" style="font-size:12px">${x.note}</div>` : ''}</td>
       <td>${x.group ? html`<span class="badge">${x.group}</span>` : html`<span class="faint">—</span>`}</td>
       <td class="hide-sm">${x.active ? html`<span class="badge ok">在读</span>` : html`<span class="badge">停用</span>`}</td>
-      <td class="actions">${canRoster ? html`<button class="btn ghost sm icon-only" data-act="edit-student" data-id="${x.id}" title="编辑">${icon('edit')}</button><button class="btn ghost sm icon-only danger" data-act="del-student" data-id="${x.id}" title="移除">${icon('trash')}</button>` : ''}</td></tr>`)
-      : html`<tr><td colspan="5">${empty('student', students.length ? '没有匹配的学生' : '还没有学生名单', students.length ? '换个关键词试试。' : '导入名单后可以安排值日，名单只保存在集控服务器上。')}</td></tr>`);
+      <td class="actions">${canRoster ? html`<button class="btn ghost sm icon-only" data-act="edit-student" data-id="${x.id}" title="编辑">${icon('edit')}</button><button class="btn ghost sm icon-only danger" data-act="del-student" data-id="${x.id}" title="移除">${icon('trash')}</button>` : ''}</td></tr>`;
+  // 行内编辑：回车保存，Esc 取消。
+  const editRow = x => html`<tr class="row-edit" data-row="${x.id}">
+      <td><input class="input sm" data-ef="number" value="${x.number}" maxlength="20" placeholder="学号"></td>
+      <td><input class="input sm" data-ef="name" value="${x.name}" maxlength="30" placeholder="姓名"><input class="input sm" data-ef="note" value="${x.note}" maxlength="100" placeholder="备注" style="margin-top:6px"></td>
+      <td><input class="input sm" data-ef="group" value="${x.group}" maxlength="20" list="groups" placeholder="小组"></td>
+      <td class="hide-sm"><label class="check"><input type="checkbox" data-ef="active" ${x.active ? 'checked' : ''}>在读</label></td>
+      <td class="actions"><button class="btn sm primary" data-act="save-student" data-id="${x.id}">保存</button><button class="btn sm ghost" data-act="cancel-student">取消</button></td></tr>`;
+  // 名单顶部的快速添加行：填完按回车就添加，可以连续录入。
+  const quickRow = () => canRoster ? html`<tr class="row-edit quick-add">
+      <td><input class="input sm" data-qa="number" maxlength="20" placeholder="学号"></td>
+      <td><input class="input sm" data-qa="name" maxlength="30" placeholder="姓名，回车添加"></td>
+      <td><input class="input sm" data-qa="group" maxlength="20" list="groups" placeholder="小组"></td>
+      <td class="hide-sm"></td>
+      <td class="actions"><button class="btn sm primary" data-act="quick-add">${icon('plus')}添加</button></td></tr>` : '';
+  const renderStudents = () => {
+    const rows = students.filter(x => !q || x.name.includes(q) || x.number.includes(q) || x.group.includes(q));
+    $('#sb').innerHTML = show(html`${quickRow()}${rows.length ? rows.map(x => editing === x.id ? editRow(x) : viewRow(x))
+      : html`<tr><td colspan="5">${empty('student', students.length ? '没有匹配的学生' : '还没有学生名单', students.length ? '换个关键词试试。' : canRoster ? '在上面一行逐个录入，或用“批量导入”从表格粘贴。' : '名单由班主任维护。')}</td></tr>`}`);
+    $('#groups').innerHTML = show(groups().map(g => html`<option value="${g}">`));
+    const active = students.filter(x => x.active).length, gs = groups().length;
+    $('#scount').textContent = `${active} 人${gs ? ` · ${gs} 个小组` : ''}`;
   };
   box.innerHTML = show(html`
     <section class="card">
@@ -1355,31 +1244,30 @@ async function classPeople(box, c) {
       <div class="card-body faint" style="font-size:12.5px;border-top:1px solid var(--border)">班主任可以管理本班全部内容和人员分工；指定了科目的科任老师和助教在网页上只能编辑自己负责的科目，未指定科目则不受限。</div>
     </section>
     <section class="card" style="margin-top:18px">
-      <div class="card-head"><h3 class="grow">学生名单 <span class="faint" style="font-weight:500;font-size:13px">${students.filter(x => x.active).length} 人${groups.length ? ` · ${groups.length} 个小组` : ''}</span></h3>
-        ${canRoster ? html`<button class="btn sm" data-act="import-students">${icon('upload')}批量导入</button><button class="btn sm primary" data-act="add-student">${icon('plus')}添加学生</button>` : ''}</div>
+      <div class="card-head"><h3 class="grow">学生名单 <span class="faint" style="font-weight:500;font-size:13px" id="scount"></span></h3>
+        ${canRoster ? html`<button class="btn sm" data-act="import-students">${icon('upload')}批量导入</button>` : ''}</div>
       <div class="card-body" style="padding-bottom:0"><label class="input-icon" style="max-width:280px;display:block">${icon('search', 'sm')}<input class="input" id="sq" placeholder="搜索姓名、学号或小组"></label></div>
-      <div class="table-wrap"><table class="table"><thead><tr><th style="width:110px">学号</th><th>姓名</th><th>小组</th><th class="hide-sm">状态</th><th></th></tr></thead><tbody id="sb"></tbody></table></div>
+      <div class="table-wrap"><table class="table"><thead><tr><th style="width:120px">学号</th><th>姓名</th><th style="width:150px">小组</th><th class="hide-sm">状态</th><th></th></tr></thead><tbody id="sb"></tbody></table></div>
+      <datalist id="groups"></datalist>
     </section>`);
   renderStudents();
   $('#sq').oninput = e => { q = e.target.value.trim(); renderStudents(); };
-
-  const studentForm = (x = {}) => html`<div class="grid-2" style="gap:14px">
-      <label class="field"><span>姓名</span><input class="input" name="name" value="${x.name || ''}" maxlength="30"></label>
-      <label class="field"><span>学号</span><input class="input" name="number" value="${x.number || ''}" maxlength="20"></label>
-      <label class="field"><span>小组</span><input class="input" name="group" value="${x.group || ''}" maxlength="20" list="groups"><datalist id="groups">${groups.map(g => html`<option value="${g}">`)}</datalist></label>
-      <label class="field"><span>备注</span><input class="input" name="note" value="${x.note || ''}" maxlength="100"></label></div>
-    ${x.id ? html`<label class="check"><input type="checkbox" name="active" ${x.active ? 'checked' : ''}>在读（停用后不再参与值日）</label>` : ''}`;
-  const studentBody = f => ({ name: f.elements.name.value.trim(), number: f.number.value.trim(), group: f.group.value.trim(), note: f.note.value.trim(), active: f.active ? f.active.checked : true });
+  $('#sb').addEventListener('keydown', e => {
+    if (e.target.dataset.qa && e.key === 'Enter') { e.preventDefault(); viewActions['quick-add']().catch(fail); }
+    if (e.target.dataset.ef && e.key === 'Enter') { e.preventDefault(); viewActions['save-student']($('[data-act=save-student]', e.target.closest('tr'))).catch(fail); }
+    if (e.target.dataset.ef && e.key === 'Escape') { editing = null; renderStudents(); }
+  });
+  const rowBody = tr => ({ name: $('[data-ef=name]', tr).value.trim(), number: $('[data-ef=number]', tr).value.trim(), group: $('[data-ef=group]', tr).value.trim(), note: $('[data-ef=note]', tr).value.trim(), active: $('[data-ef=active]', tr).checked });
 
   Object.assign(viewActions, {
     'add-teacher': async () => {
       const id = $('#ta').value; if (!id) return toast('请选择老师', 'error');
-      await api(`/api/admin/classes/${c.id}/teachers/${id}`, { method: 'POST' }); toast('老师已加入班级'); route();
+      await api(`/api/admin/classes/${c.id}/teachers/${id}`, { method: 'POST' }); toast('老师已加入班级'); reloadView();
     },
     'remove-teacher': async el => {
       const t = staff.find(x => x.id === el.dataset.id);
       if (!await confirmDialog({ title: '移出班级', message: `将“${t.displayName}”移出${c.name}？该老师将无法再管理本班。`, confirm: '移出' })) return;
-      await api(`/api/admin/classes/${c.id}/teachers/${t.id}`, { method: 'DELETE' }); toast('已移出'); route();
+      await api(`/api/admin/classes/${c.id}/teachers/${t.id}`, { method: 'DELETE' }); toast('已移出'); reloadView();
     },
     'edit-staff': async el => {
       const t = staff.find(x => x.id === el.dataset.id);
@@ -1406,21 +1294,33 @@ async function classPeople(box, c) {
         },
         onSubmit: f => api(`/api/classes/${c.id}/staff/${t.id}`, { method: 'PUT', body: { duty: f.duty.value, subjects: f.duty.value === 'HeadTeacher' ? [] : $$('input[name=subj]:checked', f).map(x => x.value) } })
       });
-      if (ok) { myAssignments = null; toast('分工已保存'); route(); }
+      if (ok) { myAssignments = null; toast('分工已保存'); reloadView(); }
     },
-    'add-student': async () => {
-      const ok = await modal({ title: '添加学生', submit: '添加', wide: true, body: studentForm(), onSubmit: f => { const b = studentBody(f); if (!b.name) throw new Error('请输入姓名'); return api(`/api/classes/${c.id}/students`, { method: 'POST', body: b }); } });
-      if (ok) { toast('已添加'); route(); }
+    'quick-add': async () => {
+      const get = k => $(`[data-qa=${k}]`, box);
+      const body = { name: get('name').value.trim(), number: get('number').value.trim(), group: get('group').value.trim(), note: '', active: true };
+      if (!body.name) { get('name').focus(); return toast('请输入姓名', 'error'); }
+      const x = await api(`/api/classes/${c.id}/students`, { method: 'POST', body });
+      students.push(x); renderStudents();
+      // 小组保留方便连续录入同组学生；学号是数字时自动加一。
+      get('group').value = body.group;
+      if (/^\d+$/.test(body.number)) get('number').value = String(+body.number + 1).padStart(body.number.length, '0');
+      (body.number ? get('number') : get('name')).focus();
+      toast(`已添加 ${x.name}`);
     },
-    'edit-student': async el => {
-      const x = students.find(y => y.id === el.dataset.id);
-      const ok = await modal({ title: '编辑学生', submit: '保存', wide: true, body: studentForm(x), onSubmit: f => { const b = studentBody(f); if (!b.name) throw new Error('请输入姓名'); return api(`/api/classes/${c.id}/students/${x.id}`, { method: 'PATCH', body: b }); } });
-      if (ok) { toast('已保存'); route(); }
+    'edit-student': el => { editing = el.dataset.id; renderStudents(); $('[data-ef=name]', $('#sb'))?.focus(); },
+    'cancel-student': () => { editing = null; renderStudents(); },
+    'save-student': async el => {
+      const tr = el.closest('tr'), body = rowBody(tr);
+      if (!body.name) { $('[data-ef=name]', tr).focus(); return toast('请输入姓名', 'error'); }
+      const x = await api(`/api/classes/${c.id}/students/${el.dataset.id}`, { method: 'PATCH', body });
+      students[students.findIndex(y => y.id === x.id)] = x; editing = null; renderStudents(); toast('已保存');
     },
     'del-student': async el => {
       const x = students.find(y => y.id === el.dataset.id);
-      if (!await confirmDialog({ title: '移除学生', message: `从名单中移除“${x.name}”？值日安排里的这名学生也会被移除。如果只是暂时不参与值日，可以改为“停用”。`, confirm: '移除' })) return;
-      await api(`/api/classes/${c.id}/students/${x.id}`, { method: 'DELETE' }); toast('已移除'); route();
+      if (!await confirmDialog({ title: '移除学生', message: `从名单中移除“${x.name}”？值日安排里的这名学生也会被移除。如果只是暂时不参与值日，可以编辑后取消“在读”。`, confirm: '移除' })) return;
+      await api(`/api/classes/${c.id}/students/${x.id}`, { method: 'DELETE' });
+      students.splice(students.indexOf(x), 1); renderStudents(); toast('已移除');
     },
     'import-students': async () => {
       const r = await modal({
@@ -1430,7 +1330,7 @@ async function classPeople(box, c) {
           <label class="check"><input type="checkbox" name="replace">替换现有名单（不勾选时按学号或姓名合并更新）</label>`,
         onSubmit: f => { if (!f.text.value.trim()) throw new Error('请粘贴学生名单'); return api(`/api/classes/${c.id}/students/import`, { method: 'POST', body: { text: f.text.value, replaceAll: f.replace.checked } }); }
       });
-      if (r) { toast(`导入完成：新增 ${r.added} 人，更新 ${r.updated} 人`); route(); }
+      if (r) { toast(`导入完成：新增 ${r.added} 人，更新 ${r.updated} 人`); reloadView(); }
     }
   });
 }
@@ -1450,6 +1350,7 @@ async function classDuty(box, c) {
   plan.anchor ||= todayStr();
   if (!plan.tasks.length) plan.tasks = [{ id: shortId(), name: '扫地' }, { id: shortId(), name: '擦黑板' }, { id: shortId(), name: '倒垃圾' }];
   let dirty = false;
+  setLeaveGuard(() => dirty ? '值日安排还没有保存，离开后修改会丢失。' : '');
   const chips = ids => ids.map(nameOf).filter(Boolean).map(n => html`<span class="chip">${n}</span>`);
 
   const render = () => {
@@ -1533,7 +1434,7 @@ async function classDuty(box, c) {
     $('#ds').onclick = async () => {
       try {
         await api(`/api/classes/${c.id}/duty`, { method: 'PUT', body: { expectedRevision: res.revision, plan } });
-        toast('值日安排已保存'); route();
+        toast('值日安排已保存'); reloadView();
       } catch (err) { fail(err); }
     };
   };
@@ -1573,9 +1474,20 @@ async function classNotices(box, c) {
     ${items.length ? html`<div class="stack">${items.map(a => announcementCard(a))}</div>` : html`<div class="card">${empty('megaphone', '还没有公告', '发布后会实时推送到班级大屏。')}</div>`}`);
   const find = id => items.find(a => a.id === id);
   Object.assign(viewActions, {
-    'new-notice': async () => { if (await modal({ title: '发布公告', submit: '发布', wide: true, body: announcementForm(), onSubmit: f => api(`/api/classes/${c.id}/announcements`, { method: 'POST', body: announcementBody(f) }) })) { toast('公告已发布'); route(); } },
-    'edit-notice': async el => { const a = find(el.dataset.id); if (await modal({ title: '编辑公告', submit: '保存', wide: true, body: announcementForm(a), onSubmit: f => api(`/api/classes/${c.id}/announcements/${a.id}`, { method: 'PUT', body: announcementBody(f) }) })) { toast('公告已更新'); route(); } },
-    'del-notice': async el => { const a = find(el.dataset.id); if (!await confirmDialog({ title: '删除公告', message: `删除“${a.title}”？大屏上会立即撤下。`, confirm: '删除' })) return; await api(`/api/classes/${c.id}/announcements/${a.id}`, { method: 'DELETE' }); toast('已删除'); route(); }
+    'new-notice': async () => {
+      const others = (state.classes || []).filter(x => x.id !== c.id);
+      const r = await modal({
+        title: '发布公告', submit: '发布', wide: true,
+        body: html`${announcementForm()}${others.length ? html`<div class="field"><span>同时发到其他班级（可选）</span><div class="checklist">${others.map(x => html`<label class="check"><input type="checkbox" name="cls" value="${x.id}">${x.name}</label>`)}</div></div>` : ''}`,
+        onSubmit: f => {
+          const body = announcementBody(f), ids = $$('input[name=cls]:checked', f).map(x => x.value);
+          return ids.length ? api('/api/announcements/broadcast', { method: 'POST', body: { classIds: [c.id, ...ids], ...body } }) : api(`/api/classes/${c.id}/announcements`, { method: 'POST', body });
+        }
+      });
+      if (r) { toast(r.count > 1 ? `已发布到 ${r.count} 个班级` : '公告已发布'); reloadView(); }
+    },
+    'edit-notice': async el => { const a = find(el.dataset.id); if (await modal({ title: '编辑公告', submit: '保存', wide: true, body: announcementForm(a), onSubmit: f => api(`/api/classes/${c.id}/announcements/${a.id}`, { method: 'PUT', body: announcementBody(f) }) })) { toast('公告已更新'); reloadView(); } },
+    'del-notice': async el => { const a = find(el.dataset.id); if (!await confirmDialog({ title: '删除公告', message: `删除“${a.title}”？大屏上会立即撤下。`, confirm: '删除' })) return; await api(`/api/classes/${c.id}/announcements/${a.id}`, { method: 'DELETE' }); toast('已删除'); reloadView(); }
   });
 }
 
@@ -1730,16 +1642,11 @@ async function classLayout(box, c) {
   const ctx = { current, doc, assetUrl };
   let page = pages.some(p => p.key === store.get('settingsPage')) ? store.get('settingsPage') : 'Layout';
 
-  // 布局预览的磁贴取自一个项目；拖动后保存到该项目。
+  // 预览里的磁贴取自最近的项目，只作参照；磁贴位置和作业内容在“作业”画布里调整。
   const live = projects.filter(p => !p.deleted).sort((a, b) => (b.date || '').localeCompare(a.date || '') || parseTime(b.updatedAt) - parseTime(a.updatedAt));
-  let tileProject = live[0] || null, tileDetail = null, tiles = [];
-  async function loadTiles() {
-    tiles = [];
-    if (!tileProject) return;
-    tileDetail = await api(`/api/classes/${c.id}/projects/${tileProject.id}`);
-    tiles = boardTiles(tileDetail, assetUrl);
-  }
-  await loadTiles();
+  const tileProject = live[0] || null;
+  const tiles = tileProject ? boardTiles(await api(`/api/classes/${c.id}/projects/${tileProject.id}`), assetUrl).map(t => ({ ...t, locked: true, cls: 'locked' })) : [];
+  setLeaveGuard(() => Object.keys(draft).length ? '大屏设置有未保存的修改，离开后会丢失。' : '');
 
   const navIcon = p => icon(SETTING_ICON[p.icon] || p.icon || 'settings');
   box.innerHTML = show(html`<div class="set-shell" id="ss">
@@ -1819,22 +1726,15 @@ async function classLayout(box, c) {
       ? Board.screen(d, t, BOARD_W, BOARD_H, { tiles, interactive: kind === 'Layout', assetUrl, placeholder: tiles.length ? '' : `<div class="pk-center" style="color:${t.text};opacity:.5;font-size:28px">${tileProject ? '这个项目还没有摆放磁贴' : '暂无项目'}</div>` })
       : Board.sample(kind, d, t, { assetUrl });
     Board.mount(stage, html_, d);
-    if (kind === 'Layout') for (const el of $$('.pk-tile', stage)) if (tiles[+el.dataset.tile]?.moved) el.classList.add('moved');
   }
   function renderPreviewBar() {
     const kind = previewKind();
     const bar = $('#pv-bar');
     if (kind === 'Layout' || kind === 'Background' || kind === 'Board') {
-      bar.innerHTML = show(html`<div class="set-preview-bar"><span class="grow">磁贴取自</span>
-          <select class="input sm" id="lp-project" style="width:auto;max-width:220px" aria-label="磁贴取自项目">${live.length ? live.slice(0, 40).map(p => html`<option value="${p.id}" ${p.id === tileProject?.id ? 'selected' : ''}>${p.name}</option>`) : html`<option value="">暂无项目</option>`}</select>
-          ${kind === 'Layout' ? html`<button class="btn sm" data-act="save-tiles" id="lp-save-tiles" ${tiles.some(x => x.moved) ? '' : 'disabled'}>${icon('send')}保存磁贴位置</button>` : ''}</div>
-        <small class="faint">${kind === 'Layout' ? '拖动分隔条调整分屏比例，拖动磁贴移动、拖右下角调整大小；自由布局下可以拖动时钟与组件。' : '按大屏整屏比例显示。'}
+      bar.innerHTML = show(html`<div class="set-preview-bar"><span class="grow">磁贴取自“${tileProject?.name || '暂无项目'}”，仅作参照</span>
+          <a class="btn sm" href="#/classes/${c.id}/homework${tileProject ? '/' + tileProject.id : ''}">${icon('book')}去作业里调整磁贴</a></div>
+        <small class="faint">${kind === 'Layout' ? '拖动分隔条调整分屏比例；自由布局下可以拖动时钟与组件。磁贴的位置、大小和作业内容在「作业」画布里一起修改。' : '按大屏整屏比例显示。'}
           ${layout.revision ? `修订 ${layout.revision} · ${layout.updatedBy || ''} · ${relTime(layout.updatedAt)}` : '大屏尚未上传设置'}</small>`);
-      $('#lp-project').onchange = async e => {
-        if (tiles.some(x => x.moved) && !await confirmDialog({ title: '放弃磁贴改动', message: '当前项目的磁贴位置还没有保存，确定切换吗？', confirm: '切换' })) { e.target.value = tileProject.id; return; }
-        tileProject = live.find(p => p.id === e.target.value) || null;
-        await loadTiles(); renderPreviewBar(); schedulePreview();
-      };
     } else bar.innerHTML = show(html`<small class="faint">预览使用与大屏相同的字体、图标和尺寸，随设置即时变化。</small>`);
   }
   function showPage(key) {
@@ -1862,12 +1762,10 @@ async function classLayout(box, c) {
   // ---------- 布局页的拖动
   let drag = null;
   const scenePoint = e => { const scene = $('.pk-scene', stage), r = scene.getBoundingClientRect(), s = stage._pkScale || 1; return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s }; };
-  const snap = v => { const d = doc(), g = Math.max(16, Math.min(160, +d.GridSize || 48)); return d.GridSnappingEnabled === false ? Math.round(v) : Math.round(v / g) * g; };
   stage.addEventListener('pointerdown', e => {
     if (previewKind() !== 'Layout') return;
-    const p = scenePoint(e), grip = e.target.closest('[data-grip]'), tileEl = e.target.closest('[data-tile]'), widget = e.target.closest('[data-widget]'), split = e.target.closest('[data-split]');
-    if (tileEl) { const t = tiles[+tileEl.dataset.tile]; drag = { kind: grip ? 'resize' : 'tile', t, el: tileEl, p, x: t.x, y: t.y, w: t.w, h: t.h }; }
-    else if (widget) { const widgets = clone(current('Widgets')) || {}; drag = { kind: 'widget', key: widget.dataset.widget, widgets, el: widget, p, x: widgets[widget.dataset.widget].X, y: widgets[widget.dataset.widget].Y }; }
+    const p = scenePoint(e), widget = e.target.closest('[data-widget]'), split = e.target.closest('[data-split]');
+    if (widget) { const widgets = clone(current('Widgets')) || {}; drag = { kind: 'widget', key: widget.dataset.widget, widgets, el: widget, p, x: widgets[widget.dataset.widget].X, y: widgets[widget.dataset.widget].Y }; }
     else if (split) drag = { kind: 'split' };
     if (drag) { stage.setPointerCapture(e.pointerId); e.preventDefault(); }
   });
@@ -1876,22 +1774,16 @@ async function classLayout(box, c) {
     const p = scenePoint(e);
     if (drag.kind === 'split') { draft.SplitRatio = Math.round(Math.min(.9, Math.max(.1, p.x / BOARD_W)) * 100) / 100; schedulePreview(); return; }
     const dx = p.x - drag.p.x, dy = p.y - drag.p.y;
-    if (drag.kind === 'tile') { drag.t.x = Math.max(0, snap(drag.x + dx)); drag.t.y = Math.max(0, snap(drag.y + dy)); Object.assign(drag.el.style, { left: drag.t.x + 'px', top: drag.t.y + 'px' }); }
-    else if (drag.kind === 'resize') {
-      drag.t.w = Math.min(TILE_MAX.w, Math.max(TILE_MIN.w, snap(drag.w + dx))); drag.t.h = Math.min(TILE_MAX.h, Math.max(TILE_MIN.h, snap(drag.h + dy)));
-      Object.assign(drag.el.style, { width: drag.t.w + 'px', height: drag.t.h + 'px' });
-    } else if (drag.kind === 'widget') {
+    if (drag.kind === 'widget') {
       const r = drag.widgets[drag.key]; r.X = Math.round(Math.max(0, Math.min(BOARD_W - r.Width, drag.x + dx))); r.Y = Math.round(Math.max(0, Math.min(BOARD_H - r.Height, drag.y + dy)));
       Object.assign(drag.el.style, { left: r.X + 'px', top: r.Y + 'px' });
     }
-    if (drag.t && (drag.t.x !== drag.x || drag.t.y !== drag.y || drag.t.w !== drag.w || drag.t.h !== drag.h)) { drag.t.moved = true; drag.el.classList.add('moved'); }
   });
   const endDrag = () => {
     if (!drag) return;
     const d = drag; drag = null;
     if (d.kind === 'split') { const v = draft.SplitRatio; delete draft.SplitRatio; setValue('SplitRatio', v); const r = $('[data-k=SplitRatio]', sp); if (r) { r.value = v; $('[data-out=SplitRatio]', sp).textContent = settingValueText(byKey.SplitRatio, v); } }
     if (d.kind === 'widget') setValue('Widgets', d.widgets);
-    const save = $('#lp-save-tiles'); if (save) save.disabled = !tiles.some(t => t.moved);
     refresh();
   };
   stage.addEventListener('pointerup', endDrag);
@@ -2003,7 +1895,7 @@ async function classLayout(box, c) {
     if (ev.type !== 'layout') return;
     clearTimeout(remoteTimer);
     remoteTimer = setTimeout(() => {
-      if (!Object.keys(draft).length && !tiles.some(t => t.moved)) route();
+      if (!Object.keys(draft).length) route();
       else toast('班级设置刚在其他地方被修改，保存时会自动合并不冲突的部分', 'error');
     }, 500);
   }));
@@ -2022,24 +1914,6 @@ async function classLayout(box, c) {
         if (err.status === 409) { toast('部分设置刚被大屏修改，已刷新为最新版本，请重新调整', 'error'); route(); }
         else fail(err);
       }
-    },
-    'save-tiles': async el => {
-      if (!tileDetail) return;
-      el.disabled = true;
-      const moved = new Map(tiles.filter(t => t.moved).map(t => [t.index, t]));
-      const body = {
-        expectedRevision: tileDetail.revision,
-        subjects: parseProject(tileDetail.payloadJson, tileDetail.runs).map(s => {
-          const t = moved.get(s.index);
-          return {
-            index: s.index, name: s.name, accentHex: null,
-            entries: s.entries.map(en => ({ index: en.index, content: en.text, runs: en.runs })),
-            rect: t ? { x: t.x, y: t.y, width: t.w, height: t.h } : null
-          };
-        })
-      };
-      try { await api(`/api/classes/${c.id}/projects/${tileProject.id}/content`, { method: 'PUT', body }); toast('磁贴位置已保存，大屏正在同步'); await loadTiles(); renderPreviewBar(); schedulePreview(); }
-      catch (err) { el.disabled = false; if (err.status === 409) { toast('这个项目刚被修改，已重新载入', 'error'); await loadTiles(); renderPreviewBar(); schedulePreview(); } else fail(err); }
     },
     'restore-layout': async el => {
       if (!await confirmDialog({ title: '恢复设置', message: `把班级设置恢复为修订 ${el.dataset.rev}？会生成新的修订并下发到大屏。`, confirm: '恢复', danger: false })) return;
@@ -2082,57 +1956,569 @@ function classSettings(box, c, publicUrl) {
     export: () => download(`/api/classes/${c.id}/export`),
     'reset-code': async () => {
       if (!await confirmDialog({ title: '重置公开短码', message: '旧短码和已分享的链接会立即失效。确定重置吗？', confirm: '重置' })) return;
-      const r = await api(`/api/admin/classes/${c.id}/public-code`, { method: 'POST' }); toast('新短码：' + r.publicCode); route();
+      const r = await api(`/api/admin/classes/${c.id}/public-code`, { method: 'POST' }); toast('新短码：' + r.publicCode); state.classes = null; route();
     },
-    rename: async () => { await api(`/api/admin/classes/${c.id}`, { method: 'PATCH', body: { name: $('#cn').value.trim() } }); toast('班级名称已保存'); route(); },
+    rename: async () => { await api(`/api/admin/classes/${c.id}`, { method: 'PATCH', body: { name: $('#cn').value.trim() } }); toast('班级名称已保存'); state.classes = null; route(); },
     'delete-class': async () => {
       const ok = await modal({
         title: '删除班级', submit: '永久删除', danger: true,
         body: html`<p class="muted">此操作会让本班所有设备停止同步。请输入班级名称 <b>${c.name}</b> 确认：</p><input class="input" name="confirm" autocomplete="off">`,
         onSubmit: f => { if (f.confirm.value.trim() !== c.name) throw new Error('输入的名称不一致'); return api(`/api/admin/classes/${c.id}`, { method: 'DELETE' }); }
       });
-      if (ok) { toast('班级已删除'); navigate('classes'); }
+      if (ok) { toast('班级已删除'); state.classes = null; store.del('lastClass'); navigate('classes'); }
     }
   });
 }
 
-// ============================================================ 作业浏览
-async function viewHomework(classId, projectId, query) {
-  if (classId instanceof URLSearchParams) { query = classId; classId = undefined; }
-  if (projectId instanceof URLSearchParams) { query = projectId; projectId = undefined; }
-  const classes = await api('/api/classes');
-  if (!classId && classes.length) {
-    const last = store.get('lastClass');
-    const busiest = [...classes].sort((a, b) => (parseTime(b.lastUpdatedAt) || 0) - (parseTime(a.lastUpdatedAt) || 0))[0];
-    classId = classes.some(c => c.id === last) ? last : busiest.id;
-    history.replaceState(null, '', `#/homework/${classId}`);
+// ============================================================ 作业工作台：大屏画布 + 检查器 / 列表
+/**
+ * 和大屏的“编辑看板”一样：画布上按大屏外观摆放磁贴，拖动移动、拖右下角调整大小；
+ * 点选磁贴后在右侧检查器里改科目名、颜色、作业文字和图片。内容和位置共用一份草稿，一次保存。
+ * 列表视图是同一份草稿的卡片式编辑，适合连续录入和窄屏。
+ */
+const NEW_TILE = { w: 430, h: 320 };
+const TILE_COLORS = ['#818CF8', '#4ADE80', '#60A5FA', '#FBBF24', '#F472B6', '#2DD4BF', '#F87171'];
+const sameRect = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+
+async function classHomework(box, c, projectId, query) {
+  const classId = c.id, assetUrl = consoleAsset(classId);
+  const [layout, allowed, defaults, initial] = await Promise.all([
+    api(`/api/classes/${classId}/layout`).catch(() => null), editableSubjects(classId), richDefaults(classId), api(`/api/classes/${classId}/projects`)]);
+  let boardDoc = {}; try { boardDoc = JSON.parse(layout?.payloadJson || '{}'); } catch { }
+  // 画布只画作业板：分屏时宽度扣掉时钟区，磁贴坐标本来就相对作业板；自由布局画整屏。
+  const mode = boardDoc.LayoutMode || 'Split';
+  const sceneW = mode === 'Split' ? BOARD_W - Math.round(BOARD_W * Board.SPLIT(boardDoc)) : BOARD_W;
+  const sceneDoc = mode === 'Free' ? boardDoc
+    : { ...boardDoc, LayoutMode: 'Board', ...(mode === 'Split' && boardDoc.SharedBackgroundEnabled ? { BoardBackground: boardDoc.SharedBackground } : {}) };
+  const gridSize = () => Math.max(16, Math.min(160, +boardDoc.GridSize || 48));
+  const snap = v => boardDoc.GridSnappingEnabled === false ? Math.round(v) : Math.round(v / gridSize()) * gridSize();
+  const can = name => !allowed || allowed.has(name.trim().toLowerCase());
+
+  let projects = initial, showDeleted = false, detail = null, draft = null, base = '', selS = null;
+  let savedAt = 0, uploading = 0, saving = false, liveOn = false, openToken = 0;
+  let view = store.get('hwView') || (innerWidth <= 860 ? 'list' : 'canvas');
+  const byId = id => projects.find(p => p.id === id);
+  const live = () => draft ? draft.subjects.filter(s => !s.removed) : [];
+  const editorStyle = `--rt-font:${JSON.stringify(defaults.fontFamily).replace(/"/g, "'")};--rt-size:${(defaults.fontSize * .8).toFixed(1)}px`;
+
+  box.innerHTML = show(html`<div class="hw" id="hw">
+    <div class="card hw-bar" id="hw-bar"></div>
+    <div id="hw-body"></div>
+    <div class="save-bar hw-save" id="hw-save" hidden></div>
+    <div class="print-only" id="hw-print"></div>
+  </div>`);
+  const root = $('#hw', box), bar = $('#hw-bar', root), body = $('#hw-body', root);
+
+  // ---------- 草稿
+  function buildDraft(d) {
+    let raw = []; try { raw = pick(JSON.parse(d.payloadJson || '{}'), 'Subjects') || []; } catch { }
+    const subjects = parseProject(d.payloadJson, d.runs).map(s => {
+      const rect = { x: s.rect.x, y: s.rect.y, w: s.rect.w, h: s.rect.h };
+      return {
+        index: s.index, name: s.name, color: (s.color || '#818CF8').toUpperCase(), origColor: (s.color || '').toUpperCase(),
+        explicit: !!pick(raw[s.index], 'IsAccentExplicit'), locked: !can(s.name), removed: false, rect, origRect: { ...rect },
+        entries: s.entries.map(e => ({ index: e.index, runs: e.runs, hand: e.hand, atts: e.atts.map(a => ({ index: a.index, name: a.name, path: a.path, kind: a.kind })) }))
+      };
+    });
+    // 没有摆放过的科目先放到空位上，不算改动。
+    const out = { name: d.name, date: d.date || '', subjects };
+    for (const s of subjects) if (s.rect.w <= 0 || s.rect.h <= 0) { s.rect = freeSpot(subjects.filter(x => x !== s && x.rect.w > 0)); s.origRect = { ...s.rect }; }
+    return out;
   }
-  const current = classes.find(c => c.id === classId);
-  const page = shell({
-    nav: 'homework', title: '作业',
-    actions: classes.length ? html`<select class="input" id="hc" style="width:220px" aria-label="选择班级">${classes.map(c => html`<option value="${c.id}" ${c.id === classId ? 'selected' : ''}>${c.name}</option>`)}</select>
-      ${current ? html`<a class="btn" href="#/classes/${current.id}">${icon('class')}班级详情</a>` : ''}` : ''
+  const snapshotOf = () => draft && {
+    n: draft.name.trim(), d: draft.date,
+    s: live().map(s => ({ i: s.index, n: s.name, c: s.color, r: s.rect, e: s.entries.map(e => ({ i: e.index, r: rtNormalize(e.runs), a: e.atts.map(a => a.index ?? a.path) })) }))
+  };
+  const snapshot = () => JSON.stringify(snapshotOf());
+  const dirty = () => !!draft && snapshot() !== base;
+  setLeaveGuard(() => dirty() ? '作业有未保存的修改，离开后会丢失。' : '');
+
+  function freeSpot(others = live()) {
+    const g = gridSize(), { w, h } = NEW_TILE;
+    for (let y = g; y < 4000; y += g)
+      for (let x = g; x + w <= Math.max(sceneW, w + g); x += g)
+        if (!others.some(o => x < o.rect.x + o.rect.w && o.rect.x < x + w && y < o.rect.y + o.rect.h && o.rect.y < y + h)) return { x, y, w, h };
+    return { x: g, y: g, w, h };
+  }
+  const serialize = s => ({
+    index: s.index, name: s.name.trim(),
+    accentHex: s.color !== s.origColor && !(s.index != null && !s.origColor && s.color === '#818CF8') ? s.color : null,
+    entries: s.entries.filter(en => en.index != null || rtPlain(en.runs).trim() || en.atts.length).map(en => ({
+      index: en.index, content: rtPlain(en.runs), runs: en.runs, attachments: en.atts.map(a => a.index != null ? { index: a.index } : { asset: a.path, name: a.name })
+    })),
+    rect: !s.locked && (s.index == null || !sameRect(s.rect, s.origRect)) ? { x: s.rect.x, y: s.rect.y, width: s.rect.w, height: s.rect.h } : null
   });
-  page.classList.add('wide');
-  if (!classes.length) return setPage(page, html`<div class="card">${empty('class', '还没有班级', '创建或分配班级后可以在这里查看作业。')}</div>`);
-  if (!current) return setPage(page, html`<div class="card">${empty('alert', '班级不存在', '该班级可能已被删除，或你没有访问权限。')}</div>`);
-  store.set('lastClass', classId);
-  $('#hc').onchange = e => navigate('homework/' + e.target.value);
-  await mountBrowser(page, {
-    list: () => api(`/api/classes/${classId}/projects`),
-    detail: id => api(`/api/classes/${classId}/projects/${id}`),
-    link: id => `homework/${classId}/${id}`,
-    asset: consoleAsset(classId),
-    manage: true, classId,
-    ws: `/ws/classes/${classId}?access_token=${encodeURIComponent(state.token)}`
-  }, projectId);
-  if (query?.get('new')) { history.replaceState(null, '', `#/homework/${classId}`); viewActions['p-new']?.(); }
+  /** 草稿转成展示用的科目（复制文本、打印）。 */
+  const viewSubjects = () => live().map(s => ({
+    name: s.name || '新科目', color: s.color,
+    entries: s.entries.map(e => ({ text: rtPlain(e.runs), runs: e.runs, hand: e.hand, atts: e.atts })).filter(e => e.text.trim() || e.hand || e.atts.length)
+  }));
+
+  // ---------- 项目切换
+  /** 按日期从旧到新排，用来前后翻。 */
+  const ordered = () => projects.filter(p => showDeleted || !p.deleted || p.id === detail?.id)
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || a.name.localeCompare(b.name, 'zh'));
+  async function refreshProjects() { projects = await api(`/api/classes/${classId}/projects`); renderBar(); }
+  /** keepSel：重新载入同一项目时保留选中的磁贴。 */
+  async function open(id, keepSel = false) {
+    const token = ++openToken, selPos = keepSel ? live().indexOf(selS) : -1;
+    if (!byId(id)) { detail = draft = selS = null; base = ''; renderAll(); return; }
+    let d;
+    try { d = await api(`/api/classes/${classId}/projects/${id}`); }
+    catch (err) { if (token === openToken) body.innerHTML = show(html`<div class="card">${empty('alert', '加载失败', err.message)}</div>`); return; }
+    if (token !== openToken) return;
+    detail = d; draft = d.deleted ? null : buildDraft(d); base = snapshot();
+    selS = selPos >= 0 ? live()[selPos] || null : null;
+    renderAll();
+  }
+  async function switchTo(id) {
+    if (!id || id === detail?.id) return;
+    if (dirty() && !await confirmDialog({ title: '放弃未保存的修改', message: '当前项目的修改还没有保存，确定切换吗？', confirm: '放弃并切换' })) return;
+    setHash(`classes/${classId}/homework/${id}`);
+    await open(id);
+  }
+  /** 新建后直接进入编辑：选中第一个磁贴并把光标放进第一条作业。 */
+  async function afterCreate(created) {
+    await refreshProjects();
+    setHash(`classes/${classId}/homework/${created.id}`);
+    await open(created.id);
+    const first = live().find(s => !s.locked);
+    if (view === 'canvas' && first) select(first, true);
+    else $('#hw-body .rich[contenteditable=true]')?.focus();
+  }
+  async function newProject() {
+    if (dirty() && !await confirmDialog({ title: '放弃未保存的修改', message: '当前项目的修改还没有保存，确定新建吗？', confirm: '放弃并新建' })) return;
+    const t = todayStr(), [, m, d] = t.split('-').map(Number);
+    const created = await api(`/api/classes/${classId}/projects`, { method: 'POST', body: { name: `${m}月${d}日`, date: t, templateProjectId: null, useLatestTemplate: true } });
+    toast('已新建项目，沿用最近的科目布局');
+    await afterCreate(created);
+  }
+  async function newFromTemplate() {
+    const t = todayStr(), [, m, d] = t.split('-').map(Number);
+    const liveP = projects.filter(p => !p.deleted).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    const created = await modal({
+      title: '选择模板新建', submit: '创建',
+      body: html`<label class="field"><span>项目名称</span><input class="input" name="name" value="${m}月${d}日" maxlength="80"></label>
+        <label class="field"><span>作业日期</span><input class="input" type="date" name="date" value="${t}"></label>
+        <label class="field"><span>科目布局</span><select class="input" name="tpl">
+          <option value="latest">沿用最近的项目</option>${liveP.slice(0, 30).map(p => html`<option value="${p.id}">沿用“${p.name}”</option>`)}<option value="none">空白项目</option></select>
+          <small>沿用时保留科目、颜色和磁贴位置，只清空作业内容和笔迹。</small></label>`,
+      onSubmit: f => {
+        const name = f.elements.name.value.trim(); if (!name) throw new Error('请输入项目名称');
+        const tpl = f.tpl.value;
+        return api(`/api/classes/${classId}/projects`, { method: 'POST', body: { name, date: f.date.value || null, templateProjectId: /^[0-9a-f-]{36}$/.test(tpl) ? tpl : null, useLatestTemplate: tpl === 'latest' } });
+      }
+    });
+    if (!created) return;
+    toast('项目已创建');
+    await afterCreate(created);
+  }
+  async function deleteProject() {
+    const p = detail; if (!p) return;
+    await api(`/api/classes/${classId}/projects/${p.id}`, { method: 'DELETE' });
+    draft = null; base = '';
+    toast(`已删除“${p.name}”`, 'ok', {
+      action: '撤销', onAction: async () => {
+        await api(`/api/classes/${classId}/projects/${p.id}/restore`, { method: 'POST', body: {} });
+        toast('项目已恢复'); await refreshProjects();
+        if (!dirty()) { setHash(`classes/${classId}/homework/${p.id}`); await open(p.id); }
+      }
+    });
+    await refreshProjects();
+    const next = defaultProject(projects);
+    setHash(`classes/${classId}/homework${next ? '/' + next.id : ''}`, true);
+    await open(next?.id);
+  }
+  async function restoreProject() {
+    await api(`/api/classes/${classId}/projects/${detail.id}/restore`, { method: 'POST', body: {} });
+    toast('项目已恢复'); await refreshProjects(); await open(detail.id);
+  }
+
+  // ---------- 保存
+  /** 记下光标所在的输入框，保存后重绘时放回原处。 */
+  function captureFocus() {
+    const a = document.activeElement; if (!a || !root.contains(a)) return null;
+    const si = a.closest('[data-si]'), pos = si ? live().indexOf(draft.subjects[+si.dataset.si]) : -1;
+    if (a.classList.contains('rich')) return { pos, ei: +a.closest('[data-ei]').dataset.ei, sel: rtSelection(a) };
+    if (a.dataset.hwF) return { hw: a.dataset.hwF, start: a.selectionStart };
+    if (a.dataset.f === 'name') return { pos, name: true, start: a.selectionStart };
+    return null;
+  }
+  function restoreFocus(f) {
+    if (!f) return;
+    if (f.hw) { const el = $(`[data-hw-f="${f.hw}"]`, root); el?.focus(); try { el?.setSelectionRange(f.start, f.start); } catch { } return; }
+    const s = live()[f.pos]; if (!s) return;
+    const card = $(`[data-si="${draft.subjects.indexOf(s)}"]`, root); if (!card) return;
+    if (f.name) { const el = $('[data-f=name]', card); el?.focus(); try { el?.setSelectionRange(f.start, f.start); } catch { } return; }
+    const el = $(`[data-ei="${f.ei}"] .rich`, card); if (!el) return;
+    el.focus(); if (f.sel) rtSetSelection(el, f.sel.start, f.sel.end);
+  }
+  /** 采用服务端返回的项目：草稿重新按新的序号建立，keepMeta 为还没保存的名称与日期。 */
+  function adopt(d, keepMeta) {
+    const selPos = live().indexOf(selS);
+    detail = d; draft = buildDraft(d); base = snapshot();
+    if (keepMeta) { draft.name = keepMeta.name; draft.date = keepMeta.date; }
+    selS = selPos >= 0 ? live()[selPos] || null : null;
+  }
+  async function save() {
+    if (!draft || saving || !dirty()) return;
+    if (uploading) return toast('图片还在上传，请稍候', 'error');
+    const name = draft.name.trim();
+    if (!name) { $('[data-hw-f=name]', root)?.focus(); return toast('项目名称不能为空', 'error'); }
+    const blank = live().find(s => !s.name.trim());
+    if (blank) { if (view === 'canvas') select(blank); $(`[data-si="${draft.subjects.indexOf(blank)}"] [data-f=name]`, root)?.focus(); return toast('科目名称不能为空', 'error'); }
+    const before = JSON.parse(base), now = snapshotOf();
+    const contentChanged = JSON.stringify(now.s) !== JSON.stringify(before.s);
+    const meta = { name, date: draft.date || '' }, metaChanged = meta.name !== detail.name || meta.date !== (detail.date || '');
+    const focus = captureFocus();
+    saving = true; refreshBar();
+    try {
+      if (contentChanged) {
+        const d = await api(`/api/classes/${classId}/projects/${detail.id}/content`, { method: 'PUT', body: { expectedRevision: detail.revision, subjects: live().map(serialize) } });
+        adopt(d, metaChanged ? meta : null);
+      }
+      if (metaChanged) {
+        const m = await api(`/api/classes/${classId}/projects/${detail.id}`, { method: 'PATCH', body: meta.date ? { name: meta.name, date: meta.date } : { name: meta.name, clearDate: true } });
+        adopt({ ...m, runs: detail.runs });
+      }
+      savedAt = Date.now();
+      const i = projects.findIndex(p => p.id === detail.id);
+      if (i >= 0) projects[i] = { ...projects[i], name: detail.name, date: detail.date, revision: detail.revision, updatedAt: detail.updatedAt, updatedBy: detail.updatedBy };
+      renderAll(); restoreFocus(focus);
+      toast('已保存，大屏正在同步');
+    } catch (err) {
+      if (err.status === 409) {
+        if (await confirmDialog({ title: '作业刚被修改', message: '班级大屏或其他老师刚刚修改了这个项目。重新载入最新内容吗？（当前未保存的修改会丢失，可以先复制下来）', confirm: '重新载入', danger: false })) { base = snapshot(); await open(detail.id, true); }
+      } else fail(err);
+    } finally { saving = false; refreshBar(); }
+  }
+  function discard() {
+    const selPos = live().indexOf(selS);
+    draft = buildDraft(detail); base = snapshot();
+    selS = selPos >= 0 ? live()[selPos] || null : null;
+    renderAll();
+  }
+
+  // ---------- 渲染
+  function renderAll() { renderBar(); renderBody(); refreshBar(); }
+  function renderBar() {
+    const list = ordered(), i = list.findIndex(p => p.id === detail?.id);
+    const deletedCount = projects.filter(p => p.deleted).length;
+    bar.innerHTML = show(html`
+      <div class="hw-nav">
+        <button class="btn ghost sm icon-only" data-hw="prev" ${i > 0 ? '' : 'disabled'} title="上一个项目">${icon('left')}</button>
+        <button class="btn sm hw-picker" data-hw="pick" title="选择项目">${icon('calendar', 'sm')}<span>${detail ? dateLabel(draft ? draft.date || null : detail.date) : '选择项目'}</span>${icon('right', 'sm hw-caret')}</button>
+        <button class="btn ghost sm icon-only" data-hw="next" ${i >= 0 && i < list.length - 1 ? '' : 'disabled'} title="下一个项目">${icon('right')}</button>
+      </div>
+      ${draft ? html`<input class="input hw-name" data-hw-f="name" value="${draft.name}" maxlength="80" aria-label="项目名称" placeholder="项目名称">
+        <input class="input hw-date" type="date" data-hw-f="date" value="${draft.date}" aria-label="作业日期" title="作业日期">`
+        : detail ? html`<b class="hw-title">${detail.name}</b>` : ''}
+      <span class="badge ${liveOn ? 'ok' : ''}" id="hw-live" title="实时同步状态"><span class="dot ${liveOn ? 'live' : ''}"></span>${liveOn ? '实时同步' : '离线'}</span>
+      <span class="spacer"></span>
+      ${draft ? html`<div class="segmented" role="tablist" aria-label="视图">${[['canvas', '画布'], ['list', '列表']].map(([k, l]) => html`<button type="button" data-hw="view" data-v="${k}" class="${view === k ? 'active' : ''}">${l}</button>`)}</div>
+        <button class="btn sm" data-ed="add-subject">${icon('plus')}科目</button>` : ''}
+      <button class="btn sm primary" data-hw="new">${icon('plus')}新建项目</button>
+      <button class="btn sm icon-only" data-hw="more" title="更多操作${deletedCount ? `（${deletedCount} 个已删除）` : ''}">${icon('more')}</button>`);
+  }
+  function renderBody() {
+    unbindRichEditors(body);
+    if (!detail) {
+      body.innerHTML = show(html`<div class="card">${empty('book', projects.some(p => !p.deleted) ? '选择一个项目' : '这个班还没有作业项目', '点“新建项目”就能直接在磁贴上布置作业，也可以等班级大屏同步。', html`<button class="btn primary" data-hw="new">${icon('plus')}新建项目</button>`)}</div>`);
+      return;
+    }
+    if (!draft) {
+      body.innerHTML = show(html`<div class="banner warn">${icon('trash')}<div class="grow"><b>这个项目已删除</b><div class="muted" style="font-size:13px">恢复后才能编辑；大屏同步后也会恢复。</div></div><button class="btn sm primary" data-hw="restore">${icon('restore')}恢复</button></div>
+        <div class="card">${renderSubjects(subjectsOf(detail.payloadJson, detail.runs), assetUrl)}</div>`);
+      return;
+    }
+    if (view === 'canvas') {
+      body.innerHTML = show(html`<div class="hw-canvas">
+        <div class="card hw-stage-wrap"><div class="hw-stage pk-interactive" id="hw-stage"></div>
+          <div class="hw-stage-foot">拖动磁贴移动，拖右下角调整大小 · 双击磁贴直接输入 · 方向键微调，Shift+方向键按格移动 · Delete 删除科目</div></div>
+        <aside class="card hw-insp" id="hw-insp"></aside></div>`);
+      bindStage($('#hw-stage', body));
+      renderCanvas(); renderInspector();
+      bindRichEditors($('#hw-insp', body), richOpts);
+    } else {
+      body.innerHTML = show(html`<div class="card hw-list" id="hw-list"><div class="rt-dock">${richToolbar(defaults.fonts, defaults)}</div><div class="editor" id="hw-cards" style="${editorStyle}"></div></div>`);
+      renderCards();
+      bindRichEditors($('#hw-list', body), richOpts);
+    }
+  }
+  const richOpts = { getRuns: el => entryAt(el).runs, setRuns: (el, runs) => { entryAt(el).runs = runs; schedule(); }, defaults };
+  const subjectAt = el => draft.subjects[+el.closest('[data-si]').dataset.si];
+  const entryAt = el => subjectAt(el).entries[+el.closest('[data-ei]').dataset.ei];
+
+  function subjectCard(s) {
+    const si = draft.subjects.indexOf(s);
+    return html`<section class="edit-subject ${s.locked ? 'locked' : ''}" style="--subject:${s.color}" data-si="${si}">
+      <div class="edit-subject-head">
+        <input type="color" value="${s.color.slice(0, 7).toLowerCase()}" data-f="color" ${s.locked ? 'disabled' : ''} title="科目颜色" aria-label="科目颜色">
+        <input class="input" value="${s.name}" data-f="name" maxlength="40" ${s.locked ? 'disabled' : ''} placeholder="科目名称" aria-label="科目名称">
+        ${s.locked ? html`<span class="badge" title="由其他老师负责">${icon('lock', 'sm')}只读</span>` : html`<button type="button" class="btn ghost sm icon-only danger" data-ed="del-subject" title="删除科目">${icon('trash')}</button>`}
+      </div>
+      <div class="edit-entries">
+        ${s.entries.map((e, ei) => html`<div class="edit-entry" data-ei="${ei}">
+          <span class="num">${ei + 1}</span>
+          <div class="grow" style="display:grid;gap:6px">
+            <div class="input rich" contenteditable="${s.locked ? 'false' : 'true'}" role="textbox" aria-multiline="true" data-placeholder="作业内容" ${s.locked ? 'aria-disabled="true"' : ''}>${raw(rtHtml(e.runs, true))}</div>
+            ${e.hand ? html`<small class="faint">${icon('pen', 'sm')}含手写笔迹，网页上看不到；修改文字不会影响笔迹。</small>` : ''}
+            ${e.atts.length ? html`<div class="attachments">${e.atts.map((a, ai) => {
+              const img = assetImage(a, assetUrl);
+              return html`<span class="attachment ${img ? 'with-thumb' : ''}">${img ? html`<img src="${img}" alt="">` : icon('clip', 'sm')}<span>${a.name}</span>${s.locked ? '' : html`<button type="button" class="att-x" data-ed="del-att" data-ai="${ai}" title="移除">${icon('x', 'sm')}</button>`}</span>`;
+            })}</div>` : ''}
+          </div>
+          ${s.locked ? '' : html`<div class="edit-entry-actions">
+            <button type="button" class="btn ghost sm icon-only" data-ed="add-image" title="添加图片">${icon('image')}</button>
+            <button type="button" class="btn ghost sm icon-only danger" data-ed="del-entry" title="删除这一条">${icon('x')}</button></div>`}
+        </div>`)}
+        ${s.locked ? (s.entries.length ? '' : html`<p class="faint" style="font-size:12.5px;margin:0">暂无作业</p>`) : html`<button type="button" class="btn ghost sm" data-ed="add-entry">${icon('plus')}添加一条</button>`}
+      </div>
+    </section>`;
+  }
+  function renderCards() {
+    const el = $('#hw-cards', body); if (!el) return;
+    el.innerHTML = show(html`${live().map(subjectCard)}<button type="button" class="btn add-subject" data-ed="add-subject">${icon('plus')}添加科目</button>
+      <p class="faint" style="font-size:12.5px;grid-column:1/-1">保存后连接的班级大屏会实时更新；新科目会放在作业板的空位上，可以切到“画布”调整位置。</p>`);
+  }
+  function renderInspector() {
+    const el = $('#hw-insp', body); if (!el) return;
+    if (!selS) {
+      const subs = live();
+      el.innerHTML = show(html`<div class="hw-insp-empty">
+        <b>点选磁贴编辑作业</b>
+        <span class="faint">拖动磁贴移动位置，拖右下角调整大小；双击磁贴直接开始输入。</span>
+        ${subs.length ? html`<div class="hw-chips">${subs.map((s, i) => html`<button type="button" class="chip" data-pick="${i}" style="--subject:${s.color}"><i></i>${s.name || '新科目'}${s.locked ? icon('lock', 'sm') : ''}</button>`)}</div>` : ''}
+        <button type="button" class="btn" data-ed="add-subject">${icon('plus')}添加科目</button>
+        ${allowed ? html`<span class="badge warn">${icon('lock', 'sm')}你负责：${allowed.names.join('、')}</span>` : ''}
+      </div>`);
+      return;
+    }
+    el.innerHTML = show(html`<div class="rt-dock">${richToolbar(defaults.fonts, defaults)}</div>
+      <div class="hw-insp-body" style="${editorStyle}">${subjectCard(selS)}</div>`);
+  }
+  /** 结构改动（增删条目、图片）后重绘编辑区。 */
+  const renderEditors = () => view === 'canvas' ? renderInspector() : renderCards();
+
+  const tileOf = s => ({
+    name: s.name || '新科目', accent: s.color, explicit: s.explicit || s.color !== s.origColor, x: s.rect.x, y: s.rect.y, w: s.rect.w, h: s.rect.h,
+    locked: s.locked, cls: [s === selS ? 'sel' : '', s.locked ? 'locked' : '', s.index == null || !sameRect(s.rect, s.origRect) ? 'moved' : ''].join(' '),
+    entries: s.entries.map(e => ({ runs: e.runs, images: e.atts.map(a => assetImage(a, assetUrl)).filter(Boolean) }))
+  });
+  function renderCanvas() {
+    const stage = $('#hw-stage', body); if (!stage) return;
+    const t = Board.theme(sceneDoc);
+    Board.mount(stage, Board.screen(sceneDoc, t, sceneW, BOARD_H, {
+      tiles: live().map(tileOf), interactive: true, editing: true, assetUrl,
+      placeholder: `<div class="pk-center" style="color:${t.text};opacity:.5;font-size:28px">点“+ 科目”添加第一个磁贴</div>`
+    }), sceneDoc);
+  }
+  let queued = false;
+  function schedule() {
+    refreshBar();
+    if (queued) return; queued = true;
+    requestAnimationFrame(() => { queued = false; renderCanvas(); });
+  }
+  function refreshBar() {
+    const el = $('#hw-save', root), on = dirty();
+    el.hidden = !on && !saving;
+    if (el.hidden) return;
+    el.innerHTML = show(html`${icon('edit', 'sm')}<span class="grow">${saving ? '正在保存…' : '有未保存的修改'}</span>
+      <button type="button" class="btn sm ghost" data-hw="discard" ${saving ? 'disabled' : ''}>撤销修改</button>
+      <button type="button" class="btn sm primary" data-hw="save" ${saving ? 'disabled' : ''}>${icon('send')}保存并同步到大屏<kbd>Ctrl S</kbd></button>`);
+  }
+  function select(s, focusEntry = false) {
+    selS = s;
+    const stage = $('#hw-stage', body), subs = live();
+    if (stage) $$('.pk-tile', stage).forEach((el, i) => el.classList.toggle('sel', subs[i] === s));
+    renderInspector();
+    if (focusEntry) {
+      const el = $('#hw-insp .rich[contenteditable=true]', body);
+      if (el) { el.focus(); rtSetSelection(el, rtPlain(rtExtract(el)).length, rtPlain(rtExtract(el)).length); }
+    }
+  }
+  function addSubject() {
+    if (!draft) return;
+    const used = new Set(live().map(s => s.color));
+    const rect = freeSpot();
+    const s = { index: null, name: '', color: TILE_COLORS.find(x => !used.has(x)) || TILE_COLORS[0], origColor: '', explicit: false, locked: false, removed: false, rect, origRect: null, entries: [{ index: null, runs: [], atts: [] }] };
+    draft.subjects.push(s);
+    if (view === 'canvas') { selS = s; renderCanvas(); renderInspector(); $('#hw-insp [data-f=name]', body)?.focus(); }
+    else { renderCards(); $(`[data-si="${draft.subjects.indexOf(s)}"] [data-f=name]`, body)?.focus(); }
+    refreshBar();
+  }
+  function removeSubject(s) {
+    s.removed = true;
+    if (selS === s) selS = null;
+    if (view === 'canvas') { renderCanvas(); renderInspector(); } else renderCards();
+    refreshBar();
+    toast(`已移除“${s.name || '新科目'}”，保存后生效`, 'ok', { action: '撤销', onAction: () => { s.removed = false; if (view === 'canvas') { selS = s; renderCanvas(); renderInspector(); } else renderCards(); refreshBar(); } });
+  }
+
+  // ---------- 画布拖动
+  let drag = null;
+  function bindStage(stage) {
+    const scenePoint = e => { const r = $('.pk-scene', stage).getBoundingClientRect(), k = stage._pkScale || 1; return { x: (e.clientX - r.left) / k, y: (e.clientY - r.top) / k }; };
+    stage.addEventListener('pointerdown', e => {
+      const tileEl = e.target.closest('[data-tile]');
+      if (!tileEl) { if (selS) select(null); return; }
+      const i = +tileEl.dataset.tile, s = live()[i];
+      if (s !== selS) select(s);
+      if (s.locked) return;
+      drag = { i, s, kind: e.target.closest('[data-grip]') ? 'resize' : 'move', p: scenePoint(e), r: { ...s.rect }, moved: false };
+      stage.setPointerCapture(e.pointerId); e.preventDefault();
+    });
+    stage.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const p = scenePoint(e), dx = p.x - drag.p.x, dy = p.y - drag.p.y, r = drag.s.rect;
+      if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
+      drag.moved = true;
+      if (drag.kind === 'move') { r.x = Math.max(0, snap(drag.r.x + dx)); r.y = Math.max(0, snap(drag.r.y + dy)); }
+      else { r.w = Math.min(TILE_MAX.w, Math.max(TILE_MIN.w, snap(drag.r.w + dx))); r.h = Math.min(TILE_MAX.h, Math.max(TILE_MIN.h, snap(drag.r.h + dy))); }
+      const el = stage.querySelector(`[data-tile="${drag.i}"]`);
+      if (el) { Object.assign(el.style, { left: r.x + 'px', top: r.y + 'px', width: r.w + 'px', height: r.h + 'px' }); el.classList.add('moved'); }
+    });
+    const end = () => { if (!drag) return; const moved = drag.moved; drag = null; if (moved) schedule(); };
+    stage.addEventListener('pointerup', end);
+    stage.addEventListener('pointercancel', end);
+    stage.addEventListener('dblclick', e => { const t = e.target.closest('[data-tile]'); if (t) select(live()[+t.dataset.tile], true); });
+  }
+
+  // ---------- 事件
+  root.addEventListener('input', e => {
+    const el = e.target, hf = el.dataset.hwF, f = el.dataset.f;
+    if (hf === 'name') draft.name = el.value;
+    else if (hf === 'date') { draft.date = el.value; $('.hw-picker span', bar).textContent = dateLabel(el.value || null); }
+    else if (f === 'name') subjectAt(el).name = el.value;
+    else if (f === 'color') { const s = subjectAt(el); s.color = el.value.toUpperCase(); el.closest('.edit-subject').style.setProperty('--subject', s.color); }
+    else return;
+    schedule();
+  });
+  root.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset.hwF === 'name') e.target.blur(); });
+  root.addEventListener('click', async e => {
+    const pickEl = e.target.closest('[data-pick]');
+    if (pickEl) return select(live()[+pickEl.dataset.pick], true);
+    const hw = e.target.closest('[data-hw]');
+    if (hw) {
+      const list = ordered(), i = list.findIndex(p => p.id === detail?.id);
+      try {
+        switch (hw.dataset.hw) {
+          case 'prev': return await switchTo(list[i - 1]?.id);
+          case 'next': return await switchTo(list[i + 1]?.id);
+          case 'pick': return openPicker(hw);
+          case 'new': return await newProject();
+          case 'more': return openMenu(hw, moreItems());
+          case 'save': return await save();
+          case 'discard': return discard();
+          case 'restore': return await restoreProject();
+          case 'view': view = hw.dataset.v; store.set('hwView', view); renderBar(); renderBody(); return;
+        }
+      } catch (err) { fail(err); }
+      return;
+    }
+    const b = e.target.closest('[data-ed]'); if (!b) return;
+    const act = b.dataset.ed;
+    if (act === 'add-subject') return addSubject();
+    if (act === 'del-subject') return removeSubject(subjectAt(b));
+    if (act === 'add-entry') { const s = subjectAt(b); s.entries.push({ index: null, runs: [], atts: [] }); renderEditors(); schedule(); $$(`[data-si="${draft.subjects.indexOf(s)}"] .rich`, body).pop()?.focus(); return; }
+    if (act === 'del-entry') { subjectAt(b).entries.splice(+b.closest('[data-ei]').dataset.ei, 1); renderEditors(); schedule(); return; }
+    if (act === 'del-att') { entryAt(b).atts.splice(+b.dataset.ai, 1); renderEditors(); schedule(); return; }
+    if (act === 'add-image') return pickImages(entryAt(b));
+  });
+  const keys = new AbortController();
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (!$('dialog[open]')) save().catch(fail); return; }
+    if (view !== 'canvas' || !selS || !draft || $('dialog[open]') || $('.menu')) return;
+    if (e.target.closest?.('input,textarea,select,[contenteditable=true]')) { if (e.key === 'Escape') e.target.blur(); return; }
+    if (e.key === 'Escape') return select(null);
+    if (selS.locked) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); return removeSubject(selS); }
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (d) { e.preventDefault(); const step = e.shiftKey ? gridSize() : 4; selS.rect.x = Math.max(0, selS.rect.x + d[0] * step); selS.rect.y = Math.max(0, selS.rect.y + d[1] * step); schedule(); }
+  }, { signal: keys.signal });
+  onDispose(() => keys.abort());
+
+  const pickImages = entry => {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'image/*'; input.multiple = true;
+    input.onchange = async () => {
+      for (const file of input.files) {
+        if (file.size > 50 * 1024 * 1024) { toast(`“${file.name}”超过 50 MB`, 'error'); continue; }
+        uploading++;
+        try {
+          const r = await fetch(`/api/classes/${classId}/assets?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { authorization: 'Bearer ' + state.token }, body: file });
+          if (!r.ok) throw new Error((await r.text().catch(() => '')).replace(/^"|"$/g, '') || '上传失败');
+          entry.atts.push({ index: null, name: file.name, path: (await r.json()).reference, kind: '图片' });
+        } catch (err) { toast(`图片上传失败：${err.message}`, 'error'); }
+        finally { uploading--; }
+      }
+      renderEditors(); schedule();
+    };
+    input.click();
+  };
+
+  function openPicker(anchor) {
+    const el = popover(anchor, html`<label class="input-icon">${icon('search', 'sm')}<input class="input" placeholder="搜索项目或日期" autocomplete="off"></label><div class="hw-picker-list"></div>`, 'hw-pick', 'left');
+    const listEl = $('.hw-picker-list', el), q = $('input', el);
+    const draw = () => {
+      const v = q.value.trim().toLowerCase();
+      const items = projects.filter(p => (showDeleted || !p.deleted) && (!v || p.name.toLowerCase().includes(v) || (p.date || '').includes(v) || dateLabel(p.date).includes(v)));
+      listEl.innerHTML = show(items.length ? projectGroups(items, p => html`<button type="button" class="project-item ${p.id === detail?.id ? 'active' : ''} ${p.deleted ? 'deleted' : ''}" data-id="${p.id}">
+          <span class="name">${p.name}${p.deleted ? html`<span class="badge danger" style="height:18px;font-size:11px">已删除</span>` : ''}</span><span class="meta">更新于 ${relTime(p.updatedAt)}${p.updatedBy ? ' · ' + p.updatedBy : ''}</span></button>`)
+        : html`<p class="faint" style="padding:12px">没有匹配的项目</p>`);
+    };
+    draw(); q.oninput = draw; q.focus();
+    listEl.onclick = e => { const b = e.target.closest('[data-id]'); if (!b) return; closeMenu(); switchTo(b.dataset.id).catch(fail); };
+  }
+  function moreItems() {
+    const current = detail ? [
+      { label: '复制作业文本', icon: 'copy', run: () => copyText(homeworkText({ name: draft?.name || detail.name, date: draft ? draft.date || null : detail.date }, draft ? viewSubjects() : subjectsOf(detail.payloadJson, detail.runs)), '作业文本已复制') },
+      { label: '打印', icon: 'print', run: printProject },
+      { label: '历史版本', icon: 'history', run: () => openHistory(classId, { id: detail.id, name: detail.name }, async () => { base = snapshot(); await refreshProjects(); await open(detail.id); }, assetUrl) }
+    ] : [];
+    return [
+      { label: '选择模板新建…', icon: 'plus', run: newFromTemplate },
+      null, ...current,
+      { label: `显示已删除的项目（${projects.filter(p => p.deleted).length}）`, checked: showDeleted, run: () => { showDeleted = !showDeleted; renderBar(); } },
+      { label: '导出全部项目 JSON', icon: 'download', run: () => download(`/api/classes/${classId}/export`) },
+      ...(draft ? [null, { label: '删除项目', icon: 'trash', danger: true, run: deleteProject }] : [])
+    ];
+  }
+  function printProject() {
+    const name = draft?.name || detail.name, date = draft ? draft.date || null : detail.date;
+    $('#hw-print', root).innerHTML = show(html`<h2 style="margin:0 0 4px">${name}</h2><p class="muted" style="margin-bottom:12px">${dateLabel(date, true)}</p>${renderSubjects(draft ? viewSubjects() : subjectsOf(detail.payloadJson, detail.runs), assetUrl)}`);
+    print();
+  }
+
+  // 大屏或其他老师改了项目：没有未保存修改时直接载入，否则提醒。
+  let remoteTimer;
+  onDispose(liveSocket(`/ws/classes/${classId}?access_token=${encodeURIComponent(state.token)}`, ev => {
+    if (ev.type && !['updated', 'deleted'].includes(ev.type)) return;
+    clearTimeout(remoteTimer);
+    remoteTimer = setTimeout(async () => {
+      await refreshProjects().catch(() => { });
+      if (!detail || ev.projectId !== detail.id || Date.now() - savedAt < 4000) return;
+      if (dirty()) toast('这个项目刚被大屏修改，保存时会提示冲突', 'error');
+      else if (!drag) { const f = captureFocus(); await open(detail.id, true); restoreFocus(f); toast('已载入大屏上的最新修改'); }
+    }, 400);
+  }, on => { liveOn = on; const b = $('#hw-live', bar); if (b) { b.className = 'badge ' + (on ? 'ok' : ''); b.innerHTML = show(html`<span class="dot ${on ? 'live' : ''}"></span>${on ? '实时同步' : '离线'}`); } }));
+  onDispose(() => clearTimeout(remoteTimer));
+  Board.fontsReady.then(() => { if (view === 'canvas') renderCanvas(); });
+
+  let id = byId(projectId) ? projectId : defaultProject(projects)?.id;
+  if (id && id !== projectId) setHash(`classes/${classId}/homework/${id}`, true);
+  await open(id);
+  if (query?.get('new')) { setHash(`classes/${classId}/homework${id ? '/' + id : ''}`, true); await newProject(); }
 }
 
 // ============================================================ 账号管理
 async function viewUsers() {
   const page = shell({ nav: 'users', title: '账号', actions: html`<button class="btn primary" data-act="new-user">${icon('plus')}新建账号</button>` });
   setPage(page, loading());
+  reloadView = () => usersPage(page);
+  await usersPage(page);
+}
+async function usersPage(page) {
   const [users, classes] = await Promise.all([api('/api/admin/users'), api('/api/classes')]);
   const find = id => users.find(u => u.id === id);
   const classChecklist = selected => classes.length
@@ -2183,7 +2569,7 @@ async function viewUsers() {
           return u;
         }
       });
-      if (created) { toast(`账号 ${created.userName} 已创建`); route(); }
+      if (created) { toast(`账号 ${created.userName} 已创建`); reloadView(); }
     },
     'edit-user': async el => {
       const u = find(el.dataset.id), self = u.id === state.me.id;
@@ -2224,7 +2610,7 @@ async function viewUsers() {
     'delete-user': async el => {
       const u = find(el.dataset.id);
       if (!await confirmDialog({ title: '删除账号', message: `确定删除“${u.displayName}（${u.userName}）”吗？此操作不可撤销，已配对的设备不受影响。`, confirm: '删除' })) return;
-      await api(`/api/admin/users/${u.id}`, { method: 'DELETE' }); toast('账号已删除'); route();
+      await api(`/api/admin/users/${u.id}`, { method: 'DELETE' }); toast('账号已删除'); reloadView();
     }
   });
 }
@@ -2262,45 +2648,6 @@ async function viewAudit() {
   $('#ac').onchange = e => { classId = e.target.value; load(true).catch(fail); };
   viewActions.more = () => load(false);
   await load(true);
-}
-
-// ============================================================ 公告
-async function viewAnnouncements() {
-  const page = shell({ nav: 'announcements', title: '公告', actions: html`<button class="btn primary" data-act="broadcast">${icon('megaphone')}发布公告</button>` });
-  setPage(page, loading());
-  const [items, classes] = await Promise.all([api('/api/announcements'), api('/api/classes')]);
-  let classId = '', onlyActive = false;
-  const render = () => {
-    const rows = items.filter(a => (!classId || a.classId === classId) && (!onlyActive || a.active));
-    $('#al').innerHTML = show(rows.length ? html`<div class="stack">${rows.map(a => announcementCard(a, { showClass: true }))}</div>` : html`<div class="card">${empty('megaphone', '没有公告', items.length ? '没有符合条件的公告。' : '发布公告后会实时显示在班级大屏顶部。')}</div>`);
-  };
-  setPage(page, html`<div class="toolbar">
-      <select class="input" id="ac" style="width:220px"><option value="">全部班级</option>${classes.map(x => html`<option value="${x.id}">${x.name}</option>`)}</select>
-      <label class="check"><input type="checkbox" id="aa">只看生效中</label><span class="spacer"></span><span class="faint">${items.length} 条</span></div>
-    <div id="al"></div>`);
-  render();
-  $('#ac').onchange = e => { classId = e.target.value; render(); };
-  $('#aa').onchange = e => { onlyActive = e.target.checked; render(); };
-  const find = id => items.find(a => a.id === id);
-  Object.assign(viewActions, {
-    broadcast: async () => {
-      if (!classes.length) return toast('还没有可管理的班级', 'error');
-      const r = await modal({
-        title: '发布公告', submit: '发布', wide: true,
-        body: html`${announcementForm()}<div class="field"><span>发送到</span><div class="checklist">${classes.map(x => html`<label class="check"><input type="checkbox" name="cls" value="${x.id}" ${classes.length === 1 ? 'checked' : ''}>${x.name}</label>`)}</div>
-          <div class="row"><button type="button" class="btn ghost sm" id="ball">全选</button></div></div>`,
-        onMount: f => { $('#ball', f).onclick = () => $$('input[name=cls]', f).forEach(x => x.checked = true); },
-        onSubmit: f => {
-          const ids = $$('input[name=cls]:checked', f).map(x => x.value);
-          if (!ids.length) throw new Error('请选择班级');
-          return api('/api/announcements/broadcast', { method: 'POST', body: { classIds: ids, ...announcementBody(f) } });
-        }
-      });
-      if (r) { toast(`已发布到 ${r.count} 个班级`); route(); }
-    },
-    'edit-notice': async el => { const a = find(el.dataset.id); if (await modal({ title: '编辑公告', submit: '保存', wide: true, body: announcementForm(a), onSubmit: f => api(`/api/classes/${a.classId}/announcements/${a.id}`, { method: 'PUT', body: announcementBody(f) }) })) { toast('公告已更新'); route(); } },
-    'del-notice': async el => { const a = find(el.dataset.id); if (!await confirmDialog({ title: '删除公告', message: `删除“${a.title}”（${a.className}）？`, confirm: '删除' })) return; await api(`/api/classes/${a.classId}/announcements/${a.id}`, { method: 'DELETE' }); toast('已删除'); route(); }
-  });
 }
 
 // ============================================================ 设置
