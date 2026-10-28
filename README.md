@@ -258,22 +258,7 @@ dotnet publish src/Pancake/Pancake.csproj -c Release -p:Platform=x64 -p:EnableUi
 
 ## 集控服务
 
-仓库包含 `src/Pancake.Shared` 共享协议和 `src/Pancake.Server` ASP.NET Core 服务端。服务端默认监听 `http://0.0.0.0:5080`，用 SQLite 保存班级、项目、布局、人员和账号数据，附件与背景文件按 SHA-256 存放在 `assets` 目录。
-
-```powershell
-dotnet run --project .\src\Pancake.Server\Pancake.Server.csproj
-```
-
-首次启动会创建管理员 `admin`，初始密码为 `admin`，部署后应立即修改。可在 `appsettings.json` 或命令行调整：
-
-| 配置 | 默认值 | 说明 |
-|---|---|---|
-| `Urls` | `http://0.0.0.0:5080` | 监听地址 |
-| `ConnectionStrings:Pancake` | `Data Source=pancake.db` | SQLite 数据库 |
-| `Pancake:AssetsPath` | `assets` | 附件与背景文件目录（相对内容根目录） |
-| `Pancake:MaxAssetMegabytes` | `200` | 单个文件上限，超出的背景视频保留各设备本机文件 |
-
-旧数据库启动时会自动补齐新表和新列，无需手动迁移。公开短码只适合非敏感的只读作业，不能代替老师登录凭据。
+集控服务端（`Pancake.Server`）已迁移到独立仓库 [Edge-HH/PancakeServer](https://github.com/Edge-HH/PancakeServer)，单独发布版本，部署与配置说明见该仓库。本仓库保留与服务端共用的 `src/Pancake.Shared` 协议，修改时需同步到服务端仓库。
 
 ### 完整同步
 
@@ -306,7 +291,8 @@ dotnet run --project .\src\Pancake.Server\Pancake.Server.csproj
 
 ### 测试
 
+同步测试需要把 PancakeServer 检出到与本仓库相邻的目录（或用 `-p:PancakeServerDir=<路径>` 指定）。
+
 ```powershell
-dotnet run --project .\tests\ServerLogic\ServerLogic.csproj   # 服务端集成测试：临时数据库 + 随机端口
 dotnet run --project .\tests\SyncLogic\SyncLogic.csproj       # 桌面端同步服务与真实服务端的端到端测试（两台模拟大屏）
 ```

@@ -6,5 +6,4 @@
   </Configurations>
   <Project Path="src/Pancake/Pancake.csproj" DefaultStartup="true" />
   <Project Path="src/Pancake.Shared/Pancake.Shared.csproj" />
-  <Project Path="src/Pancake.Server/Pancake.Server.csproj" />
 </Solution>

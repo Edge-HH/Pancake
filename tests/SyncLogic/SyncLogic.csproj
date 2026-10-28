@@ -4,9 +4,11 @@
     <OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
     <EnableDefaultContentItems>false</EnableDefaultContentItems>
+    <!-- 服务端在独立仓库 Edge-HH/PancakeServer，默认取与本仓库相邻的检出目录；CI 用 -p:PancakeServerDir 指定。 -->
+    <PancakeServerDir Condition="'$(PancakeServerDir)' == ''">$(MSBuildThisFileDirectory)../../../PancakeServer/</PancakeServerDir>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/Pancake.Server/Pancake.Server.csproj" />
+    <ProjectReference Include="$(PancakeServerDir)src/Pancake.Server/Pancake.Server.csproj" />
     <Compile Include="../../src/Pancake/Services/ProjectState.cs" Link="Desktop/ProjectState.cs" />
     <Compile Include="../../src/Pancake/Services/ProjectStore.cs" Link="Desktop/ProjectStore.cs" />
     <Compile Include="../../src/Pancake/Services/CloudPayload.cs" Link="Desktop/CloudPayload.cs" />

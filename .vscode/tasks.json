@@ -31,19 +31,6 @@
       ],
       "problemMatcher": "$msCompile",
       "group": "build"
-    },
-    {
-      "label": "build Pancake.Server (Debug)",
-      "type": "process",
-      "command": "dotnet",
-      "args": [
-        "build",
-        "${workspaceFolder}/src/Pancake.Server/Pancake.Server.csproj",
-        "--configuration",
-        "Debug"
-      ],
-      "problemMatcher": "$msCompile",
-      "group": "build"
     }
   ]
 }
