@@ -337,10 +337,10 @@ try
 
     // 嵌套设置与校验：补全开关同步，本机词库不动；超范围的值被限幅
     libC.Settings.Autofill.Subject.Subjects.Add(new SubjectSuggestion { Name = "本机科目" });
-    Check((await WebPatch((await ServerLayout()).Revision, new() { ["Autofill.Subject.Enabled"] = true, ["GridSize"] = 999, ["Theme"] = "Light", ["Palette"] = "Macaron" })).IsSuccessStatusCode, "网页修改嵌套设置与主题色系");
+    Check((await WebPatch((await ServerLayout()).Revision, new() { ["Autofill.Subject.Enabled"] = true, ["GridSize"] = 999, ["Theme"] = "Light", ["Palette"] = "Macaron" })).IsSuccessStatusCode, "网页修改嵌套设置（主题色系随项目保存，班级设置里会被忽略）");
     await syncC.SynchronizeAsync(libC, Hooks("大屏C"));
     Check(libC.Settings.Autofill.Subject.Enabled && libC.Settings.Autofill.Subject.Subjects.Single().Name == "本机科目" && libC.Settings.GridSize == 160
-        && libC.Settings.Theme == "Light" && libC.Settings.Palette == "Macaron" && libC.Settings.ToolbarIconOnly == false, "嵌套设置、主题色系与限幅后的值都已应用，本机词库保持不变");
+        && libC.Settings.Theme == "Dark" && libC.Settings.Palette == "Vivid" && libC.Settings.ToolbarIconOnly == false, "嵌套设置与限幅后的值都已应用，主题色系不随班级设置改变，本机词库保持不变");
     // 设置原地合并：设置页控件持有的子对象引用继续有效
     BoardSettingsState settingsRef = libC.Settings; BackgroundSettings tileRef = libC.Settings.TileBackground; var widgetsRef = libC.Settings.Widgets;
     Check((await WebPatch((await ServerLayout()).Revision, new() { ["TileBackground"] = JsonNode.Parse("""{"Glass":true,"Blur":35}""")!, ["Widgets"] = JsonNode.Parse("""{"Clock":{"X":10,"Y":20,"Width":300,"Height":160}}""")! })).IsSuccessStatusCode, "网页修改磁贴背景与组件位置");
@@ -369,6 +369,44 @@ try
     await syncC.SynchronizeAsync(libC, new CloudSyncHooks { BackgroundDirectory = Path.Combine(root, "大屏C", "data", "backgrounds"), Fonts = () => ["楷体", "Segoe UI"] });
     var fonts = await admin.GetFromJsonAsync<List<string>>($"/api/classes/{classId}/fonts");
     Check(fonts!.Contains("楷体") && fonts.Contains("Segoe UI") && fonts.Contains("HarmonyOS Sans SC"), "网页取得大屏上报的字体");
+
+    // ---------------------------------------------------------------- 编辑占用：大屏编辑时网页只读，网页编辑时大屏进不了编辑、上传留在队列
+    var lockProject = await (await admin.PostAsJsonAsync($"/api/classes/{classId}/projects", new { name = "占用测试", date = (string?)null, useLatestTemplate = false })).Content.ReadFromJsonAsync<JsonObject>();
+    Guid lockId = lockProject!["id"]!.GetValue<Guid>();
+    string lockUrl = $"/api/classes/{classId}/projects/{lockId}/edit-lock";
+    await syncC.SyncProjectsOnlyAsync(libC, [lockId], Hooks("大屏C"));
+    ProjectDocument LockDoc() => libC.Projects.Single(x => x.Id == lockId);
+    Check((await syncC.AcquireEditLockAsync(libC.Settings.CloudSync, lockId)).Acquired, "大屏进入编辑前申请到占用");
+    Check((await admin.PutAsJsonAsync(lockUrl, new EditLockRequest("tab"))).StatusCode == System.Net.HttpStatusCode.Locked, "大屏编辑时网页拿不到占用");
+    await syncC.ReleaseEditLockAsync(libC.Settings.CloudSync, lockId);
+    Check((await admin.PutAsJsonAsync(lockUrl, new EditLockRequest("tab"))).IsSuccessStatusCode, "大屏释放后网页可以占用");
+    var held = await syncC.AcquireEditLockAsync(libC.Settings.CloudSync, lockId);
+    Check(!held.Acquired && held.HeldBy?.Holder == EditLockHolders.User && held.HeldBy.Name == "系统管理员", "网页编辑时大屏进不了编辑模式，并知道是谁在改");
+    LockDoc().Name = "占用测试（大屏改）";
+    CloudSyncService.Queue(libC, LockDoc());
+    await syncC.SynchronizeAsync(libC, Hooks("大屏C"));
+    Check(syncC.LastSyncError?.Contains("云端修改中") == true && CloudSyncService.IsPending(libC, lockId), "网页编辑期间大屏的上传留在队列里：" + syncC.LastSyncError);
+    await admin.DeleteAsync($"{lockUrl}?clientId=tab");
+    await syncC.SynchronizeAsync(libC, Hooks("大屏C"));
+    Check(!CloudSyncService.IsPending(libC, lockId) && await ServerRevision(lockId) == 2, "网页结束编辑后大屏补传");
+
+    // 项目配色随项目同步，不改动大屏的班级设置
+    (await admin.PutAsJsonAsync($"/api/classes/{classId}/projects/{lockId}/content", new { expectedRevision = 2, subjects = Array.Empty<object>(), theme = "Light", palette = "Macaron" })).EnsureSuccessStatusCode();
+    await syncC.SyncProjectsOnlyAsync(libC, [lockId], Hooks("大屏C"));
+    Check(LockDoc().Theme == "Light" && LockDoc().Palette == "Macaron" && libC.Settings.Theme == "Dark", "网页改的项目配色随项目下载");
+
+    // 编辑中跳过的更新记下来，结束编辑后补拉；排队但没改动的项目在同一轮拉到新版本
+    (await admin.PutAsJsonAsync($"/api/classes/{classId}/projects/{lockId}/content", new { expectedRevision = 3, subjects = Array.Empty<object>(), theme = "Dark" })).EnsureSuccessStatusCode();
+    await syncC.SyncProjectsOnlyAsync(libC, [lockId], Hooks("大屏C", busy: id => id == lockId));
+    Check(LockDoc().Theme == "Light" && syncC.TakeDeferredProjects().SequenceEqual([lockId]), "编辑中的项目不被替换，并记下来等结束编辑后补拉");
+    CloudSyncService.Queue(libC, LockDoc());
+    await syncC.SynchronizeAsync(libC, Hooks("大屏C"));
+    Check(LockDoc().Theme == "Dark" && !CloudSyncService.IsPending(libC, lockId), "排队但没改动的项目在同一轮补拉到服务器的新版本");
+
+    // 屏幕与分区上报：网页设备列表能读到
+    await syncC.ReportScreenAsync(libC.Settings.CloudSync, new DeviceScreenReport(1920, 1080, 1.5, "Split", .4, false, new ScreenRegion(0, 0, 768, 1080), new ScreenRegion(768, 0, 1152, 1080), lockId));
+    var screens = await admin.GetFromJsonAsync<JsonArray>($"/api/classes/{classId}/devices");
+    Check(screens!.Any(d => d!["screen"]?["board"]?["width"]?.GetValue<double>() == 1152 && d["activeProjectId"]?.GetValue<Guid>() == lockId), "大屏上报屏幕与分区");
 
     // ---------------------------------------------------------------- 吊销后提示重新配对
     Guid deviceA = libA.Settings.CloudSync.DeviceId!.Value;

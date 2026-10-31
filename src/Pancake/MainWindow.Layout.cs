@@ -5,11 +5,49 @@ using Microsoft.UI.Xaml.Media;
 using Pancake.Controls;
 using Pancake.Models;
 using Pancake.Services;
+using Pancake.Shared;
 
 namespace Pancake;
 
 public sealed partial class MainWindow
 {
+    // ------------------------------------------------------------------ 屏幕上报（集控）
+
+    private readonly DispatcherTimer _screenReportDebounce = new() { Interval = TimeSpan.FromMilliseconds(500) };
+
+    /// <summary>窗口、布局、缩放或当前项目变化后上报屏幕与分区，网页据此按真实尺寸画出整屏；合并 0.5 秒内的连续变化。</summary>
+    private void ScheduleScreenReport()
+    {
+        if (!_settings.CloudSync.Enabled) return;
+        _screenReportDebounce.Stop();
+        _screenReportDebounce.Start();
+    }
+
+    private async Task ReportScreenAsync()
+    {
+        _screenReportDebounce.Stop();
+        if (CurrentScreen() is { } report) await CloudSync.ReportScreenAsync(_settings.CloudSync, report);
+    }
+
+    /// <summary>
+    /// 当前屏幕与分区：整屏取显示区，时钟区与作业区按实际位置换算到显示区坐标（作业区左上角就是磁贴坐标原点）。
+    /// 设置页、集控页打开时显示区不可见，不上报。
+    /// </summary>
+    private DeviceScreenReport? CurrentScreen()
+    {
+        if (DisplayRoot.Visibility != Visibility.Visible || DisplayRoot.XamlRoot is not { } root || DisplayRoot.ActualWidth < 1 || DisplayRoot.ActualHeight < 1) return null;
+        ScreenRegion? Region(FrameworkElement element)
+        {
+            if (element.Visibility != Visibility.Visible || element.ActualWidth < 1 || element.ActualHeight < 1) return null;
+            Windows.Foundation.Point origin = element.TransformToVisual(DisplayRoot).TransformPoint(new Windows.Foundation.Point(0, 0));
+            return new ScreenRegion(Math.Round(origin.X, 1), Math.Round(origin.Y, 1), Math.Round(element.ActualWidth, 1), Math.Round(element.ActualHeight, 1));
+        }
+        bool free = _settings.LayoutMode == "Free";
+        return new DeviceScreenReport(Math.Round(DisplayRoot.ActualWidth, 1), Math.Round(DisplayRoot.ActualHeight, 1), root.RasterizationScale,
+            _settings.LayoutMode, Math.Round(_settings.SplitRatio, 4), RootShell.ActualWidth < 900,
+            free ? null : Region(ClockPanel), Region(BoardScroller), _library.ActiveProjectId);
+    }
+
     private const double DockedClockFallbackAspectRatio = 1.8;
     private const double DockedComponentsAspectRatio = 6.5;
     private readonly Dictionary<string, Viewbox> _freeWidgets = [];
@@ -103,6 +141,7 @@ public sealed partial class MainWindow
             RefreshClockInk();
         }
         finally { _layingOut = false; }
+        ScheduleScreenReport();
     }
 
     private void ApplyFreeWidgets(bool free)
@@ -348,6 +387,7 @@ public sealed partial class MainWindow
         }
         SyncLayoutChoiceSelection();
         SettingChanged();
+        ScheduleScreenReport();
     }
 
     /// <summary>拖动分隔条切换模式后，把设置里的布局下拉框同步到同一模式。</summary>

@@ -205,7 +205,7 @@
                         <TextBlock Style="{StaticResource BoardSectionTitleStyle}" Text="主题" />
                         <Grid ColumnSpacing="24">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="260" /></Grid.ColumnDefinitions>
-                            <StackPanel Spacing="3"><TextBlock FontSize="15" FontWeight="SemiBold" Text="主题" /><TextBlock FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="深色更接近教室黑板，强光环境可切换浅色" /></StackPanel>
+                            <StackPanel Spacing="3"><TextBlock FontSize="15" FontWeight="SemiBold" Text="主题" /><TextBlock FontSize="12" Foreground="{ThemeResource BoardTextMutedBrush}" Text="主题和色系随当前作业项目保存，切换项目时自动换成该项目的配色" /></StackPanel>
                             <ComboBox x:Name="ThemeComboBox" Grid.Column="1" HorizontalAlignment="Stretch" SelectedIndex="0" SelectionChanged="ThemeComboBox_SelectionChanged">
                                 <ComboBoxItem Content="深色" Tag="Dark" /><ComboBoxItem Content="浅色" Tag="Light" /><ComboBoxItem Content="跟随系统" Tag="Default" />
                             </ComboBox>

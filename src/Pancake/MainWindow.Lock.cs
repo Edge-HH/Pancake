@@ -265,6 +265,7 @@ public sealed partial class MainWindow
                     _editAuthGranted = true;
                     EnterEditing();
                 }
+                else ReleaseUnusedEditLock();
             }
             finally { _editAuthPending = false; }
         });

@@ -122,6 +122,7 @@ public sealed partial class MainWindow : Window
         InitializeTimersAndServices();
         InitializePresentationBehavior();
         InitializeCloudSync();
+        InitializeCloudEditLock();
 
         RootShell.Loaded += (_, _) =>
         {
@@ -321,6 +322,7 @@ public sealed partial class MainWindow : Window
         CloudControlRoot.Visibility = Visibility.Collapsed;
         // 设置页里调整过网格大小或吸附后，回到看板时一次性应用磁贴位置与网格。
         ApplyPendingBoardLayout();
+        ScheduleScreenReport();
         UpdateProjectCommands();
         BackToBoardButton.Visibility = Visibility.Collapsed;
         EditBoardButton.Visibility = Visibility.Visible;
@@ -365,6 +367,8 @@ public sealed partial class MainWindow : Window
     private void EnterEditing()
     {
         if (_isEditing || CurrentProject is null) return;
+        // 连了集控时先申请编辑占用：网页上有老师在改这个项目时不进入编辑，也就不必再问解锁密码。
+        if (NeedsCloudEditLock()) { RequestCloudLockThenEnter(); return; }
         // 锁定生效且要求编辑前验证时，先弹出解锁对话框，通过后才进入编辑模式。
         if (NeedsEditAuth()) { RequestEditAuthThenEnter(); return; }
         ViewModel.BeginEditing();
@@ -380,6 +384,7 @@ public sealed partial class MainWindow : Window
         UpdateGridSnapHint();
         SetTilesEditing(true);
         ApplyExtendedSettings();
+        StartEditLockHeartbeat();
     }
 
     private void FinishEditing()
@@ -400,6 +405,7 @@ public sealed partial class MainWindow : Window
         ApplyExtendedSettings();
         if (_cloudTilesRebuildPending) { _cloudTilesRebuildPending = false; BuildTiles(); }
         ScheduleSave();
+        ReleaseCloudEditLock();
     }
 
     private async void DiscardEditButton_Click(object sender, RoutedEventArgs e)
@@ -421,6 +427,7 @@ public sealed partial class MainWindow : Window
         ApplyExtendedSettings();
         UpdateEditingToolbarVisibility();
         ScheduleSave();
+        ReleaseCloudEditLock();
     }
 
     private async void SettingsButton_Click(object sender, RoutedEventArgs e)

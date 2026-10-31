@@ -194,64 +194,48 @@ public sealed partial class MainWindow
         }
     }
 
-    private async Task SwitchProjectAsync(ProjectDocument project)
+    /// <summary>enterEditing 为 false 时只切换显示（网页让大屏显示某个项目时）。</summary>
+    private async Task SwitchProjectAsync(ProjectDocument project, bool enterEditing = true)
     {
         if (CurrentProject?.Id == project.Id) return;
         if (_isEditing) FinishEditing();
         PersistProjects();
-        await ActivateProjectAsync(project);
+        await ActivateProjectAsync(project, enterEditing);
     }
 
-    private async Task ActivateProjectAsync(ProjectDocument? project)
+    private Task ActivateProjectAsync(ProjectDocument? project, bool enterEditing = true)
     {
         _library.ActiveProjectId = project?.Id;
         _activeInkSubject = null;
         if (project is not null) project.LastUsedAt = DateTime.Now;
         ViewModel.ReplaceSubjects(AppDataStore.RestoreSubjects(project?.Subjects ?? []));
         LoadClockInk();
-        if (project is not null) await OfferProjectAppearanceAsync(project);
+        if (project is not null) ApplyProjectAppearance(project);
         ApplyPalette();
         BuildTiles();
         ShowBoard();
-        if (project is not null) EnterEditing();
+        if (project is not null && enterEditing) EnterEditing();
         PersistProjects();
         UpdateProjectCommands();
+        ScheduleScreenReport();
+        return Task.CompletedTask;
     }
 
-    private async Task OfferProjectAppearanceAsync(ProjectDocument project)
+    /// <summary>
+    /// 配色跟着项目走：切换到项目、或项目被网页改了配色时，换上项目自己的主题与色系。
+    /// 在设置页里改主题、色系会写回当前项目（RememberAppearance），并随项目同步。
+    /// </summary>
+    private void ApplyProjectAppearance(ProjectDocument project)
     {
-        bool themeDiffers = project.Theme != _settings.Theme;
-        bool paletteDiffers = project.Palette != _settings.Palette;
-        if (!themeDiffers && !paletteDiffers) return;
-        // 集控同步班级设置时，主题与色系由班级统一决定：不询问，项目跟随班级外观。
-        CloudSyncSettings cloud = _settings.CloudSync;
-        if (cloud.Enabled && cloud.SyncLayout && cloud.LayoutPolicy != Pancake.Shared.LayoutPolicies.Off)
-        {
-            project.Theme = _settings.Theme;
-            project.Palette = _settings.Palette;
-            return;
-        }
-        CheckBox theme = new() { Content = $"应用项目主题：{project.Theme switch { "Light" => "浅色", "Dark" => "深色", _ => "跟随系统" }}", IsChecked = themeDiffers, Visibility = themeDiffers ? Visibility.Visible : Visibility.Collapsed };
-        CheckBox palette = new() { Content = $"应用项目色系：{(project.Palette == "Macaron" ? "马卡龙" : "鲜明")}", IsChecked = paletteDiffers, Visibility = paletteDiffers ? Visibility.Visible : Visibility.Collapsed };
-        StackPanel content = new() { Spacing = 12 };
-        content.Children.Add(new TextBlock { Text = "项目外观与软件当前设置不同，可分别选择要应用的设置。", TextWrapping = TextWrapping.Wrap });
-        content.Children.Add(theme); content.Children.Add(palette);
-        ContentDialog dialog = new() { XamlRoot = RootShell.XamlRoot, Title = "应用项目外观", Content = content, PrimaryButtonText = "应用所选", CloseButtonText = "保持当前" };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+        if (project.Theme == _settings.Theme && project.Palette == _settings.Palette) return;
         _applyingProjectAppearance = true;
         try
         {
-            if (themeDiffers && theme.IsChecked == true)
-            {
-                _settings.Theme = project.Theme;
-                ThemeComboBox.SelectedIndex = project.Theme switch { "Light" => 1, "Default" => 2, _ => 0 };
-                RootShell.RequestedTheme = project.Theme switch { "Light" => ElementTheme.Light, "Default" => ElementTheme.Default, _ => ElementTheme.Dark };
-            }
-            if (paletteDiffers && palette.IsChecked == true)
-            {
-                _settings.Palette = project.Palette;
-                PaletteComboBox.SelectedIndex = project.Palette == "Macaron" ? 1 : 0;
-            }
+            _settings.Theme = project.Theme;
+            _settings.Palette = project.Palette;
+            ThemeComboBox.SelectedIndex = project.Theme switch { "Light" => 1, "Default" => 2, _ => 0 };
+            PaletteComboBox.SelectedIndex = project.Palette == "Macaron" ? 1 : 0;
+            RootShell.RequestedTheme = project.Theme switch { "Light" => ElementTheme.Light, "Default" => ElementTheme.Default, _ => ElementTheme.Dark };
         }
         finally { _applyingProjectAppearance = false; }
     }

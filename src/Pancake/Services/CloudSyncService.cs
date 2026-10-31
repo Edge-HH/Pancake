@@ -42,6 +42,12 @@ public sealed class CloudSyncService(ProjectStore store)
     // 每个项目最后一次与服务器一致的规范化内容（只在内存里），冲突时据此按科目三方合并。
     private readonly Dictionary<Guid, string> _projectBases = [];
     private string _reportedFonts = "";
+    private string _reportedScreen = "";
+    private bool _screenUnsupported;
+    // 正在编辑而没能替换的项目：结束编辑后由界面补拉一次。
+    private readonly HashSet<Guid> _deferred = [];
+    // 拉取时因为排队上传而跳过、但服务器上更新了的项目：上传时发现本机其实没改动，就在同一轮补拉。
+    private readonly HashSet<Guid> _newerWhilePending = [];
     private bool _running, _again;
 
     public string? LastSyncError { get; private set; }
@@ -56,6 +62,9 @@ public sealed class CloudSyncService(ProjectStore store)
 
     /// <summary>取走上一轮同步产生的提示（冲突副本、布局被覆盖等），界面展示一次即可。</summary>
     public IReadOnlyList<string> TakeNotices() { var list = _notices.ToList(); _notices.Clear(); return list; }
+
+    /// <summary>取走因为正在编辑而跳过拉取的项目，结束编辑后补拉。</summary>
+    public IReadOnlyList<Guid> TakeDeferredProjects() { var list = _deferred.ToList(); _deferred.Clear(); return list; }
 
     public async Task<DevicePairResponse?> PairAsync(string serverUrl, string pairingCode, string deviceName, CancellationToken cancellationToken = default)
     {
@@ -131,6 +140,7 @@ public sealed class CloudSyncService(ProjectStore store)
     {
         LastSyncError = null;
         CredentialsRejected = false;
+        _newerWhilePending.Clear();
         bool reachable = await StepAsync("读取班务", () => FetchBoardAsync(library, cancellationToken), cancellationToken);
         if (reachable) reachable = await StepAsync("同步项目", async () =>
         {
@@ -184,10 +194,15 @@ public sealed class CloudSyncService(ProjectStore store)
     private async Task PullOneAsync(ProjectLibrary library, CloudSyncHooks hooks, ProjectSummary summary, ProjectSnapshot? snapshot, CancellationToken cancellationToken)
     {
         ProjectDocument? local = library.Projects.FirstOrDefault(x => x.Id == summary.Id);
-        if (IsPending(library, summary.Id)) return;
+        if (IsPending(library, summary.Id))
+        {
+            if (local is not null && summary.Revision > local.SyncRevision) _newerWhilePending.Add(summary.Id);
+            return;
+        }
         if (summary.Deleted)
         {
-            if (local is null || hooks.IsProjectBusy(local.Id)) return;
+            if (local is null) return;
+            if (hooks.IsProjectBusy(local.Id)) { _deferred.Add(local.Id); return; }
             library.Projects.Remove(local);
             if (library.ActiveProjectId == local.Id) library.ActiveProjectId = null;
             _removedProjects.Add(local.Id);
@@ -195,7 +210,7 @@ public sealed class CloudSyncService(ProjectStore store)
             return;
         }
         if (local is not null && local.SyncRevision >= summary.Revision) return;
-        if (local is not null && hooks.IsProjectBusy(local.Id)) return;
+        if (local is not null && hooks.IsProjectBusy(local.Id)) { _deferred.Add(local.Id); return; }
         CloudSyncSettings cloud = library.Settings.CloudSync;
         ProjectDocument? remote = snapshot is not null
             ? await MaterializeAsync(cloud, snapshot, cancellationToken)
@@ -289,7 +304,10 @@ public sealed class CloudSyncService(ProjectStore store)
         library.Projects[library.Projects.IndexOf(local)] = remote;
     }
 
-    /// <summary>上传队列；返回是否有内容真正写到了服务器（需要再拉取一次确认）。</summary>
+    /// <summary>
+    /// 上传队列；返回是否需要再拉取一次：有内容真正写到了服务器，或者丢弃了一个没改动的排队项，
+    /// 而它在拉取时因为排队被跳过、服务器上其实已经更新。
+    /// </summary>
     private async Task<bool> PushAsync(ProjectLibrary library, CloudSyncHooks hooks, CancellationToken cancellationToken)
     {
         CloudSyncSettings cloud = library.Settings.CloudSync;
@@ -306,7 +324,7 @@ public sealed class CloudSyncService(ProjectStore store)
 
             string payload = CloudPayload.BuildProjectPayload(project, MapKnown);
             string hash = CloudPayload.Hash(payload);
-            if (project.SyncRevision > 0 && hash == project.SyncHash) { library.SyncQueue.Remove(operation); continue; }
+            if (project.SyncRevision > 0 && hash == project.SyncHash) { library.SyncQueue.Remove(operation); wrote |= _newerWhilePending.Remove(project.Id); continue; }
 
             // 只有内容确实变了才上传附件；上传失败的附件在服务器版本里留空，本机仍保留原图。
             Dictionary<string, string?> mapped = [];
@@ -622,6 +640,63 @@ public sealed class CloudSyncService(ProjectStore store)
         using HttpResponseMessage response = await _http.SendAsync(message, cancellationToken);
         if (sendFonts && response.IsSuccessStatusCode) _reportedFonts = fontsHash;
     }
+
+    // ------------------------------------------------------------------ 编辑占用与屏幕上报
+
+    /// <summary>申请编辑占用的结果：Acquired 为可以编辑（拿到了占用，或服务器不支持、连不上时照常编辑）；HeldBy 是占着的一方。</summary>
+    public sealed record EditLockResult(bool Acquired, EditLockInfo? HeldBy = null);
+
+    /// <summary>
+    /// 进入编辑模式前（以及编辑期间每 15 秒）申请或续期项目的编辑占用。老师正在网页上编辑时返回占着的一方；
+    /// 旧服务端没有这个接口、连不上或 3 秒内没有回应时照常编辑，冲突仍由修订号和三方合并处理。
+    /// </summary>
+    public async Task<EditLockResult> AcquireEditLockAsync(CloudSyncSettings cloud, Guid projectId, CancellationToken cancellationToken = default)
+    {
+        if (!cloud.Enabled) return new(true);
+        try
+        {
+            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(3));
+            using HttpRequestMessage message = Request(cloud, HttpMethod.Put, $"/projects/{projectId}/edit-lock");
+            message.Content = JsonContent.Create(new EditLockRequest());
+            using HttpResponseMessage response = await _http.SendAsync(message, timeout.Token);
+            if (response.StatusCode != HttpStatusCode.Locked) return new(true);
+            return new(false, await response.Content.ReadFromJsonAsync<EditLockInfo>(Web, timeout.Token));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or JsonException) { return new(true); }
+    }
+
+    /// <summary>结束编辑并上传后释放占用；失败也不要紧，服务端 45 秒没有续期会自动释放。</summary>
+    public async Task ReleaseEditLockAsync(CloudSyncSettings cloud, Guid projectId)
+    {
+        if (!cloud.Enabled) return;
+        try
+        {
+            using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(5));
+            using HttpResponseMessage response = await _http.SendAsync(Request(cloud, HttpMethod.Delete, $"/projects/{projectId}/edit-lock"), timeout.Token);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException) { }
+    }
+
+    /// <summary>上报屏幕与分区，内容没变时不重复上报。旧服务端没有这个接口时停止上报，直到软件重启。</summary>
+    public async Task ReportScreenAsync(CloudSyncSettings cloud, DeviceScreenReport report, CancellationToken cancellationToken = default)
+    {
+        if (!cloud.Enabled || _screenUnsupported) return;
+        string json = JsonSerializer.Serialize(report, Web);
+        if (json == _reportedScreen) return;
+        try
+        {
+            using HttpRequestMessage message = Request(cloud, HttpMethod.Put, "/devices/me/screen");
+            message.Content = JsonContent.Create(report, options: Web);
+            using HttpResponseMessage response = await _http.SendAsync(message, cancellationToken);
+            if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed) _screenUnsupported = true;
+            else if (response.IsSuccessStatusCode) _reportedScreen = json;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException) { }
+    }
+
+    /// <summary>实时连接恢复后重新上报一次：服务端可能刚重启，或者别的网页刚打开。</summary>
+    public void ForgetReportedScreen() => _reportedScreen = "";
 
     // ------------------------------------------------------------------ 资源
 

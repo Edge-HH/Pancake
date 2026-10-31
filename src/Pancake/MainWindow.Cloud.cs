@@ -63,8 +63,10 @@ public sealed partial class MainWindow
         _cloudRealtime.ConnectionChanged += connected => DispatcherQueue.TryEnqueue(() =>
         {
             RefreshCloudStatusViews();
-            if (connected) { _cloudEventDebounce.Stop(); _cloudEventDebounce.Start(); }
+            if (connected) { _cloudEventDebounce.Stop(); _cloudEventDebounce.Start(); CloudSync.ForgetReportedScreen(); ScheduleScreenReport(); }
         });
+        _screenReportDebounce.Tick += async (_, _) => await ReportScreenAsync();
+        RootShell.Loaded += (_, _) => { if (RootShell.XamlRoot is { } root) root.Changed += (_, _) => ScheduleScreenReport(); };
         CloudSync.BoardChanged += () => DispatcherQueue.TryEnqueue(() => { _boardRotationIndex = 0; RenderBoardBanner(); });
         // 提示条打开或关闭时班务条随之让位，避免被提示条盖住。
         StorageInfoBar.RegisterPropertyChangedCallback(InfoBar.IsOpenProperty, (_, _) => DispatcherQueue.TryEnqueue(RenderBoardBanner));
@@ -138,7 +140,7 @@ public sealed partial class MainWindow
         {
             System.Diagnostics.Debug.WriteLine($"集控同步失败：{ex.Message}");
         }
-        finally { RefreshCloudStatusViews(); }
+        finally { ReleaseEditLockIfUploaded(); RefreshCloudStatusViews(); }
     }
 
     private CloudSyncHooks CloudHooks() => new()
@@ -166,6 +168,8 @@ public sealed partial class MainWindow
         _activeInkSubject = null;
         ViewModel.ReplaceSubjects(AppDataStore.RestoreSubjects(CurrentProject?.Subjects ?? []));
         LoadClockInk();
+        // 网页可能改了项目配色：换上项目自己的主题与色系。
+        if (CurrentProject is { } project) ApplyProjectAppearance(project);
         ApplyPalette();
         BuildTiles();
         UpdateProjectCommands();
@@ -198,11 +202,7 @@ public sealed partial class MainWindow
         _settings.TileBodyFontSize = Math.Round(_settings.TileBodyFontSize, MidpointRounding.AwayFromZero);
         IsGridSnappingEnabled = _settings.GridSnappingEnabled;
         GridSnapToggleButton.IsChecked = IsGridSnappingEnabled;
-        // 主题与色系同时写回当前项目，切换项目时不会被项目里保存的旧外观改回去。
-        ThemeComboBox.SelectedIndex = _settings.Theme switch { "Light" => 1, "Default" => 2, _ => 0 };
-        PaletteComboBox.SelectedIndex = _settings.Palette == "Macaron" ? 1 : 0;
-        RememberAppearance();
-        RootShell.RequestedTheme = _settings.Theme switch { "Light" => ElementTheme.Light, "Default" => ElementTheme.Default, _ => ElementTheme.Dark };
+        // 主题与色系随项目保存，不再作为班级设置下发（SettingsSchema.ProjectScopedKeys）。
         WeatherCityTextBox.Text = _settings.WeatherCityName;
         WeatherAlertsToggle.IsOn = _settings.ShowWeatherAlerts;
         NoiseIntervalSlider.Value = Math.Clamp(_settings.NoiseIntervalSeconds, 0.1, 2);
@@ -240,6 +240,16 @@ public sealed partial class MainWindow
                 ShowCloudNotice(value.Text!, InfoBarSeverity.Informational, "来自集控的消息");
                 return;
             }
+            if (value.Command == DeviceCommands.OpenProject && value.ProjectId != Guid.Empty)
+            {
+                _ = OpenCloudProjectAsync(value.ProjectId);
+                return;
+            }
+            if (value.Command == DeviceCommands.EndEdit && value.ProjectId != Guid.Empty)
+            {
+                OnEndEditRequested(value.ProjectId, value.Text);
+                return;
+            }
         }
         // 本机自己触发的修改不必再同步一次。
         if (value.SourceDeviceId is { } source && source == _settings.CloudSync.DeviceId) return;
@@ -265,6 +275,26 @@ public sealed partial class MainWindow
                 _cloudEventDebounce.Start();
                 return;
         }
+    }
+
+    private async Task OpenCloudProjectAsync(Guid projectId)
+    {
+        await RunProjectAction(async () =>
+        {
+            ProjectDocument? project = _library.Projects.FirstOrDefault(p => p.Id == projectId);
+            if (project is null)
+                await RunCloudSyncAsync(() => CloudSync.SyncProjectsOnlyAsync(_library, [projectId], CloudHooks()));
+            project = _library.Projects.FirstOrDefault(p => p.Id == projectId);
+            if (project is null)
+            {
+                ShowCloudNotice("集控指定的项目尚未同步到这台设备，请检查连接后重试。", InfoBarSeverity.Warning);
+                return;
+            }
+            // 网页让大屏切换显示时只切换，不进入编辑模式（也就不会弹出解锁对话框或占用项目）。
+            await SwitchProjectAsync(project, enterEditing: false);
+            ShowBoard();
+            ShowCloudNotice($"已切换到大屏项目“{project.Name}”。", InfoBarSeverity.Success);
+        });
     }
 
     private void ShowCloudNotice(string message, InfoBarSeverity severity, string title = "集控")
