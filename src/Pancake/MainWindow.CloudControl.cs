@@ -22,6 +22,8 @@ public sealed partial class MainWindow
         DisplayRoot.Visibility = Visibility.Collapsed;
         SettingsRoot.Visibility = Visibility.Collapsed;
         CloudControlRoot.Visibility = Visibility.Visible;
+        // 考试画面只在看板上显示，打开班级页后立即收起。
+        UpdateExamDisplay();
         ProjectCommands.Visibility = Visibility.Collapsed;
         EmptyProjectPanel.Visibility = Visibility.Collapsed;
         BackToBoardButton.Visibility = Visibility.Visible;

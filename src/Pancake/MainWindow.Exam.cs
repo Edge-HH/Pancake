@@ -77,6 +77,12 @@ public sealed partial class MainWindow
     private void UpdateExamDisplay()
     {
         if (ExamOverlay is null) return;
+        // 设置页或班级页在前台时收起考试画面，避免考试元素透在页面后面；返回看板后自动恢复。
+        if (DisplayRoot.Visibility != Visibility.Visible)
+        {
+            SuspendExamOverlay();
+            return;
+        }
         ExamScheduleDto? effective = _settings.CloudSync.Enabled ? CloudSync.Exam : null;
         bool localSource = false;
         DateTime now = DateTime.Now;
@@ -124,7 +130,6 @@ public sealed partial class MainWindow
 
     private void HideExamOverlay()
     {
-        if (!_examOverlayVisible) return;
         _examOverlayVisible = false;
         if (ExamOverlay is not null) ExamOverlay.Visibility = Visibility.Collapsed;
         if (_examForcedFullScreen)
@@ -132,6 +137,14 @@ public sealed partial class MainWindow
             _examForcedFullScreen = false;
             if (_isFullScreen) SetFullScreen(false);
         }
+    }
+
+    /// <summary>设置页/班级页打开时暂时收起考试画面；不改变全屏状态，回到看板后由 UpdateExamDisplay 恢复。</summary>
+    private void SuspendExamOverlay()
+    {
+        if (!_examOverlayVisible) return;
+        _examOverlayVisible = false;
+        if (ExamOverlay is not null) ExamOverlay.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>科目右侧的小字：考试段显示本场时间，休息段显示下一场，提前进入时提示即将开始。</summary>

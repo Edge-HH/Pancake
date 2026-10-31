@@ -333,6 +333,8 @@ public sealed partial class MainWindow : Window
         UpdateCloudToolbarButton();
         // 回到作业板时缩放岛重新出现，并重新贴合控制窗。
         RefreshIslands();
+        // 考试进行中从设置页返回看板时恢复全屏考试画面。
+        UpdateExamDisplay();
     }
 
     private void ShowSettings()
@@ -344,6 +346,8 @@ public sealed partial class MainWindow : Window
         DisplayRoot.Visibility = Visibility.Collapsed;
         SettingsRoot.Visibility = Visibility.Visible;
         CloudControlRoot.Visibility = Visibility.Collapsed;
+        // 考试画面只在看板上显示，打开设置后立即收起，避免元素透在设置页后面。
+        UpdateExamDisplay();
         if (SettingsRoot.SelectedItem is null)
         {
             // 等导航模板加载并显示后再设置默认项，确保背景和选中指示条使用同一状态。
