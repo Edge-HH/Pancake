@@ -290,6 +290,131 @@ try
     Check(Math.Abs((BoardNotices.NextBoundary(timed, DateTime.UtcNow)!.Value - starts).TotalSeconds) < 1 && Math.Abs((BoardNotices.NextBoundary(timed, starts.AddSeconds(1))!.Value - ends).TotalSeconds) < 1, "按最近的开始或结束时间重绘");
     realtime.Stop();
 
+    // ---------------------------------------------------------------- 考试模式
+    DateOnly examDate = DateOnly.FromDateTime(DateTime.Now);
+    DateTime examDayStart = examDate.ToDateTime(TimeOnly.MinValue);
+    var sample = new ExamScheduleDto(Guid.NewGuid(), "期中考试",
+    [
+        new ExamDayDto(examDate,
+        [
+            new ExamSegmentDto(ExamSegmentKinds.Exam, "语文", 540, 630),
+            new ExamSegmentDto(ExamSegmentKinds.Break, "", 630, 645, "课间休息"),
+            new ExamSegmentDto(ExamSegmentKinds.Exam, "数学", 645, 735)
+        ])
+    ], 5, DateTime.UtcNow);
+    Check(ExamSchedule.Evaluate(sample, examDayStart.AddHours(8).AddMinutes(54)) is null, "提前进入之前不显示考试画面");
+    var upcoming = ExamSchedule.Evaluate(sample, examDayStart.AddHours(8).AddMinutes(55));
+    Check(upcoming is { Phase: ExamPhase.Upcoming, Title: "语文" } && upcoming.Remaining == TimeSpan.FromMinutes(5), "开考前 5 分钟进入即将开始并倒计时");
+    var atStart = ExamSchedule.Evaluate(sample, examDayStart.AddHours(9));
+    Check(atStart is { Phase: ExamPhase.Examining, Title: "语文" } && atStart.Remaining == TimeSpan.FromMinutes(90), "开考瞬间进入考试，区间左闭右开");
+    Check(atStart?.Total == TimeSpan.FromMinutes(90), "考试段总时长供进度环使用");
+    var midway = ExamSchedule.Evaluate(sample, examDayStart.AddHours(9).AddMinutes(45));
+    Check(midway is { Phase: ExamPhase.Examining } && midway.Remaining == TimeSpan.FromMinutes(45) && midway.Total == TimeSpan.FromMinutes(90), "进度环的剩余与总时长");
+    Check(upcoming is { Total: { } upcomingTotal } && upcomingTotal == TimeSpan.FromMinutes(5), "提前进入阶段也有总时长");
+    var atEnd = ExamSchedule.Evaluate(sample, examDayStart.AddHours(10).AddMinutes(30));
+    Check(atEnd is { Phase: ExamPhase.Break, Title: "课间休息", NextSubject: "数学" }
+        && atEnd.NextStart == examDayStart.AddHours(10).AddMinutes(45), "结束瞬间进入休息并指向下一场");
+    Check(ExamSchedule.Evaluate(sample, examDayStart.AddHours(11)) is { Phase: ExamPhase.Examining, Title: "数学" }, "第二场考试");
+    Check(ExamSchedule.Evaluate(sample, examDayStart.AddHours(12).AddMinutes(15)) is null, "当天全部结束后退出考试模式");
+
+    var gap = sample with
+    {
+        Days = [new ExamDayDto(examDate,
+        [
+            new ExamSegmentDto(ExamSegmentKinds.Exam, "语文", 540, 600),
+            new ExamSegmentDto(ExamSegmentKinds.Exam, "数学", 620, 680)
+        ])]
+    };
+    Check(ExamSchedule.Evaluate(gap, examDayStart.AddHours(10).AddMinutes(5)) is { Phase: ExamPhase.Break, NextSubject: "数学" }, "段间空隙按休息倒计时");
+    var dirty = sample with
+    {
+        Days = [new ExamDayDto(examDate,
+        [
+            new ExamSegmentDto(ExamSegmentKinds.Exam, "语文", 600, 540),
+            new ExamSegmentDto(ExamSegmentKinds.Exam, " ", 540, 600),
+            new ExamSegmentDto(ExamSegmentKinds.Exam, "数学", 540, 630)
+        ])]
+    };
+    Check(ExamSchedule.Evaluate(dirty, examDayStart.AddHours(10)) is { Phase: ExamPhase.Examining, Title: "数学" }, "非法段被忽略");
+    var twoDays = sample with
+    {
+        Days =
+        [
+            new ExamDayDto(examDate, [new ExamSegmentDto(ExamSegmentKinds.Exam, "语文", 540, 630)]),
+            new ExamDayDto(examDate.AddDays(1), [new ExamSegmentDto(ExamSegmentKinds.Exam, "数学", 540, 630)])
+        ]
+    };
+    Check(ExamSchedule.Evaluate(twoDays, examDayStart.AddDays(1).AddHours(9)) is { Title: "数学" }, "多天计划按日期隔离");
+    Check(ExamSchedule.Evaluate(twoDays, examDayStart.AddDays(2).AddHours(9)) is null, "计划之外的日子正常看板");
+
+    // 本机安排：同一套评估逻辑，校验提示可显示在设置页
+    var local = new LocalExamSettings
+    {
+        Enabled = true, EnterMinutesBefore = 10, ShowSeconds = false, RoomName = "第 3 考场",
+        Days = [new LocalExamDay { Date = examDate, Segments = [new LocalExamSegment { Kind = ExamSegmentKinds.Exam, Subject = "英语", StartMinute = 540, EndMinute = 600 }] }]
+    };
+    var localSchedule = ExamSchedule.FromLocal(local);
+    Check(localSchedule.PlanName == ExamSchedule.LocalPlanName && localSchedule.EnterMinutesBefore == 10
+        && localSchedule.Days.Single().Segments.Single().Subject == "英语"
+        && !localSchedule.ShowSeconds && localSchedule.RoomName == "第 3 考场", "本机设置转成与服务器相同的协议（含考场名与秒级开关）");
+    Check(ExamSchedule.Evaluate(localSchedule, examDayStart.AddHours(9)) is { Phase: ExamPhase.Examining, Title: "英语" }, "本机安排用同一套评估逻辑");
+    Check(ExamSchedule.ValidateLocal(local).Count == 0, "合法本机安排没有提示");
+    local.Days[0].Segments.Add(new LocalExamSegment { Kind = ExamSegmentKinds.Break, StartMinute = 590, EndMinute = 600 });
+    Check(ExamSchedule.ValidateLocal(local).Any(text => text.Contains("重叠")), "本机安排重叠会被提示");
+
+    // 端到端：服务器创建启用计划 → 大屏拉取并缓存 → 停用后清空
+    var examPayload = new ExamSchedulePayload(
+    [
+        new ExamDayDto(examDate,
+        [
+            new ExamSegmentDto(ExamSegmentKinds.Exam, "语文", 540, 630),
+            new ExamSegmentDto(ExamSegmentKinds.Break, "", 630, 645, "课间休息"),
+            new ExamSegmentDto(ExamSegmentKinds.Exam, "数学", 645, 735)
+        ])
+    ], 5);
+    var createPlan = await admin.PostAsJsonAsync("/api/admin/exam-plans", new { name = "期中考试", schedule = examPayload, classIds = new[] { classId }, enabled = true });
+    Check(createPlan.IsSuccessStatusCode, "考试计划创建成功：" + await createPlan.Content.ReadAsStringAsync());
+    var planJson = JsonNode.Parse(await createPlan.Content.ReadAsStringAsync())!;
+    Guid examPlanId = planJson["id"]!.GetValue<Guid>();
+    long examPlanRevision = planJson["revision"]!.GetValue<long>();
+    bool examChanged = false;
+    syncA.ExamChanged += () => examChanged = true;
+    await syncA.RefreshExamAsync(libA);
+    Check(examChanged && syncA.Exam is { PlanName: "期中考试" } fetched && fetched.Days.Single().Segments.Count == 3, "大屏拉取服务器考试安排");
+    Check(Math.Abs(syncA.ServerClockOffset.TotalSeconds) < 30, "校时偏移合理");
+
+    // 考场名随班级下发，显示在考试画面右上角
+    await admin.PutAsJsonAsync("/api/admin/exam-rooms", new { items = new[] { new { classId, room = "第 3 考场" } } });
+    await syncA.RefreshExamAsync(libA);
+    Check(syncA.Exam is { RoomName: "第 3 考场", ShowSeconds: true }, "服务器考场名与秒级开关随考试安排下发");
+
+    var cachedSync = new CloudSyncService(storeA);
+    cachedSync.LoadExamCache(libA);
+    Check(cachedSync.Exam is { PlanName: "期中考试" }, "重启后从缓存恢复考试安排");
+    var otherClass = new ProjectLibrary();
+    otherClass.Settings.CloudSync = new CloudSyncSettings
+    {
+        ServerUrl = libA.Settings.CloudSync.ServerUrl, ClassId = Guid.NewGuid(), DeviceToken = "x"
+    };
+    cachedSync.LoadExamCache(otherClass);
+    Check(cachedSync.Exam is null, "缓存的班级不匹配时不恢复");
+
+    using (var examEvents = new CloudRealtimeClient())
+    {
+        var examEvent = new TaskCompletionSource<SyncEvent>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var examConnected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        examEvents.ConnectionChanged += on => { if (on) examConnected.TrySetResult(); };
+        examEvents.EventReceived += value => { if (value.Type == SyncEventTypes.Exam) examEvent.TrySetResult(value); };
+        examEvents.Start(baseUrl, classId, libA.Settings.CloudSync.DeviceToken);
+        await examConnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await admin.PatchAsJsonAsync($"/api/admin/exam-plans/{examPlanId}/enabled", new { enabled = false, expectedRevision = examPlanRevision });
+        var receivedExam = await examEvent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Check(receivedExam.Type == SyncEventTypes.Exam && receivedExam.Revision == examPlanRevision + 1, "停用考试计划时大屏收到 exam 通知");
+        await syncA.RefreshExamAsync(libA);
+        Check(syncA.Exam is null, "停用后大屏清空考试安排");
+        examEvents.Stop();
+    }
+
     // ---------------------------------------------------------------- 按键三方合并
     async Task<LayoutSnapshot> ServerLayout() => (await admin.GetFromJsonAsync<LayoutSnapshot>($"/api/classes/{classId}/layout", web))!;
     async Task<HttpResponseMessage> WebPatch(long baseRevision, Dictionary<string, object> set) =>

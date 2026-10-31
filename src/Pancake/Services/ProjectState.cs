@@ -97,10 +97,44 @@ public sealed class BoardSettingsState
     public LockSettings Lock { get; set; } = new();
     public DataSettings Data { get; set; } = new();
     public CloudSyncSettings CloudSync { get; set; } = new();
+    /// <summary>本机考试安排：不连接集控时也能按设定时间全屏显示；不参与班级布局同步。</summary>
+    public LocalExamSettings LocalExam { get; set; } = new();
 
     /// <summary>再次启动行为只认三种取值；旧配置或手改值一律回到“移至前台”。</summary>
     public static string NormalizeSecondLaunchAction(string? value) =>
         value is "Foreground" or "FullScreen" or "None" ? value : "Foreground";
+}
+
+/// <summary>
+/// 本机考试安排：不连接集控时也能按设定时间全屏显示考试信息。作为本机设置保存，
+/// 不参与班级布局同步；服务器下发的启用计划优先于本机安排。
+/// </summary>
+public sealed class LocalExamSettings
+{
+    public bool Enabled { get; set; }
+    /// <summary>开考前提前进入考试画面的分钟数。</summary>
+    public int EnterMinutesBefore { get; set; } = 5;
+    /// <summary>大时钟与倒计时是否显示到秒。</summary>
+    public bool ShowSeconds { get; set; } = true;
+    /// <summary>考场名：显示在考试画面右上角。</summary>
+    public string RoomName { get; set; } = "";
+    public List<LocalExamDay> Days { get; set; } = [];
+}
+
+public sealed class LocalExamDay
+{
+    public DateOnly Date { get; set; } = DateOnly.FromDateTime(DateTime.Now);
+    public List<LocalExamSegment> Segments { get; set; } = [];
+}
+
+/// <summary>本机时间表的一段：Kind 为 exam/break；时间用当天 00:00 起的分钟数，避免时区换算。</summary>
+public sealed class LocalExamSegment
+{
+    public string Kind { get; set; } = Pancake.Shared.ExamSegmentKinds.Exam;
+    public string Subject { get; set; } = "";
+    public string Label { get; set; } = "";
+    public int StartMinute { get; set; }
+    public int EndMinute { get; set; }
 }
 
 /// <summary>集控连接设置。未配对时保持空值，主程序继续走原有本地保存路径。</summary>

@@ -118,7 +118,7 @@
                         Visibility="Collapsed" Canvas.ZIndex="40" Tapped="BoardBanner_Tapped" AutomationProperties.Name="班务条" />
         </Grid>
 
-        <Grid x:Name="CloudControlRoot" Grid.Row="1" Background="{ThemeResource BoardBackgroundBrush}" Visibility="Collapsed">
+        <Grid x:Name="CloudControlRoot" Grid.Row="1" Canvas.ZIndex="105" Background="{ThemeResource BoardBackgroundBrush}" Visibility="Collapsed">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="300" MinWidth="240" />
                 <ColumnDefinition Width="260" MinWidth="220" />
@@ -146,7 +146,7 @@
             </Grid>
         </Grid>
 
-        <NavigationView x:Name="SettingsRoot" Grid.Row="1" Visibility="Collapsed"
+        <NavigationView x:Name="SettingsRoot" Grid.Row="1" Canvas.ZIndex="105" Visibility="Collapsed"
                         PaneDisplayMode="Left" OpenPaneLength="260" IsBackButtonVisible="Collapsed"
                         IsSettingsVisible="False" IsPaneOpen="True" Loaded="SettingsRoot_Loaded"
                         SelectionChanged="SettingsNavigation_SelectionChanged">
@@ -179,6 +179,7 @@
                         <NavigationViewItem Content="作业补全" Tag="AutofillHomework"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Document" /></NavigationViewItem.Icon></NavigationViewItem>
                     </NavigationViewItem.MenuItems>
                 </NavigationViewItem>
+                <NavigationViewItem Content="考试" Tag="Exam"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Clock" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="集控" Tag="CloudSync"><NavigationViewItem.Icon><icons:FluentIcon Symbol="Cloud" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="数据" Tag="Data"><NavigationViewItem.Icon><icons:FluentIcon Symbol="ArrowDownload" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="锁定" Tag="Lock"><NavigationViewItem.Icon><icons:FluentIcon Symbol="LockClosed" /></NavigationViewItem.Icon></NavigationViewItem>
@@ -329,6 +330,7 @@
                     </Border>
                 </StackPanel>
                 <StackPanel x:Name="AutofillSettingsPanel" Spacing="22" Visibility="Collapsed" />
+                <StackPanel x:Name="ExamSettingsPanel" Spacing="22" Visibility="Collapsed" />
                 <StackPanel x:Name="CloudSyncSettingsPanel" Spacing="22" Visibility="Collapsed" />
                 <StackPanel x:Name="DataSettingsPanel" Spacing="22" Visibility="Collapsed" />
                 <StackPanel x:Name="LockSettingsPanel" Spacing="22" Visibility="Collapsed" />
@@ -349,6 +351,46 @@
             <ScrollViewer x:Name="InkToolbarScroll" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"><StackPanel x:Name="GlobalInkTools" Orientation="Horizontal" Spacing="10" /></ScrollViewer>
         </Border>
         <Grid x:Name="ExportOverlay" Grid.RowSpan="2" Canvas.ZIndex="200" Background="{ThemeResource BoardBackgroundBrush}" Visibility="Collapsed" />
+
+        <!--
+            考试模式全屏覆盖层：左上日期与科目（右侧小字为本场时间），右上班级与考场，
+            中间是带秒的大时钟和胶囊环形倒计时。ZIndex 低于控制窗与设置页，考试期间仍可操作控制窗。
+        -->
+        <Grid x:Name="ExamOverlay" Grid.RowSpan="2" Canvas.ZIndex="90" Background="{ThemeResource BoardBackgroundBrush}" Visibility="Collapsed">
+            <StackPanel Margin="56,32,0,0" HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="4">
+                <TextBlock x:Name="ExamDateText" FontSize="26" Foreground="{ThemeResource BoardTextBrush}" Opacity="0.72" />
+                <StackPanel Orientation="Horizontal" Spacing="18">
+                    <TextBlock x:Name="ExamTitleText" FontSize="84" FontWeight="SemiBold" MaxWidth="900" TextTrimming="CharacterEllipsis"
+                               Foreground="{ThemeResource BoardTextBrush}" />
+                    <TextBlock x:Name="ExamSegmentText" Margin="0,0,0,12" VerticalAlignment="Bottom" FontSize="24"
+                               Foreground="{ThemeResource BoardTextBrush}" Opacity="0.68" />
+                </StackPanel>
+            </StackPanel>
+            <StackPanel Margin="0,32,56,0" HorizontalAlignment="Right" VerticalAlignment="Top" Spacing="2">
+                <TextBlock x:Name="ExamClassText" HorizontalAlignment="Right" FontSize="26" MaxWidth="600" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource BoardTextBrush}" Opacity="0.85" />
+                <TextBlock x:Name="ExamRoomText" HorizontalAlignment="Right" FontSize="20" MaxWidth="600" TextTrimming="CharacterEllipsis"
+                           Foreground="{ThemeResource BoardTextBrush}" Opacity="0.6" />
+            </StackPanel>
+            <Viewbox Stretch="Uniform" Margin="140,150,140,80" MaxWidth="1400" MaxHeight="760">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="30">
+                    <TextBlock x:Name="ExamClockText" HorizontalAlignment="Center" FontSize="230" FontWeight="Light"
+                               FontFamily="{StaticResource BoardTextFontFamily}" Foreground="{ThemeResource BoardTextBrush}" />
+                    <Grid Width="760" Height="120">
+                        <Rectangle x:Name="ExamRingTrack" Width="750" Height="110" RadiusX="55" RadiusY="55"
+                                   StrokeThickness="10" StrokeLineJoin="Round" />
+                        <Rectangle x:Name="ExamRingFill" Width="750" Height="110" RadiusX="55" RadiusY="55"
+                                  StrokeThickness="10" StrokeLineJoin="Round" Visibility="Collapsed" />
+                        <TextBlock x:Name="ExamCountdownText" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="42"
+                                   FontFamily="{StaticResource BoardTextFontFamily}" Foreground="{ThemeResource BoardTextBrush}" />
+                    </Grid>
+                </StackPanel>
+            </Viewbox>
+            <!-- 本机考试可随时退出；服务器下发的计划由老师统一控制。 -->
+            <Button x:Name="ExamExitButton" Content="退出本机考试" Click="ExamExitButton_Click" Visibility="Collapsed"
+                    HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,40,30"
+                    Style="{StaticResource BoardSecondaryButtonStyle}" />
+        </Grid>
 
         <!--
             富文本悬浮岛：编辑模式下承载当前作业的富文本工具条，贴在控制窗左侧（竖版控制窗时贴在其上方）。

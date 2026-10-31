@@ -75,8 +75,10 @@ public sealed partial class MainWindow
         {
             _cloudSyncDebounce.Stop(); _cloudEventDebounce.Stop(); _cloudProjectDebounce.Stop(); _cloudLayoutDebounce.Stop();
             _cloudSyncPeriodic.Stop(); _boardRefreshDebounce.Stop(); _boardRotation.Stop(); _boardSchedule.Stop();
+            _examRefreshDebounce.Stop();
             _cloudRealtime.Dispose();
         };
+        InitializeExamMode();
         RestartCloudConnection();
     }
 
@@ -90,8 +92,11 @@ public sealed partial class MainWindow
         {
             _cloudRealtime.Start(cloud.ServerUrl, cloud.ClassId!.Value, cloud.DeviceToken);
             _cloudSyncPeriodic.Start();
+            CloudSync.LoadExamCache(_library);
             _ = FlushCloudSyncAsync();
         }
+        else CloudSync.ClearExam();
+        UpdateExamDisplay();
         RenderBoardBanner();
         UpdateCloudToolbarButton();
     }
@@ -258,6 +263,10 @@ public sealed partial class MainWindow
             case SyncEventTypes.Board:
                 _boardRefreshDebounce.Stop();
                 _boardRefreshDebounce.Start();
+                return;
+            case SyncEventTypes.Exam:
+                _examRefreshDebounce.Stop();
+                _examRefreshDebounce.Start();
                 return;
             case SyncEventTypes.Layout:
                 _cloudLayoutDebounce.Stop();

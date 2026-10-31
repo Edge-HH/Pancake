@@ -240,6 +240,8 @@ public sealed partial class MainWindow : Window
         MainTimeText.Text = now.ToString("HH:mm");
         SecondsText.Text = now.ToString("ss");
         ClockDateText.Text = dateText;
+        // 考试模式挂在同一条一秒时钟上：到点切换、倒计时与全屏覆盖层的刷新都不再单独定时。
+        UpdateExamDisplay();
 
 
     }
@@ -1317,6 +1319,12 @@ public sealed partial class MainWindow : Window
             _settings.Data.AutoBackup ??= new BackupSettings();
             _settings.CloudSync ??= new CloudSyncSettings();
             if (string.IsNullOrWhiteSpace(_settings.CloudSync.LayoutPolicy)) _settings.CloudSync.LayoutPolicy = LayoutPolicies.Shared;
+            // 旧配置缺少本机考试安排或手改数据时补齐默认值。
+            _settings.LocalExam ??= new LocalExamSettings();
+            if (_settings.LocalExam.Days is null) _settings.LocalExam.Days = [];
+            _settings.LocalExam.Days.RemoveAll(day => day is null);
+            foreach (LocalExamDay day in _settings.LocalExam.Days)
+                if (day.Segments is null) day.Segments = [];
             _autofill.EnsureBuiltIns();
             _autofill.Prune(DateTime.Now);
             _settings.GridLineThickness = Math.Clamp(_settings.GridLineThickness, .5, 5);

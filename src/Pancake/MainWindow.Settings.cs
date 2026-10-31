@@ -158,6 +158,7 @@ public sealed partial class MainWindow
         AutofillSettingsPanel.Children.Clear();
         RegisterSettingsPage("AutofillSubject", AutofillSettingsPanel, SubjectAutofillSettings(), "学科补全", "设置可补全的学科、默认颜色与匹配严格度。");
         RegisterSettingsPage("AutofillHomework", AutofillSettingsPanel, HomeworkAutofillSettings(), "作业补全", "记录常输入的作业名称，并按学科范围提示补全。");
+        RegisterSettingsPage("Exam", ExamSettingsPanel, BuildExamSettingsPage(), "考试", "设置本机考试安排；不连接集控或服务器没有启用的计划时自动使用。");
         RegisterSettingsPage("CloudSync", CloudSyncSettingsPanel, BuildCloudSyncPage(), "集控", "连接班级，同步项目、班级布局、公告与值日。");
         RegisterSettingsPage("Data", DataSettingsPanel, BuildDataPage(), "数据", "管理自动保存、数据导出与自动备份。");
         RegisterSettingsPage("Lock", LockSettingsPanel, BuildLockPage(), "锁定", "设置密码与两步验证，保护看板与设置。");
@@ -859,6 +860,8 @@ public sealed partial class MainWindow
             if (_autofill.Prune(DateTime.Now)) ScheduleSave();
             _refreshHomeworkAutofill?.Invoke();
         }
+        // 服务器计划状态可能变化，每次打开考试页都按当前设置重建本机安排。
+        if (tag == "Exam") RefreshLocalExamEditor();
 
         _selectedSettingsPage = tag;
         foreach (StackPanel container in _settingsPages.Values.Select(page => page.Container).Distinct())

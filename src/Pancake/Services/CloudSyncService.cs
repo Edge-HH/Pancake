@@ -44,6 +44,8 @@ public sealed class CloudSyncService(ProjectStore store)
     private string _reportedFonts = "";
     private string _reportedScreen = "";
     private bool _screenUnsupported;
+    private ExamScheduleStore? _examStore;
+    private ExamScheduleStore ExamStore => _examStore ??= new ExamScheduleStore(store.DirectoryPath);
     // 正在编辑而没能替换的项目：结束编辑后由界面补拉一次。
     private readonly HashSet<Guid> _deferred = [];
     // 拉取时因为排队上传而跳过、但服务器上更新了的项目：上传时发现本机其实没改动，就在同一轮补拉。
@@ -53,12 +55,17 @@ public sealed class CloudSyncService(ProjectStore store)
     public string? LastSyncError { get; private set; }
     public DateTime? LastSyncAt { get; private set; }
     public BoardInfo? Board { get; private set; }
+    /// <summary>服务器下发的考试安排；为空表示当前没有启用的考试计划。</summary>
+    public ExamScheduleDto? Exam { get; private set; }
+    /// <summary>服务器时间与本机时间的差（UTC 口径）；服务器下发的考试安排按它校正到点判断。</summary>
+    public TimeSpan ServerClockOffset { get; private set; }
     /// <summary>最近一次合并进本机的班级设置键，界面据此只刷新受影响的部分。</summary>
     public IReadOnlyList<string> LastAppliedLayoutKeys { get; private set; } = [];
     /// <summary>设备令牌被拒绝（吊销或班级删除），需要重新配对。</summary>
     public bool CredentialsRejected { get; private set; }
     public bool IsRunning => _running;
     public event Action? BoardChanged;
+    public event Action? ExamChanged;
 
     /// <summary>取走上一轮同步产生的提示（冲突副本、布局被覆盖等），界面展示一次即可。</summary>
     public IReadOnlyList<string> TakeNotices() { var list = _notices.ToList(); _notices.Clear(); return list; }
@@ -142,6 +149,7 @@ public sealed class CloudSyncService(ProjectStore store)
         CredentialsRejected = false;
         _newerWhilePending.Clear();
         bool reachable = await StepAsync("读取班务", () => FetchBoardAsync(library, cancellationToken), cancellationToken);
+        if (reachable) reachable = await StepAsync("读取考试安排", () => FetchExamAsync(library, cancellationToken), cancellationToken);
         if (reachable) reachable = await StepAsync("同步项目", async () =>
         {
             if (!await PullAsync(library, hooks, cancellationToken)) return;
@@ -170,6 +178,30 @@ public sealed class CloudSyncService(ProjectStore store)
     {
         if (!library.Settings.CloudSync.Enabled) return;
         await StepAsync("读取班务", () => FetchBoardAsync(library, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>只刷新考试安排：收到 exam 通知时调用，不必跑完整一轮同步。</summary>
+    public async Task RefreshExamAsync(ProjectLibrary library, CancellationToken cancellationToken = default)
+    {
+        if (!library.Settings.CloudSync.Enabled) return;
+        await StepAsync("读取考试安排", () => FetchExamAsync(library, cancellationToken), cancellationToken);
+    }
+
+    /// <summary>启动时从本地缓存恢复考试安排（断网也能按时显示）；缓存按班级隔离，换班后失效。</summary>
+    public void LoadExamCache(ProjectLibrary library)
+    {
+        CloudSyncSettings cloud = library.Settings.CloudSync;
+        ApplyExam(cloud is { Enabled: true, ClassId: { } classId } ? ExamStore.Load(classId) : null, cacheClassId: null);
+    }
+
+    /// <summary>停用集控或切换班级时清空考试安排与本地缓存。</summary>
+    public void ClearExam()
+    {
+        ExamStore.Clear();
+        ServerClockOffset = TimeSpan.Zero;
+        if (Exam is null) return;
+        Exam = null;
+        ExamChanged?.Invoke();
     }
 
     // ------------------------------------------------------------------ 项目
@@ -621,12 +653,49 @@ public sealed class CloudSyncService(ProjectStore store)
         if (!response.IsSuccessStatusCode) return;
         BoardInfo? board = await response.Content.ReadFromJsonAsync<BoardInfo>(Web, cancellationToken);
         if (board is null) return;
+        UpdateServerClock(board.ServerTime);
         if (board.DeviceId != Guid.Empty) cloud.DeviceId = board.DeviceId;
         if (!string.IsNullOrWhiteSpace(board.ClassName)) cloud.ClassName = board.ClassName;
         bool changed = JsonSerializer.Serialize(board with { ServerTime = default }) != JsonSerializer.Serialize((Board ?? board) with { ServerTime = default }) || Board is null;
         Board = board;
         if (changed) BoardChanged?.Invoke();
     }
+
+    /// <summary>拉取本班的考试安排。旧服务端没有该接口（404）或没有启用计划（204）时都视为无安排。</summary>
+    private async Task FetchExamAsync(ProjectLibrary library, CancellationToken cancellationToken)
+    {
+        CloudSyncSettings cloud = library.Settings.CloudSync;
+        using HttpResponseMessage response = await _http.SendAsync(Request(cloud, HttpMethod.Get, "/exam"), cancellationToken);
+        if (response.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.NoContent)
+        {
+            ApplyExam(null, cloud.ClassId);
+            return;
+        }
+        if (!response.IsSuccessStatusCode) return;
+        ExamScheduleDto? schedule = await response.Content.ReadFromJsonAsync<ExamScheduleDto>(Web, cancellationToken);
+        if (schedule is null) { ApplyExam(null, cloud.ClassId); return; }
+        UpdateServerClock(schedule.ServerTime);
+        ApplyExam(schedule, cloud.ClassId);
+    }
+
+    /// <summary>更新考试安排；内容变化时写本地缓存并通知界面。ServerTime 每次刷新都不同，不参与比较。</summary>
+    private void ApplyExam(ExamScheduleDto? schedule, Guid? cacheClassId)
+    {
+        bool changed = ExamSignature(schedule) != ExamSignature(Exam);
+        Exam = schedule;
+        if (cacheClassId is { } classId)
+        {
+            if (schedule is null) ExamStore.Clear();
+            else ExamStore.Save(classId, schedule);
+        }
+        if (changed) ExamChanged?.Invoke();
+    }
+
+    private static string ExamSignature(ExamScheduleDto? schedule) =>
+        schedule is null ? "" : JsonSerializer.Serialize(schedule with { ServerTime = default }, Web);
+
+    /// <summary>服务器时间（UTC）与本机 UTC 的差；同校内网同时区，直接加到本地时间上用于到点判断。</summary>
+    private void UpdateServerClock(DateTime serverUtc) => ServerClockOffset = serverUtc - DateTime.UtcNow;
 
     private async Task ReportStatusAsync(ProjectLibrary library, CloudSyncHooks hooks, CancellationToken cancellationToken)
     {
