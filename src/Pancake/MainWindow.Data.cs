@@ -189,7 +189,7 @@ public sealed partial class MainWindow
         page.Children.Add(Heading("布局与班务"));
         page.Children.Add(Toggle("同步班级布局", _settings.CloudSync.SyncLayout, value => _settings.CloudSync.SyncLayout = value, () => { ScheduleSave(); RequestCloudSync(true); }, read: () => _settings.CloudSync.SyncLayout));
         page.Children.Add(Note("布局模式、分屏比例、组件位置、网格、字体、工具栏、背景与主题会和班级共享；麦克风、锁定、备份等本机设置不会上传。管理员可以在网页上把班级设为“网页统一下发”，此时本机的布局改动会被还原。"));
-        page.Children.Add(Toggle("在看板上显示公告与今日值日", _settings.CloudSync.ShowBoardBanner, value => _settings.CloudSync.ShowBoardBanner = value, () => { ScheduleSave(); RenderBoardBanner(); }, read: () => _settings.CloudSync.ShowBoardBanner));
+        page.Children.Add(Toggle("在看板上显示公告", _settings.CloudSync.ShowBoardBanner, value => _settings.CloudSync.ShowBoardBanner = value, () => { ScheduleSave(); RenderBoardBanner(); }, read: () => _settings.CloudSync.ShowBoardBanner));
 
         page.Children.Add(Heading("项目同步进度"));
         _cloudSyncProgressText = new TextBlock { Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["BoardTextMutedBrush"], TextWrapping = TextWrapping.Wrap };

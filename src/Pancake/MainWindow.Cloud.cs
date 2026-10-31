@@ -9,7 +9,7 @@ namespace Pancake;
 
 /// <summary>
 /// 集控同步与界面的衔接：保存后防抖同步、定时兜底同步、实时通知触发同步，
-/// 以及服务器版本替换当前项目、应用班级布局、显示公告与值日。
+/// 以及服务器版本替换当前项目、应用班级布局、显示公告。
 /// </summary>
 public sealed partial class MainWindow
 {
@@ -21,7 +21,7 @@ public sealed partial class MainWindow
     private readonly DispatcherTimer _cloudSyncPeriodic = new() { Interval = TimeSpan.FromMinutes(3) };
     private readonly HashSet<Guid> _pendingCloudProjects = [];
     private readonly CloudRealtimeClient _cloudRealtime = new();
-    // 班务通知只刷新公告与值日；轮播与定时两个计时器只驱动班务条重绘，不发请求。
+    // 班务通知只刷新公告；轮播与定时两个计时器只驱动班务条重绘，不发请求。
     private readonly DispatcherTimer _boardRefreshDebounce = new() { Interval = TimeSpan.FromMilliseconds(150) };
     private readonly DispatcherTimer _boardRotation = new() { Interval = TimeSpan.FromSeconds(8) };
     private readonly DispatcherTimer _boardSchedule = new();
@@ -336,7 +336,7 @@ public sealed partial class MainWindow
     // ------------------------------------------------------------------ 班务条
 
     /// <summary>
-    /// 看板上的班务条：生效中的公告（多条时每 8 秒轮播一条）和今日值日。点按查看全部内容，可以收起，内容变化后重新出现。
+    /// 看板上的班务条：生效中的公告（多条时每 8 秒轮播一条）。点按查看全部内容，可以收起，内容变化后重新出现。
     /// 定时公告到开始或结束时刻自动刷新，不必等下一次同步。
     /// </summary>
     private void RenderBoardBanner()
@@ -356,8 +356,8 @@ public sealed partial class MainWindow
             _boardSchedule.Start();
         }
         List<AnnouncementItem> notices = BoardNotices.Visible(board, now, _settings.BoardBannerLevels);
-        string key = BoardNotices.Key(notices, board.Duty);
-        if (key == "|" || key == _boardBannerDismissedKey) { BoardBanner.Visibility = Visibility.Collapsed; return; }
+        string key = BoardNotices.Key(notices);
+        if (key.Length == 0 || key == _boardBannerDismissedKey) { BoardBanner.Visibility = Visibility.Collapsed; return; }
 
         if (notices.Count > 0)
         {
@@ -366,11 +366,6 @@ public sealed partial class MainWindow
             if (notices.Count > 1) text = $"{_boardRotationIndex % notices.Count + 1}/{notices.Count}　{text}";
             BoardBanner.Children.Add(BannerPill("Info", LevelBrush(notice.Level), text));
             if (notices.Count > 1) _boardRotation.Start();
-        }
-        if (board.Duty is { } duty)
-        {
-            string text = string.Join("　", duty.Tasks.Select(t => $"{t.Task}：{string.Join("、", t.Students)}"));
-            BoardBanner.Children.Add(BannerPill("Clock", "BoardSuccessBrush", $"今日值日 · {text}"));
         }
         bool toolbarTop = _settings.ToolbarPosition.StartsWith("Top", StringComparison.Ordinal);
         BoardBanner.VerticalAlignment = toolbarTop ? VerticalAlignment.Bottom : VerticalAlignment.Top;
@@ -407,7 +402,7 @@ public sealed partial class MainWindow
         return pill;
     }
 
-    /// <summary>点按班务条：浮层列出全部公告的标题、正文、发布人与时间，以及今日值日，可以在这里收起班务条。</summary>
+    /// <summary>点按班务条：浮层列出全部公告的标题、正文、发布人与时间，可以在这里收起班务条。</summary>
     private void BoardBanner_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
     {
         e.Handled = true;
@@ -425,13 +420,6 @@ public sealed partial class MainWindow
             if (!string.IsNullOrWhiteSpace(notice.Body)) item.Children.Add(Strong(notice.Body, 14));
             string until = notice.ExpiresAt is { } end ? $" · 显示到 {end.ToLocalTime():M月d日 HH:mm}" : "";
             item.Children.Add(Muted($"{notice.Author} · {(notice.StartsAt ?? notice.CreatedAt).ToLocalTime():M月d日 HH:mm}{until}", 11));
-            list.Children.Add(item);
-        }
-        if (board.Duty is { } duty)
-        {
-            StackPanel item = new() { Spacing = 4 };
-            item.Children.Add(SectionTitle("Clock", "今日值日", duty.Label));
-            foreach (DutyTaskAssignment task in duty.Tasks) item.Children.Add(Strong($"{task.Task}：{string.Join("、", task.Students)}", 14));
             list.Children.Add(item);
         }
         Flyout flyout = new();

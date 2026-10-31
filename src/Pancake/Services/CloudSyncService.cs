@@ -26,7 +26,7 @@ public sealed class CloudSyncHooks
 }
 
 /// <summary>
-/// 集控同步。一轮同步依次：读取公告与值日 → 拉取项目 → 上传本地队列 → 再拉取 → 同步班级布局 → 上报设备状态。
+/// 集控同步。一轮同步依次：读取公告 → 拉取项目 → 上传本地队列 → 再拉取 → 同步班级布局 → 上报设备状态。
 /// 内容哈希与上次同步一致时不发请求；附件和背景按 SHA-256 上传下载；冲突时保留本机副本再采用服务器版本。
 /// 所有方法都在调用方线程（界面线程）上继续执行，库对象不会被并发修改。
 /// </summary>
@@ -165,7 +165,7 @@ public sealed class CloudSyncService(ProjectStore store)
         catch (Exception ex) { LastSyncError ??= $"{name}失败：{ex.Message}"; return true; }
     }
 
-    /// <summary>只刷新公告与值日：收到班务通知时调用，不必跑完整一轮同步。</summary>
+    /// <summary>只刷新公告：收到班务通知时调用，不必跑完整一轮同步。</summary>
     public async Task RefreshBoardAsync(ProjectLibrary library, CancellationToken cancellationToken = default)
     {
         if (!library.Settings.CloudSync.Enabled) return;

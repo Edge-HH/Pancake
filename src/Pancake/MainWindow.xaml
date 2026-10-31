@@ -113,7 +113,7 @@
                 </Grid>
             </Grid>
             <Canvas x:Name="FreeWidgetsCanvas" /><Canvas x:Name="FreeLayoutHandles" IsHitTestVisible="False" />
-            <!-- 集控班务条：重要公告与今日值日，点按收起，内容变化后重新出现。 -->
+            <!-- 集控班务条：重要公告，点按收起，内容变化后重新出现。 -->
             <StackPanel x:Name="BoardBanner" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="16,14,16,0" Orientation="Horizontal" Spacing="10"
                         Visibility="Collapsed" Canvas.ZIndex="40" Tapped="BoardBanner_Tapped" AutomationProperties.Name="班务条" />
         </Grid>

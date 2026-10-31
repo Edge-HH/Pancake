@@ -17,7 +17,7 @@ public sealed record DevicePairRequest(string PairingCode, string DeviceName);
 public sealed record DevicePairResponse(string DeviceToken, Guid ClassId, DateTime ExpiresAt, string ClassName = "", Guid DeviceId = default);
 
 /// <summary>
-/// 班级实时通知。Type：updated / deleted（项目）、layout（班级布局）、board（公告与值日）、command（发给单台设备的指令）、
+/// 班级实时通知。Type：updated / deleted（项目）、layout（班级布局）、board（公告）、command（发给单台设备的指令）、
 /// editing（项目编辑占用变化）、screen（大屏上报的屏幕与分区）。editing 与 screen 只发给老师的网页，大屏和公开页收不到。
 /// SourceDeviceId 是触发这次修改的设备（网页修改时为空），设备据此忽略自己的回声；Keys 是布局通知里改动的设置键；
 /// Lock 是 editing 通知里的当前占用（为空表示已释放）；Screen 是 screen 通知里的屏幕信息，DeviceId 为上报的设备。
@@ -99,14 +99,12 @@ public sealed record LayoutConflictResponse(string Error, List<string> Keys, Lay
 public sealed record DeviceStatusRequest(string AppVersion, int PendingChanges, string? LastError, Guid? ActiveProjectId, string? ActiveProjectName, List<string>? Fonts = null);
 
 public sealed record AnnouncementItem(Guid Id, string Title, string Body, string Level, bool Pinned, DateTime CreatedAt, DateTime? StartsAt, DateTime? ExpiresAt, string Author);
-public sealed record DutyTaskAssignment(string Task, List<string> Students);
-public sealed record DutyToday(DateOnly Date, string Label, List<DutyTaskAssignment> Tasks);
 
 /// <summary>
-/// 班级大屏需要的班务信息：生效中的公告、今天的值日和布局修订号。
+/// 班级大屏需要的班务信息：生效中的公告和布局修订号。
 /// Upcoming 是 24 小时内将开始的定时公告，大屏到点自行显示，不必等下一次同步；旧客户端会忽略它。
 /// </summary>
-public sealed record BoardInfo(Guid DeviceId, string ClassName, List<AnnouncementItem> Announcements, DutyToday? Duty, long LayoutRevision, string LayoutPolicy, DateTime ServerTime, List<AnnouncementItem>? Upcoming = null);
+public sealed record BoardInfo(Guid DeviceId, string ClassName, List<AnnouncementItem> Announcements, long LayoutRevision, string LayoutPolicy, DateTime ServerTime, List<AnnouncementItem>? Upcoming = null);
 
 /// <summary>项目内容里引用服务器资源的附件路径前缀，后面跟 SHA-256 与扩展名，例如 asset:ab12…ef.png。</summary>
 public static class AssetReference

@@ -120,7 +120,7 @@ public sealed class CloudSyncSettings
     public long LayoutRevision { get; set; }
     public string LayoutBaseJson { get; set; } = "";
     public string LayoutPolicy { get; set; } = "Shared";
-    /// <summary>在看板顶部显示公告与今日值日。</summary>
+    /// <summary>在看板顶部显示公告。</summary>
     public bool ShowBoardBanner { get; set; } = true;
     public bool Enabled => !string.IsNullOrWhiteSpace(ServerUrl) && ClassId.HasValue && !string.IsNullOrWhiteSpace(DeviceToken);
 }
