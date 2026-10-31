@@ -118,7 +118,7 @@
                         Visibility="Collapsed" Canvas.ZIndex="40" Tapped="BoardBanner_Tapped" AutomationProperties.Name="班务条" />
         </Grid>
 
-        <Grid x:Name="CloudControlRoot" Grid.Row="1" Canvas.ZIndex="105" Background="{ThemeResource BoardBackgroundBrush}" Visibility="Collapsed">
+        <Grid x:Name="CloudControlRoot" Grid.Row="1" Canvas.ZIndex="95" Background="{ThemeResource BoardBackgroundBrush}" Visibility="Collapsed">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="300" MinWidth="240" />
                 <ColumnDefinition Width="260" MinWidth="220" />
@@ -146,7 +146,7 @@
             </Grid>
         </Grid>
 
-        <NavigationView x:Name="SettingsRoot" Grid.Row="1" Canvas.ZIndex="105" Visibility="Collapsed"
+        <NavigationView x:Name="SettingsRoot" Grid.Row="1" Canvas.ZIndex="95" Visibility="Collapsed"
                         PaneDisplayMode="Left" OpenPaneLength="260" IsBackButtonVisible="Collapsed"
                         IsSettingsVisible="False" IsPaneOpen="True" Loaded="SettingsRoot_Loaded"
                         SelectionChanged="SettingsNavigation_SelectionChanged">
