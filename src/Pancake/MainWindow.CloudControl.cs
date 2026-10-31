@@ -7,7 +7,7 @@ using Pancake.Shared;
 
 namespace Pancake;
 
-/// <summary>“班级”页：集控连接状态、今日值日、班级公告，以及全部项目的同步情况与作业内容。</summary>
+/// <summary>“班级”页：集控连接状态、班级公告，以及全部项目的同步情况与作业内容。</summary>
 public sealed partial class MainWindow
 {
     private ProjectDocument? _cloudSelectedProject;
@@ -64,7 +64,7 @@ public sealed partial class MainWindow
 
         if (!settings.Enabled)
         {
-            CloudClassesPanel.Children.Add(Muted("尚未连接集控。连接后可以在这里查看公告、今日值日和全部项目的同步情况。", 13));
+            CloudClassesPanel.Children.Add(Muted("尚未连接集控。连接后可以在这里查看公告和全部项目的同步情况。", 13));
             Button openSettings = new() { Content = "去设置连接班级", HorizontalAlignment = HorizontalAlignment.Stretch, Margin = new Thickness(0, 8, 0, 0) };
             openSettings.Click += (_, _) => { ShowSettings(); ShowSettingsPage("CloudSync"); };
             CloudClassesPanel.Children.Add(openSettings);
@@ -94,20 +94,6 @@ public sealed partial class MainWindow
         CloudClassesPanel.Children.Add(Card(status));
 
         BoardInfo? board = CloudSync.Board;
-        // 今日值日
-        StackPanel duty = new() { Spacing = 6 };
-        duty.Children.Add(SectionTitle("Clock", "今日值日", board?.Duty?.Label));
-        if (board?.Duty is { } today)
-            foreach (DutyTaskAssignment task in today.Tasks)
-            {
-                StackPanel row = new() { Spacing = 2 };
-                row.Children.Add(new TextBlock { Text = task.Task, FontSize = 12, Foreground = ResourceBrush("BoardTextMutedBrush") });
-                row.Children.Add(Strong(string.Join("、", task.Students), 15));
-                duty.Children.Add(row);
-            }
-        else duty.Children.Add(Muted(board is null ? "同步后显示" : "今天没有值日安排"));
-        CloudClassesPanel.Children.Add(Card(duty));
-
         // 公告
         StackPanel notices = new() { Spacing = 10 };
         DateTime now = DateTime.UtcNow;

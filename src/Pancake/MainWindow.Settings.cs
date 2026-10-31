@@ -159,7 +159,7 @@ public sealed partial class MainWindow
         RegisterSettingsPage("AutofillSubject", AutofillSettingsPanel, SubjectAutofillSettings(), "学科补全", "设置可补全的学科、默认颜色与匹配严格度。");
         RegisterSettingsPage("AutofillHomework", AutofillSettingsPanel, HomeworkAutofillSettings(), "作业补全", "记录常输入的作业名称，并按学科范围提示补全。");
         RegisterSettingsPage("Exam", ExamSettingsPanel, BuildExamSettingsPage(), "考试", "设置本机考试安排；不连接集控或服务器没有启用的计划时自动使用。");
-        RegisterSettingsPage("CloudSync", CloudSyncSettingsPanel, BuildCloudSyncPage(), "集控", "连接班级，同步项目、班级布局、公告与值日。");
+        RegisterSettingsPage("CloudSync", CloudSyncSettingsPanel, BuildCloudSyncPage(), "集控", "连接班级，同步项目、班级布局与公告。");
         RegisterSettingsPage("Data", DataSettingsPanel, BuildDataPage(), "数据", "管理自动保存、数据导出与自动备份。");
         RegisterSettingsPage("Lock", LockSettingsPanel, BuildLockPage(), "锁定", "设置密码与两步验证，保护看板与设置。");
         // 仓库卡片已在 XAML 中声明 GitHub / Gitee 两个链接，并绑定主题色，切浅色时背景和文字一起换。

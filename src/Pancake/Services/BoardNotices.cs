@@ -32,8 +32,7 @@ public static class BoardNotices
             .Where(x => x > utcNow)
             .Min();
 
-    /// <summary>内容指纹：公告或值日变化后，被收起的班务条重新出现。</summary>
-    public static string Key(IEnumerable<AnnouncementItem> notices, DutyToday? duty) =>
-        string.Join("|", notices.Select(a => $"{a.Id}:{a.Title}:{a.Body}:{a.Level}")) + "|" +
-        (duty is { } d ? d.Date + d.Label + string.Join(",", d.Tasks.SelectMany(t => t.Students)) : "");
+    /// <summary>内容指纹：公告变化后，被收起的班务条重新出现。</summary>
+    public static string Key(IEnumerable<AnnouncementItem> notices) =>
+        string.Join("|", notices.Select(a => $"{a.Id}:{a.Title}:{a.Body}:{a.Level}"));
 }
