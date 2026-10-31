@@ -18,12 +18,18 @@ public sealed partial class MainWindow
     // 收到 exam 实时通知后短暂合并，再拉取本班的最新安排。
     private readonly DispatcherTimer _examRefreshDebounce = new() { Interval = TimeSpan.FromMilliseconds(150) };
     private double _examRingLength;
+    private TextBlock? _examMeasureText;
     private bool _examOverlayVisible;
     private bool _examForcedFullScreen;
+    private bool _examActive;
+    private bool _examLocalSource;
 
     private void InitializeExamMode()
     {
         InitializeExamRing();
+        // 内置字体的每个字重是单独文件，考试大时钟用粗体文件，仅改 FontWeight 匹配不到。
+        ExamClockText.FontFamily = FontService.BundledFamilyForWeight("Bold");
+        ExamClockText.FontWeight = Microsoft.UI.Text.FontWeights.Bold;
         _examRefreshDebounce.Tick += async (_, _) =>
         {
             _examRefreshDebounce.Stop();
@@ -66,8 +72,17 @@ public sealed partial class MainWindow
     /// </summary>
     private void UpdateExamRing(ExamDisplay display)
     {
-        ExamCountdownText.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-        Windows.Foundation.Size text = ExamCountdownText.DesiredSize;
+        // 用独立的 TextBlock 测量：树内元素带着上一轮布局的宽度约束，量不出 “01:30:00” 的真实宽度。
+        _examMeasureText ??= new TextBlock
+        {
+            FontFamily = ExamCountdownText.FontFamily,
+            FontSize = ExamCountdownText.FontSize,
+            FontWeight = ExamCountdownText.FontWeight,
+            TextWrapping = TextWrapping.NoWrap
+        };
+        _examMeasureText.Text = ExamCountdownText.Text ?? "";
+        _examMeasureText.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        Windows.Foundation.Size text = _examMeasureText.DesiredSize;
         double gap = Math.Max(2, (ExamRingHeight - 2 * ExamRingThickness - text.Height) / 2);
         double width = Math.Max(64, Math.Ceiling((text.Width + 2 * ExamRingThickness + 2 * gap) / 2) * 2);
         if (double.IsNaN(ExamRingHost.Width) || Math.Abs(ExamRingHost.Width - width) > 0.5)
@@ -119,15 +134,35 @@ public sealed partial class MainWindow
             localSource = true;
         }
         ExamDisplay? display = ExamSchedule.Evaluate(effective, now);
+        _examActive = display is not null;
+        _examLocalSource = _examActive && localSource;
+        UpdateExamToolbarButtons();
         if (display is null)
         {
             HideExamOverlay();
             return;
         }
-        ShowExamOverlay(display, now, effective!.ShowSeconds, localSource, effective.RoomName);
+        ShowExamOverlay(display, now, effective!.ShowSeconds, effective.RoomName);
     }
 
-    private void ShowExamOverlay(ExamDisplay display, DateTime now, bool showSeconds, bool localSource, string? roomName)
+    /// <summary>考试期间隐藏编辑键；本机考试时在编辑键的位置显示“退出考试”。</summary>
+    private void UpdateExamToolbarButtons()
+    {
+        if (EditBoardButton is not null)
+        {
+            // 编辑模式下该键会变成“保存修改”，此时即使考试进行中也保留，避免无法保存退出。
+            bool showEdit = DisplayRoot.Visibility == Visibility.Visible && (!_examActive || _isEditing);
+            Visibility target = showEdit ? Visibility.Visible : Visibility.Collapsed;
+            if (EditBoardButton.Visibility != target) EditBoardButton.Visibility = target;
+        }
+        if (ExamExitToolbarButton is not null)
+        {
+            Visibility target = _examActive && _examLocalSource ? Visibility.Visible : Visibility.Collapsed;
+            if (ExamExitToolbarButton.Visibility != target) ExamExitToolbarButton.Visibility = target;
+        }
+    }
+
+    private void ShowExamOverlay(ExamDisplay display, DateTime now, bool showSeconds, string? roomName)
     {
         bool wasVisible = _examOverlayVisible;
         _examOverlayVisible = true;
@@ -156,7 +191,6 @@ public sealed partial class MainWindow
         ExamClockText.Text = now.ToString(showSeconds ? "HH:mm:ss" : "HH:mm");
         ExamCountdownText.Text = FormatCountdown(display.Remaining, showSeconds);
         UpdateExamRing(display);
-        ExamExitButton.Visibility = localSource ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void HideExamOverlay()
@@ -224,7 +258,7 @@ public sealed partial class MainWindow
 
     // ------------------------------------------------------------------ 本机考试随时退出
 
-    private async void ExamExitButton_Click(object sender, RoutedEventArgs e)
+    private async void ExamExitToolbarButton_Click(object sender, RoutedEventArgs e)
     {
         if (_dialogOpen) return;
         ContentDialog dialog = new()

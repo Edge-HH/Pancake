@@ -390,10 +390,6 @@
             <TextBlock x:Name="ExamClockText" HorizontalAlignment="Center" VerticalAlignment="Center"
                        FontSize="180" FontWeight="Light" FontFamily="{StaticResource BoardTextFontFamily}"
                        Foreground="{ThemeResource BoardTextBrush}" />
-            <!-- 本机考试可随时退出；服务器下发的计划由老师统一控制。 -->
-            <Button x:Name="ExamExitButton" Content="退出本机考试" Click="ExamExitButton_Click" Visibility="Collapsed"
-                    HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,40,30"
-                    Style="{StaticResource BoardSecondaryButtonStyle}" />
         </Grid>
 
         <!--
@@ -492,6 +488,11 @@
                 </Button>
                 <Button x:Name="EditBoardButton" Click="EditBoardButton_Click" Style="{StaticResource BoardIconButtonStyle}" AutomationProperties.Name="编辑看板">
                     <icons:FluentIcon x:Name="EditBoardIcon" Symbol="Edit" />
+                </Button>
+                <!-- 本机考试期间替代编辑键的位置；服务器下发的计划由老师统一控制，不出现此键。 -->
+                <Button x:Name="ExamExitToolbarButton" Click="ExamExitToolbarButton_Click" Style="{StaticResource BoardIconButtonStyle}"
+                        Visibility="Collapsed" AutomationProperties.Name="退出考试">
+                    <icons:FluentIcon Symbol="Dismiss" />
                 </Button>
             </StackPanel></ScrollViewer>
         </Border>
