@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Pancake.Services;
 using Pancake.Shared;
+using Pancake.ViewModels;
 
 namespace Pancake;
 
@@ -12,7 +13,8 @@ namespace Pancake;
 /// </summary>
 public sealed partial class MainWindow
 {
-    private const double ExamRingThickness = 10;
+    private const double ExamRingThickness = 3;
+    private const double ExamRingHeight = 36;
     // 收到 exam 实时通知后短暂合并，再拉取本班的最新安排。
     private readonly DispatcherTimer _examRefreshDebounce = new() { Interval = TimeSpan.FromMilliseconds(150) };
     private double _examRingLength;
@@ -36,20 +38,43 @@ public sealed partial class MainWindow
 
     // ------------------------------------------------------------------ 进度环
 
-    /// <summary>胶囊进度环：750×110 的圆角矩形居中放在 760×120 的格子里，描边不会超出外框。</summary>
+    /// <summary>胶囊环：高度与右侧时间段文字一致，宽度在每次刷新时按剩余时间文字自适应。</summary>
     private void InitializeExamRing()
     {
         if (ExamRingTrack.Stroke is not null) return;
-        ExamRingTrack.Stroke = (Brush)Application.Current.Resources["BoardTextBrush"];
         ExamRingTrack.Opacity = 0.16;
-        ExamRingFill.Stroke = (Brush)Application.Current.Resources["BoardBrandBrush"];
-        // 圆角矩形周长 = 2×(宽+高) − 8×圆角半径 + 2π×圆角半径。
-        _examRingLength = 2 * (750 + 110) - 8 * 55 + 2 * Math.PI * 55;
+        ExamRingTrack.Stroke = BoardTheme.TextBrush;
+        ExamRingFill.Stroke = SubjectBrush(null);
+        UpdateExamRingGeometry(double.IsNaN(ExamRingHost.Width) || ExamRingHost.Width < 12 ? 96 : ExamRingHost.Width);
     }
 
-    /// <summary>按当前阶段剩余比例绘制胶囊环；剩余时间不变时环保持满格。</summary>
+    private void UpdateExamRingGeometry(double width)
+    {
+        double rectWidth = Math.Max(12, width - ExamRingThickness);
+        double rectHeight = ExamRingHeight - ExamRingThickness;
+        double radius = rectHeight / 2;
+        ExamRingTrack.Width = ExamRingFill.Width = rectWidth;
+        ExamRingTrack.Height = ExamRingFill.Height = rectHeight;
+        ExamRingTrack.RadiusX = ExamRingTrack.RadiusY = radius;
+        ExamRingFill.RadiusX = ExamRingFill.RadiusY = radius;
+        _examRingLength = 2 * (rectWidth + rectHeight) - 8 * radius + 2 * Math.PI * radius;
+    }
+
+    /// <summary>
+    /// 按当前剩余时间文字测量胶囊宽度：文字与环的上下左右间距相同，胶囊高度与时间段文字一致。
+    /// 宽度按 2px 取整，避免每秒数字宽度变化导致抖动。
+    /// </summary>
     private void UpdateExamRing(ExamDisplay display)
     {
+        ExamCountdownText.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        Windows.Foundation.Size text = ExamCountdownText.DesiredSize;
+        double gap = Math.Max(2, (ExamRingHeight - 2 * ExamRingThickness - text.Height) / 2);
+        double width = Math.Max(64, Math.Ceiling((text.Width + 2 * ExamRingThickness + 2 * gap) / 2) * 2);
+        if (double.IsNaN(ExamRingHost.Width) || Math.Abs(ExamRingHost.Width - width) > 0.5)
+        {
+            ExamRingHost.Width = width;
+            UpdateExamRingGeometry(width);
+        }
         double fraction = display.Total is { TotalSeconds: > 0 } total
             ? Math.Clamp(display.Remaining.TotalSeconds / total.TotalSeconds, 0, 1)
             : 1;
@@ -117,6 +142,12 @@ public sealed partial class MainWindow
         ExamTitleText.Text = display.Title;
         ExamSegmentText.Text = SegmentLine(display);
         ExamSegmentText.Visibility = string.IsNullOrEmpty(ExamSegmentText.Text) ? Visibility.Collapsed : Visibility.Visible;
+        // 学科名称与胶囊环使用本机该学科配置的颜色（按当前色系解析），未配置时使用色系蓝色。
+        string colorSubject = display.Phase == ExamPhase.Break ? display.NextSubject ?? "" : display.Title;
+        Brush subjectBrush = SubjectBrush(colorSubject);
+        ExamRingFill.Stroke = subjectBrush;
+        ExamTitleText.Foreground = display.Phase == ExamPhase.Break ? BoardTheme.TextBrush : subjectBrush;
+        ExamRingTrack.Stroke = BoardTheme.TextBrush;
         string className = _settings.CloudSync.ClassName;
         ExamClassText.Text = className;
         ExamClassText.Visibility = string.IsNullOrWhiteSpace(className) ? Visibility.Collapsed : Visibility.Visible;
@@ -166,6 +197,29 @@ public sealed partial class MainWindow
         return hours > 0
             ? $"{hours:00}:{remaining.Minutes:00}:{remaining.Seconds:00}"
             : $"{remaining.Minutes:00}:{remaining.Seconds:00}";
+    }
+
+    /// <summary>学科颜色：本机学科补全里的配置按当前色系解析；未配置时使用色系默认蓝色。</summary>
+    private Brush SubjectBrush(string? subject)
+    {
+        string hex = "#818CF8";
+        if (!string.IsNullOrWhiteSpace(subject))
+        {
+            SubjectSuggestion? entry = _settings.Autofill.Subject.Subjects
+                .FirstOrDefault(item => string.Equals(item.Name.Trim(), subject.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (entry is not null)
+                hex = entry.RandomColor ? RandomExamColor(subject) : SafeColorHex(entry.Color);
+        }
+        return MainViewModel.BrushFromHex(ColorPalette.Resolve(hex));
+    }
+
+    /// <summary>随机配色学科在考试画面上取一个稳定的预设色（按学科名散列，不随刷新变化）。</summary>
+    private static string RandomExamColor(string subject)
+    {
+        int hash = 0;
+        foreach (char c in subject) hash = unchecked(hash * 31 + c);
+        IReadOnlyList<string> presets = ColorPalette.Presets;
+        return presets.Count == 0 ? "#818CF8" : presets[(hash & int.MaxValue) % presets.Count];
     }
 
     // ------------------------------------------------------------------ 本机考试随时退出
