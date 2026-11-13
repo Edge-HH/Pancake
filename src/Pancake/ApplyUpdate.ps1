@@ -52,7 +52,12 @@ catch {
     ("UPDATE_FAILED`n" + $failure) | Set-Content -LiteralPath $log -Encoding UTF8
 }
 if (-not $SkipRestart -and $canRestart -and $target) {
-    try { Start-Process -FilePath (Join-Path $target 'Pancake.exe') -WorkingDirectory $target -WindowStyle Hidden }
+    try {
+        # 过渡版：优先重启更名后的 WorkWidgets.exe，回退到 Pancake.exe。
+        $exe = Join-Path $target 'WorkWidgets.exe'
+        if (-not (Test-Path -LiteralPath $exe)) { $exe = Join-Path $target 'Pancake.exe' }
+        Start-Process -FilePath $exe -WorkingDirectory $target -WindowStyle Hidden
+    }
     catch { ("Restart: " + $_) | Add-Content -LiteralPath $log -Encoding UTF8 }
 }
 if (-not $installed) { exit 1 }
