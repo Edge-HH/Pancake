@@ -53,8 +53,8 @@ catch {
 }
 if (-not $SkipRestart -and $canRestart -and $target) {
     try {
-        # 过渡版：优先重启更名后的 WorkWidgets.exe，回退到 Pancake.exe。
-        $exe = Join-Path $target 'WorkWidgets.exe'
+        # 过渡版：优先重启更名后的 WorkTiles.exe，回退到 Pancake.exe。
+        $exe = Join-Path $target 'WorkTiles.exe'
         if (-not (Test-Path -LiteralPath $exe)) { $exe = Join-Path $target 'Pancake.exe' }
         Start-Process -FilePath $exe -WorkingDirectory $target -WindowStyle Hidden
     }

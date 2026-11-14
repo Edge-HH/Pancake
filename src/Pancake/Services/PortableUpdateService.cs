@@ -37,11 +37,11 @@ public static class PortableUpdateService
                 }
             }
         }
-        // 过渡版：本包仍是 Pancake.exe，但后续要能安装 WorkWidgets.exe 的更新包，故两套必需文件满足其一即可。
+        // 过渡版：本包仍是 Pancake.exe，但后续要能安装 WorkTiles.exe 的更新包，故两套必需文件满足其一即可。
         string[] pancakeRequired = ["Pancake.exe", "Pancake.dll", "Pancake.pri", "Pancake.runtimeconfig.json"];
-        string[] workwidgetsRequired = ["WorkWidgets.exe", "WorkWidgets.dll", "WorkWidgets.pri", "WorkWidgets.runtimeconfig.json"];
+        string[] worktilesRequired = ["WorkTiles.exe", "WorkTiles.dll", "WorkTiles.pri", "WorkTiles.runtimeconfig.json"];
         bool HasAll(string[] files) => files.All(f => File.Exists(Path.Combine(payload, f)));
-        if (!HasAll(pancakeRequired) && !HasAll(workwidgetsRequired)) throw new InvalidDataException("更新包缺少必要文件：Pancake.exe 或 WorkWidgets.exe");
+        if (!HasAll(pancakeRequired) && !HasAll(worktilesRequired)) throw new InvalidDataException("更新包缺少必要文件：Pancake.exe 或 WorkTiles.exe");
         // 在关闭应用前发现权限问题，用户仍可继续使用当前版本。
         string probe = Path.Combine(target, ".pancake-update-" + Guid.NewGuid().ToString("N"));
         using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose)) { }

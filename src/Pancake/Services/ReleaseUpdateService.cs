@@ -23,8 +23,8 @@ public sealed class ReleaseUpdateService
 
     public async Task<ReleaseSnapshot?> GetLatestAsync(string source, CancellationToken token = default)
     {
-        // 过渡版：更新源已从 Pancake 迁到 WorkWidgets，老用户装上本包后即从新仓库获取后续更新。
-        string url = source == "Gitee" ? "https://gitee.com/api/v5/repos/EdgeHH/workwidgets/releases/latest" : "https://api.github.com/repos/Edge-HH/WorkWidgets/releases/latest";
+        // 过渡版：更新源已从 Pancake 迁到 WorkTiles，老用户装上本包后即从新仓库获取后续更新。
+        string url = source == "Gitee" ? "https://gitee.com/api/v5/repos/EdgeHH/worktiles/releases/latest" : "https://api.github.com/repos/Edge-HH/WorkTiles/releases/latest";
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token); timeout.CancelAfter(TimeSpan.FromSeconds(20));
         using var response = await _http.GetAsync(url, timeout.Token);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
@@ -45,7 +45,7 @@ public sealed class ReleaseUpdateService
         {
             string name = item.GetProperty("name").GetString() ?? "", url = item.GetProperty("browser_download_url").GetString() ?? "";
             // Gitee 将源码包也放入 assets，必须排除。过渡版同时接受新旧两种品牌命名。
-            if (!(name.Contains("WorkWidgets", StringComparison.OrdinalIgnoreCase) || name.Contains("Pancake", StringComparison.OrdinalIgnoreCase)) || name.Contains("arm64", StringComparison.OrdinalIgnoreCase) || url.Contains("/archive/", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!(name.Contains("WorkTiles", StringComparison.OrdinalIgnoreCase) || name.Contains("Pancake", StringComparison.OrdinalIgnoreCase)) || name.Contains("arm64", StringComparison.OrdinalIgnoreCase) || url.Contains("/archive/", StringComparison.OrdinalIgnoreCase)) continue;
             if (Path.GetFileName(name) != name || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || !Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme != "https") continue;
             assets.Add(new(name, url, item.TryGetProperty("digest", out var digest) ? digest.GetString() : null));
         }
